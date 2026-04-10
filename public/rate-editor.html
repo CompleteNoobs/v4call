@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>v4call — Rate Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #0a0c0f;
+      --surface: #12151a;
+      --surface2:#1a1e26;
+      --border:  #222730;
+      --accent:  #f5a623;
+      --green:   #4ade80;
+      --blue:    #38bdf8;
+      --danger:  #f87171;
+      --muted:   #3d4555;
+      --text:    #dde3ed;
+      --subtext: #7a869a;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:24px;}
+    .layout{display:grid;grid-template-columns:1fr 420px;gap:20px;max-width:1200px;}
+    @media(max-width:860px){.layout{grid-template-columns:1fr;}}
+
+    /* Cards */
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+
+    /* Form elements */
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+    select option{background:var(--surface);}
+    .field{margin-bottom:12px;}
+    .row{display:flex;gap:10px;}
+    .row .field{flex:1;}
+
+    /* Buttons */
+    button.primary{padding:9px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.primary:hover{opacity:0.85;}
+    button.secondary{padding:7px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+    button.danger{padding:5px 10px;background:transparent;color:var(--danger);border:1px solid rgba(248,113,113,0.3);border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;transition:background 0.2s;}
+    button.danger:hover{background:rgba(248,113,113,0.1);}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+    /* Lists */
+    .list-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;}
+    .list-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .list-name-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--blue);font-weight:600;}
+    .list-type-badge{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--subtext);background:var(--border);padding:1px 7px;border-radius:999px;}
+    .list-header .danger{margin-left:auto;}
+
+    /* Time windows */
+    .window-card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;}
+    .window-header{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;}
+    .rate-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;}
+    @media(max-width:600px){.rate-grid{grid-template-columns:1fr 1fr;}}
+    .rate-cell label{font-size:0.62rem;}
+    .rate-cell input{font-size:0.75rem;padding:5px 7px;}
+    .free-toggle{display:flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);cursor:pointer;margin-bottom:4px;}
+    .free-toggle input[type=checkbox]{width:auto;accent-color:var(--accent);}
+
+    /* Users input */
+    .users-input{font-size:0.78rem;height:56px;resize:vertical;}
+
+    /* Output panel */
+    #output-panel{position:sticky;top:20px;}
+    #output-area{width:100%;height:320px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--green);font-family:'IBM Plex Mono',monospace;font-size:0.73rem;padding:10px;resize:vertical;white-space:pre;}
+    .copy-success{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--green);margin-top:6px;min-height:18px;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+
+    /* Info box */
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+
+    /* Days checkboxes */
+    .days-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+    .day-chip{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:background 0.15s,color 0.15s,border-color 0.15s;}
+    .day-chip.on{background:rgba(245,166,35,0.15);color:var(--accent);border-color:rgba(245,166,35,0.4);}
+
+    /* Section divider */
+    hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
+  </style>
+</head>
+<body>
+
+<h1>v4call — Rate Editor</h1>
+<div class="subtitle">Create your communication rate schedule and post it to Hive</div>
+
+<div class="layout">
+
+  <!-- Left: editor -->
+  <div id="editor">
+
+    <!-- Your account -->
+    <div class="card">
+      <div class="card-title">YOUR HIVE ACCOUNT</div>
+      <div class="info-box">
+        Your rate schedule will be posted to your Hive blog as a post titled <strong>v4call-rates</strong>.
+        The v4call app reads the latest post with this title to determine your call rates.
+        Posting requires Hive Keychain browser extension.
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>HIVE USERNAME</label>
+          <input id="my-username" type="text" placeholder="e.g. noblemage" autocapitalize="none" spellcheck="false"/>
+        </div>
+        <div class="field">
+          <label>PLATFORM FEE TO V4CALL (%)</label>
+          <input id="platform-fee" type="number" value="10" min="0" max="50" step="1"/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lists -->
+    <div class="card">
+      <div class="card-title">
+        <span>RATE LISTS</span>
+        <button class="secondary" onclick="addList()">+ Add List</button>
+      </div>
+      <div class="info-box">
+        Create named lists of users with custom rates. Anyone not in a list uses the <strong>default</strong> rates.
+        Lists are checked in order — first match wins.
+      </div>
+      <div id="lists-container"></div>
+    </div>
+
+  </div>
+
+  <!-- Right: output -->
+  <div id="output-panel">
+    <div class="card">
+      <div class="card-title">OUTPUT</div>
+      <textarea id="output-area" readonly placeholder="Your rate data will appear here…"></textarea>
+      <div class="copy-success" id="copy-msg"></div>
+      <div class="btn-row">
+        <button class="primary" onclick="generateOutput()">Generate</button>
+        <button class="secondary" onclick="copyOutput()">Copy</button>
+        <button class="primary" onclick="postToHive()" style="background:var(--green);">Post to Hive</button>
+        <button class="secondary" onclick="loadFromHive()" style="font-size:0.8rem;">⬇ Load from Hive</button>
+      </div>
+      <div class="keychain-note">
+        Posting to Hive requires the Hive Keychain browser extension.
+        The post will be titled <strong>v4call-rates</strong> and tagged <strong>v4call</strong>.
+        The app always reads your most recent post with this title.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">RATE REFERENCE</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);line-height:1.9;">
+        <div><span style="color:var(--accent)">RING</span> — fee to make your phone ring</div>
+        <div><span style="color:var(--accent)">CONNECT</span> — fee when you accept the call</div>
+        <div><span style="color:var(--accent)">RATE</span> — per-hour cost, prorated per minute</div>
+        <div><span style="color:var(--accent)">TEXT</span> — flat fee to send you a message</div>
+        <div><span style="color:var(--accent)">FREE</span> — enter 0 for any field</div>
+        <hr/>
+        <div>All amounts in <span style="color:var(--green)">HBD</span> (≈ USD)</div>
+        <div>Times are in your <span style="color:var(--green)">local timezone</span></div>
+        <div>Duration billing prorated per <span style="color:var(--green)">minute</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────
+const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+let lists = [
+  // Default list always exists
+  {
+    id: 'default',
+    name: 'default',
+    type: 'default',
+    users: [],
+    windows: [
+      { days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'09:00', timeEnd:'18:00',
+        text:'3.000', voiceRing:'1.000', voiceConnect:'5.000', voiceRate:'20.000',
+        videoRing:'2.000', videoConnect:'10.000', videoRate:'50.000' }
+    ]
+  }
+];
+
+let nextId = 1;
+
+// ── Render ─────────────────────────────────────────────
+function render() {
+  const container = document.getElementById('lists-container');
+  container.innerHTML = '';
+  lists.forEach((list, li) => {
+    const el = document.createElement('div');
+    el.className = 'list-card';
+    el.innerHTML = `
+      <div class="list-header">
+        <span class="list-name-badge">#${list.name}</span>
+        <span class="list-type-badge">${list.type}</span>
+        ${list.type !== 'default' ? `<button class="danger" onclick="removeList(${li})">✕ Remove</button>` : ''}
+      </div>
+      ${list.type !== 'default' ? `
+      <div class="field">
+        <label>LIST NAME</label>
+        <input type="text" value="${list.name}" oninput="lists[${li}].name=this.value" placeholder="e.g. family"/>
+      </div>
+      <div class="field">
+        <label>HIVE USERNAMES (comma separated — these users get this list's rates)</label>
+        <textarea class="users-input" placeholder="alice, bob, charlie" oninput="lists[${li}].users=this.value.split(',').map(u=>u.trim().toLowerCase().replace('@','')).filter(Boolean)">${list.users.join(', ')}</textarea>
+      </div>
+      ` : '<div style="font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:var(--subtext);margin-bottom:10px;">Anyone not in a named list uses these default rates.</div>'}
+      <div id="windows-${li}"></div>
+      <button class="secondary" onclick="addWindow(${li})" style="font-size:0.72rem;padding:5px 12px;margin-top:4px;">+ Add Time Window</button>
+    `;
+    container.appendChild(el);
+    renderWindows(list, li);
+  });
+}
+
+function renderWindows(list, li) {
+  const container = document.getElementById(`windows-${li}`);
+  if (!container) return;
+  container.innerHTML = '';
+  list.windows.forEach((w, wi) => {
+    const el = document.createElement('div');
+    el.className = 'window-card';
+    const daysHtml = DAYS.map(d =>
+      `<div class="day-chip ${w.days.includes(d)?'on':''}" onclick="toggleDay(${li},${wi},'${d}')">${d}</div>`
+    ).join('');
+    el.innerHTML = `
+      <div class="window-header">
+        <span>TIME WINDOW ${wi+1}</span>
+        ${list.windows.length > 1 ? `<button class="danger" style="padding:2px 7px;font-size:0.65rem;" onclick="removeWindow(${li},${wi})">✕</button>` : ''}
+      </div>
+      <div class="field">
+        <label>DAYS</label>
+        <div class="days-row">${daysHtml}</div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>FROM</label>
+          <input type="time" value="${w.timeStart}" oninput="lists[${li}].windows[${wi}].timeStart=this.value"/>
+        </div>
+        <div class="field">
+          <label>TO</label>
+          <input type="time" value="${w.timeEnd}" oninput="lists[${li}].windows[${wi}].timeEnd=this.value"/>
+        </div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);margin-bottom:8px;">
+        RATES (HBD) — enter 0 for free
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">TEXT MESSAGE</div>
+      <div class="rate-grid" style="grid-template-columns:1fr;margin-bottom:10px;">
+        <div class="rate-cell">
+          <label>FLAT FEE TO SEND YOU A TEXT (HBD)</label>
+          <input type="number" value="${w.text}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].text=this.value"/>
+        </div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">VOICE CALL</div>
+      <div class="rate-grid" style="margin-bottom:10px;">
+        <div class="rate-cell">
+          <label>RING FEE</label>
+          <input type="number" value="${w.voiceRing}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].voiceRing=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>CONNECT FEE</label>
+          <input type="number" value="${w.voiceConnect}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].voiceConnect=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>RATE /HOUR</label>
+          <input type="number" value="${w.voiceRate}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].voiceRate=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>MIN DEPOSIT (min)</label>
+          <input type="number" value="${w.voiceMinDep||10}" min="1" step="1"
+            oninput="lists[${li}].windows[${wi}].voiceMinDep=this.value"/>
+        </div>
+      </div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">VIDEO CALL</div>
+      <div class="rate-grid">
+        <div class="rate-cell">
+          <label>RING FEE</label>
+          <input type="number" value="${w.videoRing}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].videoRing=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>CONNECT FEE</label>
+          <input type="number" value="${w.videoConnect}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].videoConnect=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>RATE /HOUR</label>
+          <input type="number" value="${w.videoRate}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].videoRate=this.value"/>
+        </div>
+        <div class="rate-cell">
+          <label>MIN DEPOSIT (min)</label>
+          <input type="number" value="${w.videoMinDep||10}" min="1" step="1"
+            oninput="lists[${li}].windows[${wi}].videoMinDep=this.value"/>
+        </div>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+}
+
+// ── Actions ────────────────────────────────────────────
+function addList() {
+  lists.push({
+    id: 'list' + (nextId++),
+    name: 'mylist',
+    type: 'custom',
+    users: [],
+    windows: [
+      { days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'09:00', timeEnd:'18:00',
+        text:'0', voiceRing:'0', voiceConnect:'0', voiceRate:'0', voiceMinDep:'10',
+        videoRing:'0', videoConnect:'0', videoRate:'0', videoMinDep:'10' }
+    ]
+  });
+  render();
+}
+
+function removeList(li) {
+  lists.splice(li, 1);
+  render();
+}
+
+function addWindow(li) {
+  lists[li].windows.push({
+    days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'00:00', timeEnd:'08:59',
+    text:'5.000', voiceRing:'2.000', voiceConnect:'10.000', voiceRate:'30.000',
+    videoRing:'5.000', videoConnect:'20.000', videoRate:'60.000'
+  });
+  render();
+}
+
+function removeWindow(li, wi) {
+  lists[li].windows.splice(wi, 1);
+  render();
+}
+
+function toggleDay(li, wi, day) {
+  const days = lists[li].windows[wi].days;
+  const idx  = days.indexOf(day);
+  if (idx >= 0) days.splice(idx, 1); else days.push(day);
+  render();
+}
+
+// ── Generate Output ────────────────────────────────────
+function hbd(val) {
+  const n = parseFloat(val) || 0;
+  return n.toFixed(3) + ' HBD';
+}
+
+function generateOutput() {
+  const username    = document.getElementById('my-username').value.trim().toLowerCase() || 'yourusername';
+  const platformFee = parseFloat(document.getElementById('platform-fee').value) || 10;
+  const now         = new Date().toISOString().split('T')[0];
+
+  let out = `[V4CALL-RATES-V1]\n`;
+  out    += `ACCOUNT:${username}\n`;
+  out    += `UPDATED:${now}\n`;
+  out    += `PLATFORM-FEE:${platformFee}%\n`;
+  out    += `ESCROW:v4call-escrow\n\n`;
+
+  // Custom lists first, then default last
+  const ordered = [...lists.filter(l => l.type !== 'default'), ...lists.filter(l => l.type === 'default')];
+
+  for (const list of ordered) {
+    out += `[LIST:${list.name}]\n`;
+    if (list.users.length > 0) {
+      out += `USERS:${list.users.join(',')}\n`;
+    }
+    for (const w of list.windows) {
+      const daysStr = w.days.length === 7 ? 'mon-sun'
+        : w.days.map(d => d.toLowerCase()).join(',');
+      out += `[DAYS:${daysStr}][TIME:${w.timeStart}-${w.timeEnd}]\n`;
+      out += `TEXT:${hbd(w.text)}\n`;
+      out += `VOICE:RING:${hbd(w.voiceRing)};CONNECT:${hbd(w.voiceConnect)};RATE:${hbd(w.voiceRate)}/hr;MIN-DEPOSIT:${w.voiceMinDep||10}min\n`;
+      out += `VIDEO:RING:${hbd(w.videoRing)};CONNECT:${hbd(w.videoConnect)};RATE:${hbd(w.videoRate)}/hr;MIN-DEPOSIT:${w.videoMinDep||10}min\n`;
+      out += `[/TIME]\n`;
+    }
+    out += `[/LIST]\n\n`;
+  }
+
+  out += `[/V4CALL-RATES-V1]`;
+
+  document.getElementById('output-area').value = out;
+  document.getElementById('copy-msg').textContent = '';
+  return out;
+}
+
+function copyOutput() {
+  const text = document.getElementById('output-area').value;
+  if (!text) { generateOutput(); }
+  navigator.clipboard.writeText(document.getElementById('output-area').value).then(() => {
+    document.getElementById('copy-msg').textContent = '✓ Copied to clipboard';
+    setTimeout(() => document.getElementById('copy-msg').textContent = '', 2000);
+  });
+}
+
+// ── Post to Hive via Keychain ──────────────────────────
+function postToHive() {
+  const username = document.getElementById('my-username').value.trim().toLowerCase();
+  if (!username) { alert('Please enter your Hive username first.'); return; }
+
+  if (!window.hive_keychain) {
+    alert('Hive Keychain extension is not installed.\n\nInstall it from:\nhttps://hive-keychain.com\n\nThen come back and try again.');
+    return;
+  }
+
+  const body    = generateOutput();
+  const title   = 'v4call-rates';
+  const permlink= 'v4call-rates'; // fixed permlink so server can find by direct lookup
+  const tags    = ['v4call', 'hive', 'communication'];
+  // json_metadata must be a valid JSON string with required fields
+  const jsonMeta= JSON.stringify({
+    tags,
+    app:   'v4call/1.0',
+    format:'markdown',
+    description: 'v4call communication rate schedule'
+  });
+
+  // Post using Keychain — uses posting key, never exposes it
+  window.hive_keychain.requestPost(
+    username,
+    title,
+    body,
+    permlink,
+    '',        // parent author (empty = top level post)
+    'hive',   // parent permlink (required for top-level posts on some UIs)
+    jsonMeta,
+    '',        // comment options (empty string, not null)
+    (response) => {
+      if (response.success) {
+        document.getElementById('copy-msg').textContent =
+          `✓ Posted! https://hive.blog/@${username}/${permlink}`;
+        document.getElementById('copy-msg').style.color = 'var(--green)';
+      } else {
+        document.getElementById('copy-msg').textContent = '✗ Post failed: ' + (response.message || 'unknown error');
+        document.getElementById('copy-msg').style.color = 'var(--danger)';
+      }
+    }
+  );
+}
+
+// ── Load from Hive ────────────────────────────────────────
+async function loadFromHive() {
+  const username = document.getElementById('my-username').value.trim().toLowerCase();
+  if (!username) { alert('Enter your Hive username first.'); return; }
+
+  document.getElementById('copy-msg').textContent = 'Fetching your rate posts from Hive…';
+  document.getElementById('copy-msg').style.color = 'var(--blue)';
+
+  try {
+    // Fetch up to 20 recent posts by this author
+    const res  = await fetch('https://api.hive.blog', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method:  'condenser_api.get_discussions_by_author_before_date',
+        params:  [username, '', '2099-01-01T00:00:00', 50],
+        id: 1
+      })
+    });
+    const data = await res.json();
+    if (!data.result) throw new Error('No posts returned');
+
+    // Filter to v4call-rates posts only
+    const ratePosts = data.result.filter(p =>
+      p.title.toLowerCase() === 'v4call-rates' && p.author === username
+    );
+
+    if (!ratePosts.length) {
+      document.getElementById('copy-msg').textContent = `No v4call-rates posts found for @${username}.`;
+      document.getElementById('copy-msg').style.color = 'var(--danger)';
+      return;
+    }
+
+    // Build a picker if there are multiple posts
+    if (ratePosts.length === 1) {
+      loadPostBody(ratePosts[0]);
+      return;
+    }
+
+    // Show a selection dialog
+    const options = ratePosts.map((p, i) => {
+      const date = p.created.replace('T', ' ').slice(0, 16);
+      return `${i}: ${date} UTC — ${p.permlink}`;
+    }).join('
+');
+
+    const choice = prompt(
+      `Found ${ratePosts.length} v4call-rates posts for @${username}.
+Enter number to load (0 = most recent):
+
+${options}`,
+      '0'
+    );
+    const idx = parseInt(choice);
+    if (isNaN(idx) || idx < 0 || idx >= ratePosts.length) {
+      document.getElementById('copy-msg').textContent = 'Cancelled.';
+      return;
+    }
+    loadPostBody(ratePosts[idx]);
+
+  } catch(e) {
+    document.getElementById('copy-msg').textContent = 'Error fetching posts: ' + e.message;
+    document.getElementById('copy-msg').style.color = 'var(--danger)';
+  }
+}
+
+function loadPostBody(post) {
+  // Extract the [V4CALL-RATES-V1] block from the post body
+  const match = post.body.match(/\[V4CALL-RATES-V1\][\s\S]*?\[\/V4CALL-RATES-V1\]/i);
+  if (!match) {
+    document.getElementById('copy-msg').textContent = 'Post found but no [V4CALL-RATES-V1] block detected.';
+    document.getElementById('copy-msg').style.color = 'var(--danger)';
+    return;
+  }
+  document.getElementById('output-area').value = match[0];
+  const date = post.created.replace('T', ' ').slice(0, 16);
+  document.getElementById('copy-msg').textContent = `✓ Loaded from post dated ${date} UTC. Edit as needed then click "Post to Hive" to repost.`;
+  document.getElementById('copy-msg').style.color = 'var(--green)';
+}
+
+// ── Save / Load (localStorage) ─────────────────────────
+function saveState() {
+  try {
+    localStorage.setItem('v4call_rates_editor', JSON.stringify({
+      username: document.getElementById('my-username').value,
+      fee:      document.getElementById('platform-fee').value,
+      lists
+    }));
+  } catch(e) {}
+}
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem('v4call_rates_editor');
+    if (!saved) return;
+    const data = JSON.parse(saved);
+    if (data.username) document.getElementById('my-username').value = data.username;
+    if (data.fee)      document.getElementById('platform-fee').value = data.fee;
+    if (data.lists && data.lists.length) lists = data.lists;
+  } catch(e) {}
+}
+
+// Auto-save on any input change
+document.addEventListener('input', () => { saveState(); });
+
+// Init
+loadState();
+render();
+generateOutput();
+</script>
+</body>
+</html>
+
