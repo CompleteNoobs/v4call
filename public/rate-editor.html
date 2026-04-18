@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>v4call — Rate Editor</title>
+  <title>v4call — Rate Editor v2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
@@ -19,28 +19,29 @@
       --muted:   #3d4555;
       --text:    #dde3ed;
       --subtext: #7a869a;
+      --purple:  #a78bfa;
     }
     *{box-sizing:border-box;margin:0;padding:0;}
     body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
     h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
     .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:24px;}
-    .layout{display:grid;grid-template-columns:1fr 420px;gap:20px;max-width:1200px;}
-    @media(max-width:860px){.layout{grid-template-columns:1fr;}}
+    .layout{display:grid;grid-template-columns:1fr 430px;gap:20px;max-width:1220px;}
+    @media(max-width:880px){.layout{grid-template-columns:1fr;}}
 
-    /* Cards */
+    /* ── Cards ─────────────────────────────────────────── */
     .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
     .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
 
-    /* Form elements */
+    /* ── Form ──────────────────────────────────────────── */
     label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
     input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
     input:focus,select:focus,textarea:focus{border-color:var(--accent);}
     select option{background:var(--surface);}
     .field{margin-bottom:12px;}
     .row{display:flex;gap:10px;}
-    .row .field{flex:1;}
+    .row>.field{flex:1;}
 
-    /* Buttons */
+    /* ── Buttons ────────────────────────────────────────── */
     button.primary{padding:9px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
     button.primary:hover{opacity:0.85;}
     button.secondary{padding:7px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
@@ -49,182 +50,378 @@
     button.danger:hover{background:rgba(248,113,113,0.1);}
     .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
 
-    /* Lists */
+    /* ── List / Token cards ─────────────────────────────── */
     .list-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;}
     .list-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
     .list-name-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--blue);font-weight:600;}
+    .tok-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--purple);font-weight:600;}
     .list-type-badge{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--subtext);background:var(--border);padding:1px 7px;border-radius:999px;}
     .list-header .danger{margin-left:auto;}
 
-    /* Time windows */
+    /* ── Time windows ───────────────────────────────────── */
     .window-card{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;margin-bottom:8px;}
     .window-header{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);margin-bottom:8px;display:flex;align-items:center;justify-content:space-between;}
-    .rate-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;}
-    @media(max-width:600px){.rate-grid{grid-template-columns:1fr 1fr;}}
-    .rate-cell label{font-size:0.62rem;}
-    .rate-cell input{font-size:0.75rem;padding:5px 7px;}
-    .free-toggle{display:flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);cursor:pointer;margin-bottom:4px;}
-    .free-toggle input[type=checkbox]{width:auto;accent-color:var(--accent);}
 
-    /* Users input */
-    .users-input{font-size:0.78rem;height:56px;resize:vertical;}
+    /* Rate grids */
+    .rg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+    .rg3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+    .rg2{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}
+    @media(max-width:620px){.rg4,.rg3{grid-template-columns:1fr 1fr;} .rg2{grid-template-columns:1fr;}}
+    .rc label{font-size:0.62rem;}
+    .rc input{font-size:0.75rem;padding:5px 7px;}
 
-    /* Output panel */
-    #output-panel{position:sticky;top:20px;}
-    #output-area{width:100%;height:320px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--green);font-family:'IBM Plex Mono',monospace;font-size:0.73rem;padding:10px;resize:vertical;white-space:pre;}
-    .copy-success{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--green);margin-top:6px;min-height:18px;}
-    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+    /* Section labels inside window cards */
+    .slabel{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.07em;margin:10px 0 5px;border-left:2px solid var(--border);padding-left:6px;}
 
-    /* Info box */
-    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
-
-    /* Days checkboxes */
-    .days-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
-    .day-chip{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:background 0.15s,color 0.15s,border-color 0.15s;}
+    /* Days chips */
+    .days-row{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px;}
+    .day-chip{font-family:'IBM Plex Mono',monospace;font-size:0.67rem;padding:3px 8px;border-radius:4px;border:1px solid var(--border);cursor:pointer;user-select:none;transition:background 0.15s,color 0.15s,border-color 0.15s;}
     .day-chip.on{background:rgba(245,166,35,0.15);color:var(--accent);border-color:rgba(245,166,35,0.4);}
 
-    /* Section divider */
-    hr{border:none;border-top:1px solid var(--border);margin:16px 0;}
+    /* Textarea */
+    .users-input{font-size:0.78rem;height:54px;resize:vertical;}
+
+    /* ── Output panel ───────────────────────────────────── */
+    #output-panel{position:sticky;top:20px;}
+    #output-area{width:100%;height:330px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--green);font-family:'IBM Plex Mono',monospace;font-size:0.72rem;padding:10px;resize:vertical;white-space:pre;}
+    .status-msg{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--green);margin-top:6px;min-height:18px;word-break:break-all;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.67rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+
+    /* Info boxes */
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+
+    /* Blocklist collapsible */
+    .collapse-body{overflow:hidden;transition:max-height 0.3s ease;}
+    .collapse-body.closed{max-height:0 !important;}
+
+    /* Toggle row */
+    .toggle-row{display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--subtext);cursor:pointer;margin-bottom:10px;user-select:none;}
+    .toggle-row input[type=checkbox]{width:auto;accent-color:var(--accent);}
+
+    /* Wiki link */
+    .wiki-link{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.69rem;color:var(--muted);text-align:center;text-decoration:none;padding:10px;transition:color 0.2s;}
+    .wiki-link:hover{color:var(--accent);}
+
+    hr{border:none;border-top:1px solid var(--border);margin:14px 0;}
   </style>
 </head>
 <body>
 
-<h1>v4call — Rate Editor</h1>
-<div class="subtitle">Create your communication rate schedule and post it to Hive</div>
+<h1>v4call — Rate Editor <span style="color:var(--subtext);font-size:0.85rem;">v2</span></h1>
+<div class="subtitle">Full rate schedule editor · Posts to Hive blockchain via Keychain</div>
 
 <div class="layout">
 
-  <!-- Left: editor -->
+  <!-- ═══════════════ LEFT: EDITOR ═══════════════ -->
   <div id="editor">
 
-    <!-- Your account -->
+    <!-- ── IDENTITY ────────────────────────────────── -->
     <div class="card">
-      <div class="card-title">YOUR HIVE ACCOUNT</div>
-      <div class="info-box">
-        Your rate schedule will be posted to your Hive blog as a post titled <strong>v4call-rates</strong>.
-        The v4call app reads the latest post with this title to determine your call rates.
-        Posting requires Hive Keychain browser extension.
-      </div>
+      <div class="card-title">IDENTITY</div>
       <div class="row">
-        <div class="field">
+        <div class="field" style="flex:2;">
           <label>HIVE USERNAME</label>
           <input id="my-username" type="text" placeholder="e.g. noblemage" autocapitalize="none" spellcheck="false"/>
         </div>
         <div class="field">
-          <label>PLATFORM FEE TO V4CALL (%)</label>
+          <label>CHAIN</label>
+          <select id="my-chain">
+            <option value="hive">hive</option>
+            <option value="steem">steem</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>SERVER</label>
+          <input id="my-server" type="text" placeholder="v4call.com" spellcheck="false"/>
+        </div>
+        <div class="field">
+          <label>PLATFORM FEE (%)</label>
           <input id="platform-fee" type="number" value="10" min="0" max="50" step="1"/>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:2;">
+          <label>NOSTR NPUB (optional)</label>
+          <input id="my-nostr" type="text" placeholder="npub1…" autocapitalize="none" spellcheck="false"/>
+        </div>
+        <div class="field">
+          <label>ESCROW ACCOUNT</label>
+          <input id="escrow-account" type="text" placeholder="v4call-escrow" spellcheck="false"/>
         </div>
       </div>
     </div>
 
-    <!-- Lists -->
+    <!-- ── BLOCKLIST ────────────────────────────────── -->
+    <div class="card">
+      <div class="card-title">
+        <span>BLOCKLIST</span>
+        <button class="secondary" id="blocklist-toggle" onclick="toggleBlocklist()">▼ expand</button>
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" id="block-enabled" onchange="saveState();"/>
+        Enable blocklist — prevent listed users from contacting you
+      </label>
+      <div id="blocklist-body" class="collapse-body closed" style="max-height:0;">
+        <div class="field">
+          <label>BLOCKED HIVE USERNAMES (comma separated)</label>
+          <textarea class="users-input" id="block-users" placeholder="spammer1, troll99, badactor"></textarea>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>BLOCK MESSAGE (shown to blocked users)</label>
+            <input id="block-message" type="text" placeholder="You have been blocked."/>
+          </div>
+          <div class="field">
+            <label>ALLOW-IF-TOKEN (token bypasses block)</label>
+            <input id="block-token" type="text" placeholder="e.g. NOBLEMAGE" style="text-transform:uppercase;"/>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TOKEN RATES ──────────────────────────────── -->
+    <div class="card">
+      <div class="card-title">
+        <span>TOKEN RATES</span>
+        <button class="secondary" onclick="addToken()">+ Add Token</button>
+      </div>
+      <div class="info-box">
+        Accept Hive-Engine tokens (PIZZA, HIVE, your own token…) in addition to HBD.
+        Add one section per token. Enter <strong>0</strong> for FREE.
+        Token holders can optionally bypass your blocklist.
+      </div>
+      <div id="tokens-container"></div>
+    </div>
+
+    <!-- ── RATE LISTS ────────────────────────────────── -->
     <div class="card">
       <div class="card-title">
         <span>RATE LISTS</span>
         <button class="secondary" onclick="addList()">+ Add List</button>
       </div>
       <div class="info-box">
-        Create named lists of users with custom rates. Anyone not in a list uses the <strong>default</strong> rates.
-        Lists are checked in order — first match wins.
+        Named lists of users get custom rates. Lists are checked in order — first match wins.
+        Anyone not matched uses the <strong>default</strong> rates.
+        Enter <strong>0</strong> in any field to make it <strong style="color:var(--green)">FREE</strong>.
       </div>
       <div id="lists-container"></div>
     </div>
 
   </div>
 
-  <!-- Right: output -->
+  <!-- ═══════════════ RIGHT: OUTPUT ════════════════ -->
   <div id="output-panel">
+
     <div class="card">
-      <div class="card-title">OUTPUT</div>
-      <textarea id="output-area" readonly placeholder="Your rate data will appear here…"></textarea>
-      <div class="copy-success" id="copy-msg"></div>
+      <div class="card-title">OUTPUT — V4CALL-RATES-V2</div>
+      <textarea id="output-area" readonly placeholder="Click Generate to preview your rate schedule…"></textarea>
+      <div class="status-msg" id="status-msg"></div>
       <div class="btn-row">
-        <button class="primary" onclick="generateOutput()">Generate</button>
-        <button class="secondary" onclick="copyOutput()">Copy</button>
-        <button class="primary" onclick="postToHive()" style="background:var(--green);">Post to Hive</button>
-        <button class="secondary" onclick="loadFromHive()" style="font-size:0.8rem;">⬇ Load from Hive</button>
+        <button class="primary"    onclick="generateOutput()">Generate</button>
+        <button class="secondary"  onclick="copyOutput()">Copy</button>
+        <button class="primary"    onclick="postToHive()"     style="background:var(--green);color:#0a0c0f;">Post to Hive</button>
+        <button class="secondary"  onclick="loadFromHive()">Load from Hive</button>
       </div>
       <div class="keychain-note">
-        Posting to Hive requires the Hive Keychain browser extension.
-        The post will be titled <strong>v4call-rates</strong> and tagged <strong>v4call</strong>.
-        The app always reads your most recent post with this title.
+        Posting requires the <strong>Hive Keychain</strong> browser extension.
+        Post title: <strong>v4call-rates</strong> · Tag: <strong>v4call</strong>.
+        The app always reads your most recent post with that title.
       </div>
     </div>
 
     <div class="card">
       <div class="card-title">RATE REFERENCE</div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);line-height:1.9;">
-        <div><span style="color:var(--accent)">RING</span> — fee to make your phone ring</div>
-        <div><span style="color:var(--accent)">CONNECT</span> — fee when you accept the call</div>
-        <div><span style="color:var(--accent)">RATE</span> — per-hour cost, prorated per minute</div>
-        <div><span style="color:var(--accent)">TEXT</span> — flat fee to send you a message</div>
-        <div><span style="color:var(--accent)">FREE</span> — enter 0 for any field</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);line-height:2;">
+        <div><span style="color:var(--accent)">RING</span> — fee to make your device ring</div>
+        <div><span style="color:var(--accent)">CONNECT</span> — fee when you accept</div>
+        <div><span style="color:var(--accent)">RATE /HR</span> — per-hour fee, prorated per minute</div>
+        <div><span style="color:var(--accent)">TEXT</span> — flat fee per message</div>
+        <div><span style="color:var(--accent)">TEXT SESSION /HR</span> — ongoing text session fee</div>
+        <div><span style="color:var(--accent)">MIN-DEPOSIT</span> — minutes of call time pre-paid before connecting</div>
+        <div><span style="color:var(--green)">0 = FREE</span> — any field set to 0 outputs FREE</div>
         <hr/>
-        <div>All amounts in <span style="color:var(--green)">HBD</span> (≈ USD)</div>
-        <div>Times are in your <span style="color:var(--green)">local timezone</span></div>
-        <div>Duration billing prorated per <span style="color:var(--green)">minute</span></div>
+        <div>HBD rates → <span style="color:var(--green)">HBD (≈ USD)</span></div>
+        <div>Token rates → <span style="color:var(--purple)">token amounts</span></div>
+        <div>Times → your <span style="color:var(--green)">local timezone</span></div>
+        <div>Duration → prorated per <span style="color:var(--green)">minute</span></div>
       </div>
     </div>
-  </div>
 
+    <a href="https://www.completenoobs.com/index.php/v4call" target="_blank" class="wiki-link">
+      📖 v4call wiki — completenoobs.com
+    </a>
+
+  </div>
 </div>
 
 <script>
-// ── State ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+//  FORKER CONFIG — change these five lines to rebrand
+// ══════════════════════════════════════════════════════════
+const SERVER_DOMAIN        = 'v4call.com';
+const ESCROW_DEFAULT       = 'v4call-escrow';
+const PLATFORM_FEE_DEFAULT = 10;
+const WIKI_URL             = 'https://www.completenoobs.com/index.php/v4call';
+const APP_VERSION          = 'v4call/2.0';
+
+// ══════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════
 const DAYS = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
 
-let lists = [
-  // Default list always exists
-  {
-    id: 'default',
-    name: 'default',
-    type: 'default',
-    users: [],
-    windows: [
-      { days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'09:00', timeEnd:'18:00',
-        text:'3.000', voiceRing:'1.000', voiceConnect:'5.000', voiceRate:'20.000',
-        videoRing:'2.000', videoConnect:'10.000', videoRate:'50.000' }
-    ]
-  }
-];
-
+let lists  = [];
+let tokens = [];
 let nextId = 1;
 
-// ── Render ─────────────────────────────────────────────
+function defaultWindow() {
+  return {
+    days: [...DAYS],          // all 7 days — 24/7 default
+    timeStart: '00:00',
+    timeEnd:   '23:59',
+    text: '0',      textSession: '0',
+    voiceRing: '0', voiceConnect: '0', voiceRate: '0', voiceMinDeposit: '0',
+    videoRing: '0', videoConnect: '0', videoRate: '0', videoMinDeposit: '0'
+  };
+}
+
+function defaultList() {
+  return {
+    id: 'default', name: 'default', type: 'default',
+    users: [], windows: [defaultWindow()]
+  };
+}
+
+// ══════════════════════════════════════════════════════════
+//  BLOCKLIST TOGGLE
+// ══════════════════════════════════════════════════════════
+function toggleBlocklist() {
+  const body = document.getElementById('blocklist-body');
+  const btn  = document.getElementById('blocklist-toggle');
+  if (body.classList.contains('closed')) {
+    body.classList.remove('closed');
+    body.style.maxHeight = body.scrollHeight + 200 + 'px'; // +buffer for dynamic content
+    btn.textContent = '▲ collapse';
+  } else {
+    body.style.maxHeight = '0';
+    body.classList.add('closed');
+    btn.textContent = '▼ expand';
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  RENDER
+// ══════════════════════════════════════════════════════════
 function render() {
-  const container = document.getElementById('lists-container');
-  container.innerHTML = '';
+  renderTokens();
+  renderLists();
+}
+
+// ── Token cards ──────────────────────────────────────────
+function renderTokens() {
+  const c = document.getElementById('tokens-container');
+  if (!c) return;
+  c.innerHTML = '';
+  if (tokens.length === 0) {
+    c.innerHTML = '<div style="font-family:IBM Plex Mono,monospace;font-size:0.72rem;color:var(--muted);padding:4px 0;">No tokens added. Click + Add Token.</div>';
+    return;
+  }
+  tokens.forEach((tok, ti) => {
+    const el = document.createElement('div');
+    el.className = 'list-card';
+    el.innerHTML = `
+      <div class="list-header">
+        <span class="tok-badge" id="tok-badge-${ti}">⬡ ${tok.symbol || 'TOKEN'}</span>
+        <button class="danger" onclick="removeToken(${ti})">✕ Remove</button>
+      </div>
+      <div class="field">
+        <label>TOKEN SYMBOL</label>
+        <input type="text" value="${esc(tok.symbol)}" placeholder="e.g. PIZZA" style="text-transform:uppercase;"
+          oninput="tokens[${ti}].symbol=this.value.toUpperCase();document.getElementById('tok-badge-${ti}').textContent='⬡ '+(this.value.toUpperCase()||'TOKEN');saveState();"/>
+      </div>
+      <div class="slabel">TEXT MESSAGE</div>
+      <div class="rg2" style="margin-bottom:6px;">
+        <div class="rc"><label>PER MESSAGE (tokens, 0=FREE)</label>
+          <input type="number" value="${tok.text}" min="0" step="0.001"
+            oninput="tokens[${ti}].text=this.value;saveState();"/></div>
+        <div class="rc"><label>SESSION /HR (tokens, 0=FREE)</label>
+          <input type="number" value="${tok.textSession}" min="0" step="0.001"
+            oninput="tokens[${ti}].textSession=this.value;saveState();"/></div>
+      </div>
+      <div class="slabel">VOICE CALL</div>
+      <div class="rg3" style="margin-bottom:6px;">
+        <div class="rc"><label>RING (tokens)</label>
+          <input type="number" value="${tok.voiceRing}" min="0" step="0.001"
+            oninput="tokens[${ti}].voiceRing=this.value;saveState();"/></div>
+        <div class="rc"><label>CONNECT (tokens)</label>
+          <input type="number" value="${tok.voiceConnect}" min="0" step="0.001"
+            oninput="tokens[${ti}].voiceConnect=this.value;saveState();"/></div>
+        <div class="rc"><label>RATE /HR (tokens)</label>
+          <input type="number" value="${tok.voiceRate}" min="0" step="0.001"
+            oninput="tokens[${ti}].voiceRate=this.value;saveState();"/></div>
+      </div>
+      <div class="slabel">VIDEO CALL</div>
+      <div class="rg3" style="margin-bottom:8px;">
+        <div class="rc"><label>RING (tokens)</label>
+          <input type="number" value="${tok.videoRing}" min="0" step="0.001"
+            oninput="tokens[${ti}].videoRing=this.value;saveState();"/></div>
+        <div class="rc"><label>CONNECT (tokens)</label>
+          <input type="number" value="${tok.videoConnect}" min="0" step="0.001"
+            oninput="tokens[${ti}].videoConnect=this.value;saveState();"/></div>
+        <div class="rc"><label>RATE /HR (tokens)</label>
+          <input type="number" value="${tok.videoRate}" min="0" step="0.001"
+            oninput="tokens[${ti}].videoRate=this.value;saveState();"/></div>
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" ${tok.allowBlocked ? 'checked' : ''}
+          onchange="tokens[${ti}].allowBlocked=this.checked;saveState();"/>
+        Allow blocked users to contact you by paying with this token
+      </label>
+    `;
+    c.appendChild(el);
+  });
+}
+
+// ── Rate list cards ──────────────────────────────────────
+function renderLists() {
+  const c = document.getElementById('lists-container');
+  if (!c) return;
+  c.innerHTML = '';
   lists.forEach((list, li) => {
     const el = document.createElement('div');
     el.className = 'list-card';
     el.innerHTML = `
       <div class="list-header">
-        <span class="list-name-badge">#${list.name}</span>
+        <span class="list-name-badge" id="list-badge-${li}">#${esc(list.name)}</span>
         <span class="list-type-badge">${list.type}</span>
         ${list.type !== 'default' ? `<button class="danger" onclick="removeList(${li})">✕ Remove</button>` : ''}
       </div>
       ${list.type !== 'default' ? `
-      <div class="field">
-        <label>LIST NAME</label>
-        <input type="text" value="${list.name}" oninput="lists[${li}].name=this.value" placeholder="e.g. family"/>
-      </div>
-      <div class="field">
-        <label>HIVE USERNAMES (comma separated — these users get this list's rates)</label>
-        <textarea class="users-input" placeholder="alice, bob, charlie" oninput="lists[${li}].users=this.value.split(',').map(u=>u.trim().toLowerCase().replace('@','')).filter(Boolean)">${list.users.join(', ')}</textarea>
-      </div>
-      ` : '<div style="font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:var(--subtext);margin-bottom:10px;">Anyone not in a named list uses these default rates.</div>'}
+        <div class="field">
+          <label>LIST NAME</label>
+          <input type="text" value="${esc(list.name)}" placeholder="e.g. family"
+            oninput="lists[${li}].name=this.value;document.getElementById('list-badge-${li}').textContent='#'+this.value;saveState();"/>
+        </div>
+        <div class="field">
+          <label>HIVE USERNAMES — these users get this list's rates (comma separated)</label>
+          <textarea class="users-input" placeholder="alice, bob, charlie"
+            oninput="lists[${li}].users=this.value.split(',').map(u=>u.trim().toLowerCase().replace('@','')).filter(Boolean);saveState();">${esc(list.users.join(', '))}</textarea>
+        </div>
+      ` : `<div style="font-family:IBM Plex Mono,monospace;font-size:0.7rem;color:var(--subtext);margin-bottom:10px;">Anyone not matched by a named list uses these rates.</div>`}
       <div id="windows-${li}"></div>
       <button class="secondary" onclick="addWindow(${li})" style="font-size:0.72rem;padding:5px 12px;margin-top:4px;">+ Add Time Window</button>
     `;
-    container.appendChild(el);
+    c.appendChild(el);
     renderWindows(list, li);
   });
 }
 
+// ── Time window cards ────────────────────────────────────
 function renderWindows(list, li) {
-  const container = document.getElementById(`windows-${li}`);
-  if (!container) return;
-  container.innerHTML = '';
+  const c = document.getElementById(`windows-${li}`);
+  if (!c) return;
+  c.innerHTML = '';
   list.windows.forEach((w, wi) => {
     const el = document.createElement('div');
     el.className = 'window-card';
@@ -233,336 +430,573 @@ function renderWindows(list, li) {
     ).join('');
     el.innerHTML = `
       <div class="window-header">
-        <span>TIME WINDOW ${wi+1}</span>
+        <span>TIME WINDOW ${wi+1}${w.days.length===7?' · 24/7':''}</span>
         ${list.windows.length > 1 ? `<button class="danger" style="padding:2px 7px;font-size:0.65rem;" onclick="removeWindow(${li},${wi})">✕</button>` : ''}
       </div>
       <div class="field">
-        <label>DAYS</label>
+        <label>DAYS ACTIVE</label>
         <div class="days-row">${daysHtml}</div>
       </div>
       <div class="row">
         <div class="field">
-          <label>FROM</label>
-          <input type="time" value="${w.timeStart}" oninput="lists[${li}].windows[${wi}].timeStart=this.value"/>
+          <label>FROM (12am = 00:00)</label>
+          <input type="time" value="${w.timeStart}" min="00:00" max="23:59"
+            oninput="lists[${li}].windows[${wi}].timeStart=this.value;saveState();"/>
         </div>
         <div class="field">
-          <label>TO</label>
-          <input type="time" value="${w.timeEnd}" oninput="lists[${li}].windows[${wi}].timeEnd=this.value"/>
+          <label>TO (11:59pm = 23:59)</label>
+          <input type="time" value="${w.timeEnd}" min="00:00" max="23:59"
+            oninput="lists[${li}].windows[${wi}].timeEnd=this.value;saveState();"/>
         </div>
       </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);margin-bottom:8px;">
-        RATES (HBD) — enter 0 for free
-      </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">TEXT MESSAGE</div>
-      <div class="rate-grid" style="grid-template-columns:1fr;margin-bottom:10px;">
-        <div class="rate-cell">
-          <label>FLAT FEE TO SEND YOU A TEXT (HBD)</label>
+
+      <div class="slabel">TEXT MESSAGE — HBD · 0 = FREE</div>
+      <div class="rg2" style="margin-bottom:6px;">
+        <div class="rc"><label>PER MESSAGE (HBD)</label>
           <input type="number" value="${w.text}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].text=this.value"/>
-        </div>
+            oninput="lists[${li}].windows[${wi}].text=this.value;saveState();"/></div>
+        <div class="rc"><label>SESSION /HR (HBD)</label>
+          <input type="number" value="${w.textSession}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].textSession=this.value;saveState();"/></div>
       </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">VOICE CALL</div>
-      <div class="rate-grid" style="margin-bottom:10px;">
-        <div class="rate-cell">
-          <label>RING FEE</label>
+
+      <div class="slabel">VOICE CALL — HBD · 0 = FREE</div>
+      <div class="rg4" style="margin-bottom:6px;">
+        <div class="rc"><label>RING (HBD)</label>
           <input type="number" value="${w.voiceRing}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].voiceRing=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>CONNECT FEE</label>
+            oninput="lists[${li}].windows[${wi}].voiceRing=this.value;saveState();"/></div>
+        <div class="rc"><label>CONNECT (HBD)</label>
           <input type="number" value="${w.voiceConnect}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].voiceConnect=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>RATE /HOUR</label>
+            oninput="lists[${li}].windows[${wi}].voiceConnect=this.value;saveState();"/></div>
+        <div class="rc"><label>RATE /HR (HBD)</label>
           <input type="number" value="${w.voiceRate}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].voiceRate=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>MIN DEPOSIT (min)</label>
-          <input type="number" value="${w.voiceMinDep||10}" min="1" step="1"
-            oninput="lists[${li}].windows[${wi}].voiceMinDep=this.value"/>
-        </div>
+            oninput="lists[${li}].windows[${wi}].voiceRate=this.value;saveState();"/></div>
+        <div class="rc"><label>MIN-DEPOSIT (min)</label>
+          <input type="number" value="${w.voiceMinDeposit}" min="0" step="1" placeholder="0=none"
+            oninput="lists[${li}].windows[${wi}].voiceMinDeposit=this.value;saveState();"/></div>
       </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);margin-bottom:6px;">VIDEO CALL</div>
-      <div class="rate-grid">
-        <div class="rate-cell">
-          <label>RING FEE</label>
+
+      <div class="slabel">VIDEO CALL — HBD · 0 = FREE</div>
+      <div class="rg4">
+        <div class="rc"><label>RING (HBD)</label>
           <input type="number" value="${w.videoRing}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].videoRing=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>CONNECT FEE</label>
+            oninput="lists[${li}].windows[${wi}].videoRing=this.value;saveState();"/></div>
+        <div class="rc"><label>CONNECT (HBD)</label>
           <input type="number" value="${w.videoConnect}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].videoConnect=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>RATE /HOUR</label>
+            oninput="lists[${li}].windows[${wi}].videoConnect=this.value;saveState();"/></div>
+        <div class="rc"><label>RATE /HR (HBD)</label>
           <input type="number" value="${w.videoRate}" min="0" step="0.001"
-            oninput="lists[${li}].windows[${wi}].videoRate=this.value"/>
-        </div>
-        <div class="rate-cell">
-          <label>MIN DEPOSIT (min)</label>
-          <input type="number" value="${w.videoMinDep||10}" min="1" step="1"
-            oninput="lists[${li}].windows[${wi}].videoMinDep=this.value"/>
-        </div>
+            oninput="lists[${li}].windows[${wi}].videoRate=this.value;saveState();"/></div>
+        <div class="rc"><label>MIN-DEPOSIT (min)</label>
+          <input type="number" value="${w.videoMinDeposit}" min="0" step="1" placeholder="0=none"
+            oninput="lists[${li}].windows[${wi}].videoMinDeposit=this.value;saveState();"/></div>
       </div>
     `;
-    container.appendChild(el);
+    c.appendChild(el);
   });
 }
 
-// ── Actions ────────────────────────────────────────────
+// ── HTML escape helper ───────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ══════════════════════════════════════════════════════════
+//  ACTIONS
+// ══════════════════════════════════════════════════════════
+function addToken() {
+  tokens.push({
+    id: 'tok'+(nextId++), symbol: '',
+    text:'0', textSession:'0',
+    voiceRing:'0', voiceConnect:'0', voiceRate:'0',
+    videoRing:'0', videoConnect:'0', videoRate:'0',
+    allowBlocked: false
+  });
+  saveState(); renderTokens();
+}
+function removeToken(ti) { tokens.splice(ti,1); saveState(); renderTokens(); }
+
 function addList() {
-  lists.push({
-    id: 'list' + (nextId++),
-    name: 'mylist',
-    type: 'custom',
-    users: [],
-    windows: [
-      { days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'09:00', timeEnd:'18:00',
-        text:'0', voiceRing:'0', voiceConnect:'0', voiceRate:'0', voiceMinDep:'10',
-        videoRing:'0', videoConnect:'0', videoRate:'0', videoMinDep:'10' }
-    ]
-  });
-  render();
+  // Insert before default (default always stays last)
+  const defIdx = lists.findIndex(l => l.type === 'default');
+  const newList = { id:'list'+(nextId++), name:'mylist', type:'custom', users:[], windows:[defaultWindow()] };
+  if (defIdx >= 0) lists.splice(defIdx, 0, newList); else lists.push(newList);
+  saveState(); renderLists();
 }
-
-function removeList(li) {
-  lists.splice(li, 1);
-  render();
-}
+function removeList(li) { lists.splice(li,1); saveState(); renderLists(); }
 
 function addWindow(li) {
-  lists[li].windows.push({
-    days: ['Mon','Tue','Wed','Thu','Fri'], timeStart:'00:00', timeEnd:'08:59',
-    text:'5.000', voiceRing:'2.000', voiceConnect:'10.000', voiceRate:'30.000',
-    videoRing:'5.000', videoConnect:'20.000', videoRate:'60.000'
-  });
-  render();
+  lists[li].windows.push(defaultWindow());
+  saveState(); renderLists();
 }
-
-function removeWindow(li, wi) {
-  lists[li].windows.splice(wi, 1);
-  render();
-}
+function removeWindow(li, wi) { lists[li].windows.splice(wi,1); saveState(); renderLists(); }
 
 function toggleDay(li, wi, day) {
   const days = lists[li].windows[wi].days;
   const idx  = days.indexOf(day);
-  if (idx >= 0) days.splice(idx, 1); else days.push(day);
-  render();
+  if (idx >= 0) days.splice(idx,1); else days.push(day);
+  saveState(); renderLists();
 }
 
-// ── Generate Output ────────────────────────────────────
-function hbd(val) {
+// ══════════════════════════════════════════════════════════
+//  FORMAT HELPERS
+// ══════════════════════════════════════════════════════════
+function fmtHbd(val) {
   const n = parseFloat(val) || 0;
-  return n.toFixed(3) + ' HBD';
+  return n === 0 ? 'FREE' : n.toFixed(3) + ' HBD';
+}
+function fmtTok(val) {
+  const n = parseFloat(val) || 0;
+  if (n === 0) return 'FREE';
+  return n % 1 === 0 ? String(n) : parseFloat(n.toFixed(6)).toString();
 }
 
+// ══════════════════════════════════════════════════════════
+//  GENERATE OUTPUT
+// ══════════════════════════════════════════════════════════
 function generateOutput() {
-  const username    = document.getElementById('my-username').value.trim().toLowerCase() || 'yourusername';
-  const platformFee = parseFloat(document.getElementById('platform-fee').value) || 10;
+  const username    = (document.getElementById('my-username').value.trim().toLowerCase()) || 'yourusername';
+  const chain       = document.getElementById('my-chain').value || 'hive';
+  const server      = document.getElementById('my-server').value.trim() || SERVER_DOMAIN;
+  const nostrNpub   = document.getElementById('my-nostr').value.trim();
+  const platformFee = parseFloat(document.getElementById('platform-fee').value) || PLATFORM_FEE_DEFAULT;
+  const escrow      = document.getElementById('escrow-account').value.trim() || ESCROW_DEFAULT;
   const now         = new Date().toISOString().split('T')[0];
 
-  let out = `[V4CALL-RATES-V1]\n`;
+  let out = `[V4CALL-RATES-V2]\n`;
   out    += `ACCOUNT:${username}\n`;
+  out    += `CHAIN:${chain}\n`;
+  out    += `SERVER:${server}\n`;
+  if (nostrNpub) out += `NOSTR:${nostrNpub}\n`;
   out    += `UPDATED:${now}\n`;
   out    += `PLATFORM-FEE:${platformFee}%\n`;
-  out    += `ESCROW:v4call-escrow\n\n`;
+  out    += `ESCROW:${escrow}\n`;
 
-  // Custom lists first, then default last
-  const ordered = [...lists.filter(l => l.type !== 'default'), ...lists.filter(l => l.type === 'default')];
+  // ── Blocklist ──────────────────────────────────────────
+  const blockEnabled = document.getElementById('block-enabled').checked;
+  const blockUsers   = document.getElementById('block-users').value
+    .split(',').map(u => u.trim().toLowerCase().replace('@','')).filter(Boolean);
+  const blockMessage = document.getElementById('block-message').value.trim();
+  const blockToken   = document.getElementById('block-token').value.trim().toUpperCase();
 
-  for (const list of ordered) {
-    out += `[LIST:${list.name}]\n`;
-    if (list.users.length > 0) {
-      out += `USERS:${list.users.join(',')}\n`;
-    }
-    for (const w of list.windows) {
-      const daysStr = w.days.length === 7 ? 'mon-sun'
-        : w.days.map(d => d.toLowerCase()).join(',');
-      out += `[DAYS:${daysStr}][TIME:${w.timeStart}-${w.timeEnd}]\n`;
-      out += `TEXT:${hbd(w.text)}\n`;
-      out += `VOICE:RING:${hbd(w.voiceRing)};CONNECT:${hbd(w.voiceConnect)};RATE:${hbd(w.voiceRate)}/hr;MIN-DEPOSIT:${w.voiceMinDep||10}min\n`;
-      out += `VIDEO:RING:${hbd(w.videoRing)};CONNECT:${hbd(w.videoConnect)};RATE:${hbd(w.videoRate)}/hr;MIN-DEPOSIT:${w.videoMinDep||10}min\n`;
-      out += `[/TIME]\n`;
-    }
-    out += `[/LIST]\n\n`;
+  if (blockEnabled && blockUsers.length > 0) {
+    out += `\n[BLOCKED]\n`;
+    out += `USERS:${blockUsers.join(',')}\n`;
+    if (blockMessage) out += `MESSAGE:${blockMessage}\n`;
+    if (blockToken)   out += `ALLOW-IF-TOKEN:${blockToken}\n`;
+    out += `[/BLOCKED]\n`;
   }
 
-  out += `[/V4CALL-RATES-V1]`;
+  // ── Token rates ────────────────────────────────────────
+  for (const tok of tokens) {
+    if (!tok.symbol) continue;
+    out += `\n[TOKEN:${tok.symbol}]\n`;
+    out += `TEXT:${fmtTok(tok.text)}\n`;
+    out += `TEXT-SESSION:${fmtTok(tok.textSession)}/hr\n`;
+    out += `VOICE:RING:${fmtTok(tok.voiceRing)};CONNECT:${fmtTok(tok.voiceConnect)};RATE:${fmtTok(tok.voiceRate)}/hr\n`;
+    out += `VIDEO:RING:${fmtTok(tok.videoRing)};CONNECT:${fmtTok(tok.videoConnect)};RATE:${fmtTok(tok.videoRate)}/hr\n`;
+    out += `ALLOW-BLOCKED:${tok.allowBlocked ? 'yes' : 'no'}\n`;
+    out += `[/TOKEN]\n`;
+  }
+
+  // ── Rate lists — custom first, default last ────────────
+  const ordered = [
+    ...lists.filter(l => l.type !== 'default'),
+    ...lists.filter(l => l.type === 'default')
+  ];
+
+  for (const list of ordered) {
+    out += `\n[LIST:${list.name}]\n`;
+    if (list.users.length > 0) out += `USERS:${list.users.join(',')}\n`;
+
+    for (const w of list.windows) {
+      if (w.days.length === 0) continue; // skip windows with no days selected
+
+      const daysStr = w.days.length === 7
+        ? 'mon-sun'
+        : w.days.map(d => d.toLowerCase()).join(',');
+
+      out += `[DAYS:${daysStr}][TIME:${w.timeStart}-${w.timeEnd}]\n`;
+      out += `TEXT:${fmtHbd(w.text)}\n`;
+      out += `TEXT-SESSION:${fmtHbd(w.textSession)}/hr\n`;
+
+      let vLine = `VOICE:RING:${fmtHbd(w.voiceRing)};CONNECT:${fmtHbd(w.voiceConnect)};RATE:${fmtHbd(w.voiceRate)}/hr`;
+      const vmd = parseInt(w.voiceMinDeposit) || 0;
+      if (vmd > 0) vLine += `;MIN-DEPOSIT:${vmd}min`;
+      out += vLine + '\n';
+
+      let vidLine = `VIDEO:RING:${fmtHbd(w.videoRing)};CONNECT:${fmtHbd(w.videoConnect)};RATE:${fmtHbd(w.videoRate)}/hr`;
+      const vidmd = parseInt(w.videoMinDeposit) || 0;
+      if (vidmd > 0) vidLine += `;MIN-DEPOSIT:${vidmd}min`;
+      out += vidLine + '\n';
+
+      out += `[/TIME]\n`;
+    }
+    out += `[/LIST]\n`;
+  }
+
+  out += `\n[/V4CALL-RATES-V2]`;
 
   document.getElementById('output-area').value = out;
-  document.getElementById('copy-msg').textContent = '';
+  // Reset status colour on each new generation
+  const msg = document.getElementById('status-msg');
+  msg.textContent = '';
+  msg.style.color = 'var(--green)';
   return out;
 }
 
-function copyOutput() {
-  const text = document.getElementById('output-area').value;
-  if (!text) { generateOutput(); }
-  navigator.clipboard.writeText(document.getElementById('output-area').value).then(() => {
-    document.getElementById('copy-msg').textContent = '✓ Copied to clipboard';
-    setTimeout(() => document.getElementById('copy-msg').textContent = '', 2000);
-  });
+// ══════════════════════════════════════════════════════════
+//  STATUS HELPER
+// ══════════════════════════════════════════════════════════
+function showStatus(text, type) {
+  const msg       = document.getElementById('status-msg');
+  msg.textContent = text;
+  msg.style.color = type === 'danger' ? 'var(--danger)'
+                  : type === 'blue'   ? 'var(--blue)'
+                  :                     'var(--green)';
 }
 
-// ── Post to Hive via Keychain ──────────────────────────
+// ══════════════════════════════════════════════════════════
+//  COPY
+// ══════════════════════════════════════════════════════════
+function copyOutput() {
+  const text = generateOutput();
+  const doFallback = () => {
+    const area = document.getElementById('output-area');
+    area.select();
+    try { document.execCommand('copy'); } catch(e){}
+    showStatus('✓ Copied to clipboard', 'green');
+    setTimeout(() => showStatus('','green'), 2000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => {
+        showStatus('✓ Copied to clipboard', 'green');
+        setTimeout(() => showStatus('','green'), 2000);
+      })
+      .catch(doFallback);
+  } else {
+    doFallback();
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+//  POST TO HIVE
+// ══════════════════════════════════════════════════════════
 function postToHive() {
   const username = document.getElementById('my-username').value.trim().toLowerCase();
   if (!username) { alert('Please enter your Hive username first.'); return; }
 
   if (!window.hive_keychain) {
-    alert('Hive Keychain extension is not installed.\n\nInstall it from:\nhttps://hive-keychain.com\n\nThen come back and try again.');
+    alert('Hive Keychain extension is not installed.\n\nInstall it from:\nhttps://hive-keychain.com\n\nThen reload and try again.');
     return;
   }
 
-  const body    = generateOutput();
-  const title   = 'v4call-rates';
-  const permlink= 'v4call-rates'; // fixed permlink so server can find by direct lookup
-  const tags    = ['v4call', 'hive', 'communication'];
-  // json_metadata must be a valid JSON string with required fields
-  const jsonMeta= JSON.stringify({
-    tags,
-    app:   'v4call/1.0',
-    format:'markdown',
-    description: 'v4call communication rate schedule'
-  });
+  const body     = generateOutput();
+  const title    = 'v4call-rates';
+  const permlink = 'v4call-rates-' + Date.now();
+  const tags     = ['v4call', 'hive', 'communication'];
+  const jsonMeta = JSON.stringify({ tags, app: APP_VERSION });
 
-  // Post using Keychain — uses posting key, never exposes it
+  showStatus('Posting to Hive…', 'blue');
+
+  // ── CORRECT parameter order for hive_keychain.requestPost ──────────────
+  // requestPost(account, title, body, parent_perm, parent_account,
+  //             json_metadata, permlink, comment_options, callback)
+  //
+  // parent_perm   = first tag (acts as category for top-level posts)
+  // parent_account = '' for a top-level post
+  // ───────────────────────────────────────────────────────────────────────
   window.hive_keychain.requestPost(
-    username,
-    title,
-    body,
-    permlink,
-    '',        // parent author (empty = top level post)
-    'hive',   // parent permlink (required for top-level posts on some UIs)
-    jsonMeta,
-    '',        // comment options (empty string, not null)
+    username,   // account
+    title,      // title
+    body,       // body
+    tags[0],    // parent_perm  — first tag = category
+    '',         // parent_account — empty = top-level post
+    jsonMeta,   // json_metadata
+    permlink,   // permlink
+    '',         // comment_options — empty = Hive defaults
     (response) => {
       if (response.success) {
-        document.getElementById('copy-msg').textContent =
-          `✓ Posted! https://hive.blog/@${username}/${permlink}`;
-        document.getElementById('copy-msg').style.color = 'var(--green)';
+        showStatus(`✓ Posted! https://hive.blog/@${username}/${permlink}`, 'green');
       } else {
-        document.getElementById('copy-msg').textContent = '✗ Post failed: ' + (response.message || 'unknown error');
-        document.getElementById('copy-msg').style.color = 'var(--danger)';
+        showStatus('✗ Post failed: ' + (response.message || 'unknown error'), 'danger');
       }
     }
   );
 }
 
-// ── Load from Hive ────────────────────────────────────────
+// ══════════════════════════════════════════════════════════
+//  LOAD FROM HIVE
+// ══════════════════════════════════════════════════════════
 async function loadFromHive() {
   const username = document.getElementById('my-username').value.trim().toLowerCase();
-  if (!username) { alert('Enter your Hive username first.'); return; }
+  if (!username) { showStatus('Enter your Hive username first', 'danger'); return; }
 
-  document.getElementById('copy-msg').textContent = 'Fetching your rate posts from Hive…';
-  document.getElementById('copy-msg').style.color = 'var(--blue)';
+  showStatus('Fetching from Hive…', 'blue');
 
-  try {
-    // Fetch up to 20 recent posts by this author
-    const res  = await fetch('https://api.hive.blog', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method:  'condenser_api.get_discussions_by_author_before_date',
-        params:  [username, '', '2099-01-01T00:00:00', 50],
-        id: 1
-      })
-    });
-    const data = await res.json();
-    if (!data.result) throw new Error('No posts returned');
+  // Try multiple API nodes for resilience
+  const nodes = [
+    'https://api.hive.blog',
+    'https://api.deathwing.me',
+    'https://hive-api.arcange.eu'
+  ];
 
-    // Filter to v4call-rates posts only
-    const ratePosts = data.result.filter(p =>
-      p.title.toLowerCase() === 'v4call-rates' && p.author === username
-    );
-
-    if (!ratePosts.length) {
-      document.getElementById('copy-msg').textContent = `No v4call-rates posts found for @${username}.`;
-      document.getElementById('copy-msg').style.color = 'var(--danger)';
-      return;
-    }
-
-    // Build a picker if there are multiple posts
-    if (ratePosts.length === 1) {
-      loadPostBody(ratePosts[0]);
-      return;
-    }
-
-    // Show a selection dialog
-    const options = ratePosts.map((p, i) => {
-      const date = p.created.replace('T', ' ').slice(0, 16);
-      return `${i}: ${date} UTC — ${p.permlink}`;
-    }).join('
-');
-
-    const choice = prompt(
-      `Found ${ratePosts.length} v4call-rates posts for @${username}.
-Enter number to load (0 = most recent):
-
-${options}`,
-      '0'
-    );
-    const idx = parseInt(choice);
-    if (isNaN(idx) || idx < 0 || idx >= ratePosts.length) {
-      document.getElementById('copy-msg').textContent = 'Cancelled.';
-      return;
-    }
-    loadPostBody(ratePosts[idx]);
-
-  } catch(e) {
-    document.getElementById('copy-msg').textContent = 'Error fetching posts: ' + e.message;
-    document.getElementById('copy-msg').style.color = 'var(--danger)';
+  let posts = null;
+  for (const node of nodes) {
+    try {
+      const res = await fetch(node, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'condenser_api.get_discussions_by_blog',
+          params: [{ tag: username, limit: 20 }],
+          id: 1
+        })
+      });
+      const data = await res.json();
+      if (data.result) { posts = data.result; break; }
+    } catch(_) { /* try next node */ }
   }
-}
 
-function loadPostBody(post) {
-  // Extract the [V4CALL-RATES-V1] block from the post body
-  const match = post.body.match(/\[V4CALL-RATES-V1\][\s\S]*?\[\/V4CALL-RATES-V1\]/i);
-  if (!match) {
-    document.getElementById('copy-msg').textContent = 'Post found but no [V4CALL-RATES-V1] block detected.';
-    document.getElementById('copy-msg').style.color = 'var(--danger)';
+  if (!posts) {
+    showStatus('✗ Could not reach Hive API — check connection', 'danger');
     return;
   }
-  document.getElementById('output-area').value = match[0];
-  const date = post.created.replace('T', ' ').slice(0, 16);
-  document.getElementById('copy-msg').textContent = `✓ Loaded from post dated ${date} UTC. Edit as needed then click "Post to Hive" to repost.`;
-  document.getElementById('copy-msg').style.color = 'var(--green)';
+
+  const ratesPost = posts.find(p => p.title === 'v4call-rates');
+  if (!ratesPost) {
+    showStatus(`✗ No v4call-rates post found for @${username}`, 'danger');
+    return;
+  }
+
+  try {
+    parseAndApplyRates(ratesPost.body);
+    saveState();
+    render();
+    generateOutput();
+    showStatus(`✓ Loaded from Hive (@${username})`, 'green');
+  } catch(e) {
+    showStatus('✗ Parse error: ' + e.message, 'danger');
+  }
 }
 
-// ── Save / Load (localStorage) ─────────────────────────
+// ══════════════════════════════════════════════════════════
+//  PARSE & APPLY RATES (handles both V1 and V2 format)
+// ══════════════════════════════════════════════════════════
+function parseAndApplyRates(body) {
+  // Strip V1/V2 wrapper lines and blank lines
+  const lines = body.split('\n')
+    .map(l => l.trim())
+    .filter(l => l && !l.match(/^\[\/?(V4CALL-RATES)/));
+
+  // Reset JS state
+  lists  = [];
+  tokens = [];
+  nextId = 1;
+
+  // Strip value suffixes, return numeric string; FREE → '0'
+  const parseVal = (v) => {
+    if (!v || v.toUpperCase().startsWith('FREE')) return '0';
+    const n = parseFloat(v.replace(/[^0-9.\-]/g, ''));
+    return String(isNaN(n) ? 0 : n);
+  };
+
+  let section   = null;
+  let curToken  = null;
+  let curList   = null;
+  let curWindow = null;
+
+  for (const line of lines) {
+
+    // ── Identity ──────────────────────────────────────────
+    if      (line.startsWith('ACCOUNT:'))       { document.getElementById('my-username').value     = line.slice(8); }
+    else if (line.startsWith('CHAIN:'))         { document.getElementById('my-chain').value        = line.slice(6).toLowerCase(); }
+    else if (line.startsWith('SERVER:'))        { document.getElementById('my-server').value       = line.slice(7); }
+    else if (line.startsWith('NOSTR:'))         { document.getElementById('my-nostr').value        = line.slice(6); }
+    else if (line.startsWith('PLATFORM-FEE:')) { document.getElementById('platform-fee').value    = parseFloat(line.slice(13)) || PLATFORM_FEE_DEFAULT; }
+    else if (line.startsWith('ESCROW:'))        { document.getElementById('escrow-account').value  = line.slice(7); }
+
+    // ── Section openers / closers ─────────────────────────
+    else if (line === '[BLOCKED]')  { section = 'blocked'; document.getElementById('block-enabled').checked = true; }
+    else if (line === '[/BLOCKED]') { section = null; }
+
+    else if (line.startsWith('[TOKEN:')) {
+      section = 'token';
+      curToken = { id:'tok'+(nextId++), symbol: line.slice(7,-1),
+        text:'0', textSession:'0',
+        voiceRing:'0', voiceConnect:'0', voiceRate:'0',
+        videoRing:'0', videoConnect:'0', videoRate:'0',
+        allowBlocked: false };
+    }
+    else if (line === '[/TOKEN]') { if (curToken) tokens.push(curToken); curToken = null; section = null; }
+
+    else if (line.startsWith('[LIST:')) {
+      section = 'list';
+      const name = line.slice(6,-1);
+      curList = { id: name==='default'?'default':'list'+(nextId++),
+        name, type: name==='default'?'default':'custom',
+        users:[], windows:[] };
+    }
+    else if (line === '[/LIST]') {
+      if (curList) {
+        if (curList.windows.length === 0) curList.windows.push(defaultWindow());
+        lists.push(curList);
+      }
+      curList = null; curWindow = null; section = null;
+    }
+
+    // ── Blocklist content ─────────────────────────────────
+    else if (section === 'blocked') {
+      if      (line.startsWith('USERS:'))          document.getElementById('block-users').value   = line.slice(6).split(',').map(u=>u.trim()).join(', ');
+      else if (line.startsWith('MESSAGE:'))        document.getElementById('block-message').value = line.slice(8);
+      else if (line.startsWith('ALLOW-IF-TOKEN:')) document.getElementById('block-token').value   = line.slice(15);
+    }
+
+    // ── Token content ─────────────────────────────────────
+    else if (section === 'token' && curToken) {
+      // Check TEXT-SESSION before TEXT to avoid prefix collision
+      if      (line.startsWith('TEXT-SESSION:'))  curToken.textSession  = parseVal(line.slice(13));
+      else if (line.startsWith('TEXT:'))          curToken.text         = parseVal(line.slice(5));
+      else if (line.startsWith('VOICE:')) {
+        line.slice(6).split(';').forEach(p => {
+          if      (p.startsWith('RING:'))    curToken.voiceRing    = parseVal(p.slice(5));
+          else if (p.startsWith('CONNECT:')) curToken.voiceConnect = parseVal(p.slice(8));
+          else if (p.startsWith('RATE:'))    curToken.voiceRate    = parseVal(p.slice(5));
+        });
+      }
+      else if (line.startsWith('VIDEO:')) {
+        line.slice(6).split(';').forEach(p => {
+          if      (p.startsWith('RING:'))    curToken.videoRing    = parseVal(p.slice(5));
+          else if (p.startsWith('CONNECT:')) curToken.videoConnect = parseVal(p.slice(8));
+          else if (p.startsWith('RATE:'))    curToken.videoRate    = parseVal(p.slice(5));
+        });
+      }
+      else if (line.startsWith('ALLOW-BLOCKED:')) curToken.allowBlocked = line.slice(14).toLowerCase() === 'yes';
+    }
+
+    // ── List content ──────────────────────────────────────
+    else if (section === 'list' && curList) {
+      if (line.startsWith('USERS:')) {
+        curList.users = line.slice(6).split(',').map(u=>u.trim().replace('@','')).filter(Boolean);
+      }
+      else if (line.startsWith('[DAYS:')) {
+        const daysM = line.match(/\[DAYS:([^\]]+)\]/);
+        const timeM = line.match(/\[TIME:([^-\]]+)-([^\]]+)\]/);
+        const dStr  = daysM ? daysM[1] : 'mon-sun';
+        const days  = dStr === 'mon-sun'
+          ? [...DAYS]
+          : dStr.split(',').map(d => d.charAt(0).toUpperCase() + d.slice(1));
+        curWindow = {
+          days,
+          timeStart: timeM ? timeM[1] : '00:00',
+          timeEnd:   timeM ? timeM[2] : '23:59',
+          text:'0', textSession:'0',
+          voiceRing:'0', voiceConnect:'0', voiceRate:'0', voiceMinDeposit:'0',
+          videoRing:'0', videoConnect:'0', videoRate:'0', videoMinDeposit:'0'
+        };
+      }
+      else if (line === '[/TIME]') {
+        if (curWindow && curList) curList.windows.push(curWindow);
+        curWindow = null;
+      }
+      else if (curWindow) {
+        // TEXT-SESSION must be checked before TEXT
+        if      (line.startsWith('TEXT-SESSION:')) curWindow.textSession    = parseVal(line.slice(13));
+        else if (line.startsWith('TEXT:'))         curWindow.text           = parseVal(line.slice(5));
+        else if (line.startsWith('VOICE:')) {
+          line.slice(6).split(';').forEach(p => {
+            if      (p.startsWith('RING:'))        curWindow.voiceRing       = parseVal(p.slice(5));
+            else if (p.startsWith('CONNECT:'))     curWindow.voiceConnect    = parseVal(p.slice(8));
+            else if (p.startsWith('RATE:'))        curWindow.voiceRate       = parseVal(p.slice(5));
+            else if (p.startsWith('MIN-DEPOSIT:')) curWindow.voiceMinDeposit = String(parseInt(p.slice(12))||0);
+          });
+        }
+        else if (line.startsWith('VIDEO:')) {
+          line.slice(6).split(';').forEach(p => {
+            if      (p.startsWith('RING:'))        curWindow.videoRing       = parseVal(p.slice(5));
+            else if (p.startsWith('CONNECT:'))     curWindow.videoConnect    = parseVal(p.slice(8));
+            else if (p.startsWith('RATE:'))        curWindow.videoRate       = parseVal(p.slice(5));
+            else if (p.startsWith('MIN-DEPOSIT:')) curWindow.videoMinDeposit = String(parseInt(p.slice(12))||0);
+          });
+        }
+      }
+    }
+  }
+
+  // Ensure default list exists and is last
+  if (!lists.find(l => l.type === 'default')) lists.push(defaultList());
+  lists = [...lists.filter(l => l.type !== 'default'), ...lists.filter(l => l.type === 'default')];
+}
+
+// ══════════════════════════════════════════════════════════
+//  SAVE / LOAD  (localStorage)
+// ══════════════════════════════════════════════════════════
 function saveState() {
   try {
-    localStorage.setItem('v4call_rates_editor', JSON.stringify({
-      username: document.getElementById('my-username').value,
-      fee:      document.getElementById('platform-fee').value,
-      lists
+    localStorage.setItem('v4call_rates_v2', JSON.stringify({
+      username:     document.getElementById('my-username').value,
+      chain:        document.getElementById('my-chain').value,
+      server:       document.getElementById('my-server').value,
+      nostrNpub:    document.getElementById('my-nostr').value,
+      platformFee:  document.getElementById('platform-fee').value,
+      escrow:       document.getElementById('escrow-account').value,
+      blockEnabled: document.getElementById('block-enabled').checked,
+      blockUsers:   document.getElementById('block-users').value,
+      blockMessage: document.getElementById('block-message').value,
+      blockToken:   document.getElementById('block-token').value,
+      tokens, lists, nextId
     }));
-  } catch(e) {}
+  } catch(_) {}
 }
 
 function loadState() {
   try {
-    const saved = localStorage.getItem('v4call_rates_editor');
+    const saved = localStorage.getItem('v4call_rates_v2');
     if (!saved) return;
-    const data = JSON.parse(saved);
-    if (data.username) document.getElementById('my-username').value = data.username;
-    if (data.fee)      document.getElementById('platform-fee').value = data.fee;
-    if (data.lists && data.lists.length) lists = data.lists;
-  } catch(e) {}
+    const d = JSON.parse(saved);
+    if (d.username    !== undefined) document.getElementById('my-username').value    = d.username;
+    if (d.chain       !== undefined) document.getElementById('my-chain').value       = d.chain;
+    if (d.server      !== undefined) document.getElementById('my-server').value      = d.server;
+    if (d.nostrNpub   !== undefined) document.getElementById('my-nostr').value       = d.nostrNpub;
+    if (d.platformFee !== undefined) document.getElementById('platform-fee').value   = d.platformFee;
+    if (d.escrow      !== undefined) document.getElementById('escrow-account').value = d.escrow;
+    if (d.blockEnabled !== undefined) document.getElementById('block-enabled').checked = d.blockEnabled;
+    if (d.blockUsers  !== undefined) document.getElementById('block-users').value    = d.blockUsers;
+    if (d.blockMessage !== undefined) document.getElementById('block-message').value = d.blockMessage;
+    if (d.blockToken  !== undefined) document.getElementById('block-token').value    = d.blockToken;
+    if (Array.isArray(d.tokens) && d.tokens.length)  tokens = d.tokens;
+    if (Array.isArray(d.lists)  && d.lists.length)   lists  = d.lists;
+    if (typeof d.nextId === 'number') nextId = d.nextId;
+  } catch(_) {}
 }
 
-// Auto-save on any input change
-document.addEventListener('input', () => { saveState(); });
+// Auto-save on any field input (button actions call saveState() directly)
+document.addEventListener('input', saveState);
 
-// Init
+// ══════════════════════════════════════════════════════════
+//  INIT
+// ══════════════════════════════════════════════════════════
+// Set defaults (before loadState overwrites them if saved state exists)
+document.getElementById('my-server').value      = SERVER_DOMAIN;
+document.getElementById('escrow-account').value = ESCROW_DEFAULT;
+document.getElementById('platform-fee').value   = PLATFORM_FEE_DEFAULT;
+// Default block message
+document.getElementById('block-message').value  = 'You have been blocked.';
+
+// Seed default list into state before load
+lists = [defaultList()];
+
+// Load any saved state (will override defaults above)
 loadState();
+
+// If no lists were saved, start with the default
+if (lists.length === 0) lists = [defaultList()];
+
+// Render UI then generate preview
 render();
 generateOutput();
 </script>
 </body>
 </html>
-
