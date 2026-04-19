@@ -1,6 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
+<!-- pop up 1/3 -->
+<style>
+  #overlay {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0,0,0,0.85); color: white; z-index: 10000;
+    display: flex; align-items: center; justify-content: center; text-align: center;
+  }
+  .popup-box { background: #222; padding: 30px; border-radius: 10px; border: 1px solid #444; }
+  button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+  .hidden { display: none !important; }
+</style>
+
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>v4call</title>
@@ -362,6 +375,21 @@
   </style>
 </head>
 <body>
+
+	<!-- pop up 2/3 message -->
+	<!-- pop up cookies and other 2/3-->
+<div id="overlay">
+  <div class="popup-box">
+	  <h2>Welcome to V4CALL - A CompleteNoobs.com project </h2> 
+	  <h3>This is in 0.1 concept phase - use at own risk</h3>
+	  <a href="https://github.com/CompleteNoobs/v4call"> github -mit licenced</a></p>
+	  <a href="https://www.completenoobs.com/noobs/V4CALL" > V4call completenoobs page</a></p>
+    <p>We use cookies to track traffic. Are you 21 or older?</p>
+    <p>By accepting you are entering at your own risk</p>
+    <button onclick="acceptAndHide()">Yes, I Accept & I'm Over 21 & am aware you are noobs and are still learning i enter at my own risk</button>
+    <p>→ <a href="https://www.google.com" >No Thank You - take me to Google</a></p>
+  </div>
+</div>
 
 <header>
   <div class="logo">v4<span>call</span></div>
@@ -2328,5 +2356,21 @@ async function createOffer(peerId) {
 }
 
 </script>
+<!-- pop up cookies and other  3/3-->
+<script>
+  function acceptAndHide() {
+    // Save the choice in the browser's "localStorage" so it doesn't pop up again
+    localStorage.setItem('gate_passed', 'true');
+    document.getElementById('overlay').classList.add('hidden');
+  }
+
+  // On page load, check if they already clicked "Yes"
+  window.onload = function() {
+    if (localStorage.getItem('gate_passed') === 'true') {
+      document.getElementById('overlay').classList.add('hidden');
+    }
+  };
+</script>
+
 </body>
 </html>
