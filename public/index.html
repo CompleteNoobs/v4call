@@ -10,7 +10,7 @@
     display: flex; align-items: center; justify-content: center; text-align: center;
   }
   .popup-box { background: #222; padding: 30px; border-radius: 10px; border: 1px solid #444; }
-  button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
+  .popup-box button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 5px; }
   .hidden { display: none !important; }
 </style>
 
@@ -69,7 +69,8 @@
 
     /* Lobby */
     #lobby-screen{flex-direction:row;}
-    #lobby-left{width:240px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;}
+    #lobby-left{width:270px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:width 0.27s ease;}
+    #lobby-left.collapsed{width:0;border-right:none;}
     .panel-header{padding:9px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
     .panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);letter-spacing:0.05em;}
     .toggle-row{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
@@ -192,7 +193,20 @@
     .room-join-btn{align-self:flex-start;padding:4px 12px;background:transparent;color:var(--blue);border:1px solid rgba(56,189,248,0.35);border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;transition:background 0.2s;}
     .room-join-btn:hover{background:rgba(56,189,248,0.08);}
     #no-rooms-msg{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--muted);text-align:center;padding:20px;}
-    #lobby-right{width:220px;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow-y:auto;}
+    #lobby-right{width:240px;background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:width 0.27s ease;}
+    #lobby-right.collapsed{width:0;}
+
+    /* Sidebar toggle strips */
+    .sidebar-strip{width:14px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:var(--surface);border:none;cursor:col-resize;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:0.72rem;padding:0;transition:color 0.2s,background 0.2s,width 0.15s;user-select:none;}
+    .sidebar-strip:hover{background:var(--surface2);color:var(--text);}
+    #left-strip{border-left:1px solid var(--border);}
+    #right-strip{border-right:1px solid var(--border);}
+    .strip-ch{pointer-events:none;flex-shrink:0;}
+    .strip-lbl{writing-mode:vertical-rl;transform:rotate(180deg);font-size:0.47rem;letter-spacing:0.12em;color:var(--accent);opacity:0;transition:opacity 0.25s;pointer-events:none;white-space:nowrap;flex-shrink:0;}
+    .sidebar-strip.panel-closed{width:20px;background:rgba(245,166,35,0.04);}
+    .sidebar-strip.panel-closed:hover{background:rgba(245,166,35,0.09);color:var(--accent);}
+    .sidebar-strip.panel-closed .strip-lbl{opacity:0.6;}
+
     #create-section{padding:12px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid var(--border);}
     #create-section h3{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--subtext);letter-spacing:0.05em;}
     #invitee-preview{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);line-height:1.7;min-height:20px;}
@@ -287,8 +301,9 @@
       #room-screen{flex-direction:column;}
       #video-panel{width:100%;max-height:180px;flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--border);}
       #lobby-screen{flex-direction:column;}
-      #lobby-left{width:100%;height:180px;border-right:none;border-bottom:1px solid var(--border);}
-      #lobby-right{width:100%;border-left:none;border-top:1px solid var(--border);}
+      #lobby-left,#lobby-left.collapsed{width:100%!important;height:auto;max-height:220px;border-right:none;border-bottom:1px solid var(--border);overflow-y:auto;transition:none;}
+      #lobby-right,#lobby-right.collapsed{width:100%!important;height:auto;border-top:1px solid var(--border);overflow-y:auto;transition:none;}
+      .sidebar-strip{display:none;}
     }
     .video-wrapper{position:relative;background:#000;}
     .video-wrapper video{width:100%;display:block;aspect-ratio:4/3;object-fit:cover;}
@@ -456,6 +471,7 @@
       <div id="kc-key-status"></div>
     </div>
   </div>
+  <button id="left-strip" class="sidebar-strip" title="Show/hide users panel"><span class="strip-ch">&#8249;</span><span class="strip-lbl">USERS</span></button>
   <div id="lobby-middle">
     <div id="lobby-tabs">
       <button class="lobby-tab active" onclick="switchLobbyTab('chat')">💬 Lobby Chat</button>
@@ -488,7 +504,8 @@
       <div id="rooms-list"><div id="no-rooms-msg">No active rooms yet.</div></div>
     </div>
   </div>
-  <div id="lobby-right">
+  <button id="right-strip" class="sidebar-strip panel-closed" title="Show/hide rooms panel"><span class="strip-ch">&#8249;</span><span class="strip-lbl">ROOMS</span></button>
+  <div id="lobby-right" class="collapsed">
     <div id="create-section">
       <h3>CREATE ROOM</h3>
       <div id="invitee-preview">Select users on the left first.</div>
@@ -946,6 +963,68 @@ async function verifySignature(message, timestamp, signature, fromUsername) {
   } catch(e) { return null; }
 }
 
+// ── Sidebar toggles & resize ─────────────────────────────
+let leftSidebarOpen = true, rightSidebarOpen = false;
+let leftW = 270, rightW = 240;
+
+function toggleLeftSidebar() {
+  leftSidebarOpen = !leftSidebarOpen;
+  const s = document.getElementById('lobby-left');
+  const strip = document.getElementById('left-strip');
+  s.style.width = leftSidebarOpen ? leftW + 'px' : '0px';
+  s.classList.toggle('collapsed', !leftSidebarOpen);
+  strip.classList.toggle('panel-closed', !leftSidebarOpen);
+  strip.querySelector('.strip-ch').innerHTML = leftSidebarOpen ? '&#8249;' : '&#8250;';
+}
+
+function toggleRightSidebar() {
+  rightSidebarOpen = !rightSidebarOpen;
+  const s = document.getElementById('lobby-right');
+  const strip = document.getElementById('right-strip');
+  s.style.width = rightSidebarOpen ? rightW + 'px' : '0px';
+  s.classList.toggle('collapsed', !rightSidebarOpen);
+  strip.classList.toggle('panel-closed', !rightSidebarOpen);
+  strip.querySelector('.strip-ch').innerHTML = rightSidebarOpen ? '&#8250;' : '&#8249;';
+}
+
+function initSidebarResize(stripId, sidebarId, side, toggleFn) {
+  const strip = document.getElementById(stripId);
+  const sidebar = document.getElementById(sidebarId);
+  let startX, startW, moved;
+  strip.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    startX = e.clientX;
+    startW = parseInt(sidebar.style.width) || sidebar.getBoundingClientRect().width;
+    moved = false;
+    sidebar.style.transition = 'none';
+    document.body.style.cursor = 'col-resize';
+    const onMove = (e) => {
+      if (!moved && Math.abs(e.clientX - startX) > 4) moved = true;
+      if (!moved) return;
+      let w = side === 'left' ? startW + (e.clientX - startX) : startW - (e.clientX - startX);
+      w = Math.max(160, Math.min(500, w));
+      if (side === 'left') leftW = w; else rightW = w;
+      sidebar.style.width = w + 'px';
+      sidebar.classList.remove('collapsed');
+      strip.classList.remove('panel-closed');
+      strip.querySelector('.strip-ch').innerHTML = side === 'left' ? '&#8249;' : '&#8250;';
+      if (side === 'left') leftSidebarOpen = true; else rightSidebarOpen = true;
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      sidebar.style.removeProperty('transition');
+      document.body.style.removeProperty('cursor');
+      if (!moved) toggleFn();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+initSidebarResize('left-strip', 'lobby-left', 'left', toggleLeftSidebar);
+initSidebarResize('right-strip', 'lobby-right', 'right', toggleRightSidebar);
+
 // ── Invisible ───────────────────────────────────────────
 function toggleInvisible() {
   isInvisible = !isInvisible;
@@ -977,9 +1056,9 @@ socket.on('lobby-users', (users) => {
       // 💬 DM (purple chat bubble icon)
       el.innerHTML = `<div class="online-dot"></div><span class="lu-name">@${u.username}</span>`
         + (isMe ? '<div class="lu-toggle"></div>' : `<div class="lu-toggle" title="Encrypt lobby messages to @${u.username}" onclick="toggleLobbyUser('${u.username}')"></div>`)
-        + (isMe ? '' : `<button class="call-btn" title="Voice call @${u.username}" onclick="initiateCall('${u.username}','voice')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.73 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.3a2 2 0 0 1 2.11-.45c.83.36 1.7.61 2.6.73A2 2 0 0 1 22 16.92z"/></svg></button>`)
-        + (isMe ? '' : `<button class="video-btn" title="Video call @${u.username}" onclick="initiateCall('${u.username}','video')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>`)
-        + (isMe ? '' : `<button class="dm-btn" title="Direct message @${u.username}" onclick="openDmPanel('${u.username}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>`);
+        + (isMe ? '' : `<button class="call-btn" title="Voice call @${u.username}" onclick="initiateCall('${u.username}','voice')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.73 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.3a2 2 0 0 1 2.11-.45c.83.36 1.7.61 2.6.73A2 2 0 0 1 22 16.92z"/></svg></button>`)
+        + (isMe ? '' : `<button class="video-btn" title="Video call @${u.username}" onclick="initiateCall('${u.username}','video')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>`)
+        + (isMe ? '' : `<button class="dm-btn" title="Direct message @${u.username}" onclick="openDmPanel('${u.username}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>`);
       list.appendChild(el);
     }
     el.className = 'lobby-user' + (isMe ? ' me' : '') + (isSel ? ' selected' : '');
