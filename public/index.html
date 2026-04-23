@@ -84,7 +84,10 @@
     .lobby-user:hover:not(.me){background:var(--surface2);}
     .lobby-user.selected{border-left-color:var(--accent);color:var(--accent);}
     .lobby-user.me{color:var(--green);cursor:default;}
-    .lobby-user .lu-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .lobby-user .lu-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;flex-direction:column;gap:1px;}
+    .lobby-user .lu-handle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .lobby-user .lu-server{font-size:0.58rem;color:var(--muted);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .lobby-user.federated .online-dot{background:var(--purple);}
     .online-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;}
     .lobby-user.me .online-dot{background:var(--accent);}
     .lu-toggle{width:24px;height:13px;border-radius:999px;background:var(--muted);position:relative;transition:background 0.2s;flex-shrink:0;cursor:pointer;}
@@ -658,12 +661,75 @@
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
+// MY_SERVER_DOMAIN is populated from location.host for federated UX.
+const MY_SERVER_DOMAIN = location.host;
+
+// ── Federation: cross-server room socket ────────────────────────────────
+// When we're the callee in a federated call, the room lives on the CALLER's
+// server. We open a temporary Socket.io connection to that server and route
+// all room/WebRTC events through it. The main `socket` keeps handling lobby,
+// DMs, presence, etc. on our home server.
+let activeRoomSocket = null;     // non-null while participating in a federated room
+let activeRoomServer = null;     // domain of the foreign server, for UI
+
+// Room-level events that must fire from whichever socket hosts the room.
+const FEDERATED_ROOM_EVENTS = [
+  'offer', 'answer', 'ice-candidate',
+  'user-joined', 'user-left',
+  'room-users', 'room-users-resync',
+  'room-info', 'room-history',
+  'chat-message',
+  'peer-hung-up',
+  'call-receipt', 'payout-failed',
+  'call-cap-warning', 'call-cap-reached',
+  'credit-warning', 'credit-exhausted', 'credit-topup',
+  'kicked', 'join-rejected'
+];
+
+// Returns the socket to use for room/RTC/call emits.
+function rsock() { return activeRoomSocket || socket; }
+
+function openFederatedRoomSocket(serverDomain, onReady) {
+  if (activeRoomSocket) closeFederatedRoomSocket();
+  const url = location.protocol + '//' + serverDomain;
+  try {
+    activeRoomSocket = io(url, { transports: ['websocket'], withCredentials: false, forceNew: true });
+  } catch(e) {
+    console.error('[federation] Failed to open socket to', url, e);
+    activeRoomSocket = null;
+    return;
+  }
+  activeRoomServer = serverDomain;
+  // Forward all room-level events from the foreign socket to handlers on main socket.
+  for (const ev of FEDERATED_ROOM_EVENTS) {
+    activeRoomSocket.on(ev, (...args) => {
+      const listeners = socket.listeners(ev);
+      listeners.forEach(fn => { try { fn(...args); } catch(e) { console.error('[fwd]', ev, e); } });
+    });
+  }
+  activeRoomSocket.on('connect', () => {
+    addLobbyMsg && addLobbyMsg({ type: 'system', text: `🔗 Connected to ${serverDomain} for this call.` });
+    activeRoomSocket.emit('lobby-join', { username: myUsername, pubKey: myPubKey });
+    if (onReady) onReady();
+  });
+  activeRoomSocket.on('connect_error', (err) => {
+    console.error('[federation] connect_error to', serverDomain, err.message);
+    addLobbyMsg && addLobbyMsg({ type: 'system', text: `⚠ Could not connect to ${serverDomain} — ${err.message}` });
+  });
+}
+
+function closeFederatedRoomSocket() {
+  if (!activeRoomSocket) return;
+  try { activeRoomSocket.disconnect(); } catch(_) {}
+  activeRoomSocket = null;
+  activeRoomServer = null;
+}
 
 // Reconnect handler
 socket.on('connect', () => {
   if (myUsername && myPubKey) {
     socket.emit('lobby-join', { username: myUsername, pubKey: myPubKey });
-    if (currentRoom) {
+    if (currentRoom && !activeRoomSocket) {
       socket.emit('join', { room: currentRoom, username: myUsername, pubKey: myPubKey });
       setTimeout(() => socket.emit('resync'), 1000);
     }
@@ -1034,17 +1100,23 @@ function toggleInvisible() {
 }
 
 // ── Lobby users ─────────────────────────────────────────
+// Track which server each user is on so call/DM flows can label federated peers.
+const userServers = {}; // username → server domain (or our own domain for local users)
+
 socket.on('lobby-users', (users) => {
   const list     = document.getElementById('lobby-users-list');
   const newNames = new Set(users.map(u => u.username));
   list.querySelectorAll('.lobby-user').forEach(el => {
-    const name = el.querySelector('span')?.textContent?.replace('@','');
-    if (name && !newNames.has(name)) { el.remove(); lobbySelected.delete(name); }
+    const name = el.querySelector('.lu-handle')?.textContent?.replace('@','');
+    if (name && !newNames.has(name)) { el.remove(); lobbySelected.delete(name); delete userServers[name]; }
   });
   users.forEach(u => {
     if (u.pubKey) pubKeyCache[u.username] = u.pubKey;
-    const isMe  = u.username === myUsername;
-    const isSel = lobbySelected.has(u.username);
+    if (u.server) userServers[u.username] = u.server;
+    const isMe       = u.username === myUsername;
+    const isSel      = lobbySelected.has(u.username);
+    const isFed      = !!u.server && u.server !== MY_SERVER_DOMAIN;
+    const serverLbl  = isFed ? `<div class="lu-server" title="User is on ${u.server}">${u.server}</div>` : '';
     let el = document.getElementById('lu-' + u.username);
     if (!el) {
       el = document.createElement('div');
@@ -1054,14 +1126,18 @@ socket.on('lobby-users', (users) => {
       // 📞 Voice call (green phone icon)
       // 🎥 Video call (blue camera icon)
       // 💬 DM (purple chat bubble icon)
-      el.innerHTML = `<div class="online-dot"></div><span class="lu-name">@${u.username}</span>`
+      el.innerHTML = `<div class="online-dot"></div><div class="lu-name"><span class="lu-handle">@${u.username}</span>${serverLbl}</div>`
         + (isMe ? '<div class="lu-toggle"></div>' : `<div class="lu-toggle" title="Encrypt lobby messages to @${u.username}" onclick="toggleLobbyUser('${u.username}')"></div>`)
         + (isMe ? '' : `<button class="call-btn" title="Voice call @${u.username}" onclick="initiateCall('${u.username}','voice')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.73 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.3a2 2 0 0 1 2.11-.45c.83.36 1.7.61 2.6.73A2 2 0 0 1 22 16.92z"/></svg></button>`)
         + (isMe ? '' : `<button class="video-btn" title="Video call @${u.username}" onclick="initiateCall('${u.username}','video')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>`)
         + (isMe ? '' : `<button class="dm-btn" title="Direct message @${u.username}" onclick="openDmPanel('${u.username}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>`);
       list.appendChild(el);
+    } else {
+      // Keep the server badge fresh when users move between states
+      const nameEl = el.querySelector('.lu-name');
+      if (nameEl) nameEl.innerHTML = `<span class="lu-handle">@${u.username}</span>${serverLbl}`;
     }
-    el.className = 'lobby-user' + (isMe ? ' me' : '') + (isSel ? ' selected' : '');
+    el.className = 'lobby-user' + (isMe ? ' me' : '') + (isSel ? ' selected' : '') + (isFed ? ' federated' : '');
   });
   updateCreatePanel();
 });
@@ -1819,7 +1895,7 @@ socket.on('call-missed',   ({ callee, caller }) => {
   else if (caller) { hideIncomingOverlay(); addLobbyMsg({type:'system',text:`📵 Missed call from @${caller}.`}); }
 });
 socket.on('call-cancelled', ({ caller }) => { hideIncomingOverlay(); addLobbyMsg({type:'system',text:`📵 @${caller} cancelled the call.`}); });
-socket.on('call-accepted',  ({ callee, caller, roomName }) => {
+socket.on('call-accepted',  ({ callee, caller, roomName, callerServer }) => {
   hideCallingOverlay(); hideIncomingOverlay();
   const roomToJoin    = roomName;
   const savedPending  = pendingCallRoom;
@@ -1828,11 +1904,23 @@ socket.on('call-accepted',  ({ callee, caller, roomName }) => {
   currentCallId       = myCallId;
   // Preserve call type for callee — caller already set it in proceedWithCall
   if (incomingCallData?.callType) pendingCallType = incomingCallData.callType;
+  const incomingServer = callerServer || incomingCallData?.callerServer || null;
   incomingCallData    = null;
   addLobbyMsg({type:'system',text:'✅ Call connected — joining room…'});
   amCreator = (caller === undefined) ? true : (caller === myUsername);
 
   const iAmCaller = (caller === myUsername) || (caller === undefined);
+
+  // Federated: if we're the callee and the caller is on another server, connect
+  // to that server first so WebRTC signalling reaches the hosting server.
+  if (!iAmCaller && incomingServer && incomingServer !== MY_SERVER_DOMAIN) {
+    openFederatedRoomSocket(incomingServer, () => {
+      enterRoom(roomToJoin || savedPending).then(() => {
+        startCallTicker(0, 0, 0, false);
+      });
+    });
+    return;
+  }
 
   enterRoom(roomToJoin || savedPending).then(() => {
     if (iAmCaller && pendingRates) {
@@ -1869,8 +1957,8 @@ function respondCall(accepted) {
     incomingCallData = null;
   }
 }
-socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ringFeePaid }) => {
-  incomingCallData = { caller, callerPubKey, roomName, callType };
+socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ringFeePaid, callerServer }) => {
+  incomingCallData = { caller, callerPubKey, roomName, callType, callerServer: callerServer || null };
   if (callerPubKey) pubKeyCache[caller] = callerPubKey;
   let verifiedText = 'Verifying identity…';
   showIncomingOverlay(caller, verifiedText, roomName);
@@ -1967,8 +2055,8 @@ async function enterRoom(roomName) {
   document.getElementById('popout-btn').style.display     = '';
   document.getElementById('chat-room-name').textContent   = '#' + roomName;
   if (amCreator) document.getElementById('allowlist-panel').style.display = 'flex';
-  socket.emit('join', { room: roomName, username: myUsername, pubKey: myPubKey });
-  setTimeout(() => socket.emit('resync'), 1500);
+  rsock().emit('join', { room: roomName, username: myUsername, pubKey: myPubKey });
+  setTimeout(() => rsock().emit('resync'), 1500);
   addRoomUser(socket.id, myUsername, myPubKey, true);
   addSystemMsg(`You joined #${roomName} as @${myUsername}`);
   resolve();
@@ -1994,13 +2082,21 @@ function leaveRoom() {
   document.getElementById('popout-btn').style.display     = 'none';
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
+  // If we joined a federated room, drop that connection and tell our home
+  // server so it clears our in-call state.
+  if (activeRoomSocket) {
+    socket.emit('federated-call-ended');
+    closeFederatedRoomSocket();
+  }
   showScreen('lobby-screen');
   socket.emit('lobby-join', { username: myUsername, pubKey: myPubKey });
 }
 function popOutRoom() {
-  socket.emit('request-join-token', { roomName: currentRoom }, ({ token, error }) => {
+  rsock().emit('request-join-token', { roomName: currentRoom }, ({ token, error }) => {
     if (error || !token) { alert('Could not generate join token.'); return; }
-    window.open(`${location.origin}?token=${token}`, '_blank');
+    // Pop-outs follow the room — if we're on a federated server, open there.
+    const origin = activeRoomServer ? (location.protocol + '//' + activeRoomServer) : location.origin;
+    window.open(`${origin}?token=${token}`, '_blank');
   });
 }
 window.addEventListener('load', async () => {
@@ -2060,7 +2156,7 @@ function stopCallTicker() {
 function endCall() {
   if (!currentRoom) return;
   if (!confirm('End this call?')) return;
-  socket.emit('call-end', { callId: currentCallId });
+  rsock().emit('call-end', { callId: currentCallId });
   addSystemMsg('You ended the call.');
   stopCallTicker();
   leaveRoom();
@@ -2173,7 +2269,7 @@ function showTopUpPrompt() {
     if (response.success) {
       addSystemMsg(`Top-up payment sent — verifying…`);
       setTimeout(() => {
-        socket.emit('verify-topup-payment', { callId: currentCallId, amount: topupAmt, memo }, ({ verified }) => {
+        rsock().emit('verify-topup-payment', { callId: currentCallId, amount: topupAmt, memo }, ({ verified }) => {
           if (!verified) addSystemMsg('⚠ Top-up verification delayed — funds are in escrow.');
         });
       }, 4000);
@@ -2248,9 +2344,9 @@ function allowlistAdd() {
   const input = document.getElementById('al-add-input');
   const user  = input.value.trim().toLowerCase().replace('@','');
   if (!user) return;
-  socket.emit('allowlist-add', { room: currentRoom, username: user }); input.value = '';
+  rsock().emit('allowlist-add', { room: currentRoom, username: user }); input.value = '';
 }
-function allowlistRemove(username) { socket.emit('allowlist-remove', { room: currentRoom, username }); }
+function allowlistRemove(username) { rsock().emit('allowlist-remove', { room: currentRoom, username }); }
 
 // ── Encryption ──────────────────────────────────────────
 function encryptMsg(plaintext, recipientPubStr) {
@@ -2282,7 +2378,7 @@ async function sendMessage() {
     if (!user) continue;
     try {
       const ciphertext = encryptMsg(text, user.pubKey);
-      socket.emit('chat-message', { room:currentRoom, to:user.username, from:myUsername, ciphertext, broadcast:false, signature, timestamp });
+      rsock().emit('chat-message', { room:currentRoom, to:user.username, from:myUsername, ciphertext, broadcast:false, signature, timestamp });
       names.push('@' + user.username);
     } catch(err) { addSystemMsg(`Encryption error for @${user.username}: ${err.message}`); }
   }
@@ -2294,7 +2390,7 @@ async function sendBroadcast() {
   if (!text || text.length > MAX_MSG) return;
   const timestamp = Date.now().toString();
   const signature = await signMessage(text, timestamp);
-  socket.emit('chat-message', { room:currentRoom, to:'all', from:myUsername, ciphertext:text, broadcast:true, signature, timestamp });
+  rsock().emit('chat-message', { room:currentRoom, to:'all', from:myUsername, ciphertext:text, broadcast:true, signature, timestamp });
   addRoomBubble(myUsername, text, true, 'everyone', true, true);
   clearMsgInput();
 }
@@ -2404,7 +2500,7 @@ socket.on('offer', async ({ from, offer }) => {
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
-  socket.emit('answer', { to: from, answer });
+  rsock().emit('answer', { to: from, answer });
 });
 socket.on('answer',        async ({ from, answer })    => { if (peers[from]) await peers[from].setRemoteDescription(new RTCSessionDescription(answer)); });
 socket.on('ice-candidate', async ({ from, candidate }) => { if (peers[from]&&candidate) try { await peers[from].addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} });
@@ -2412,7 +2508,7 @@ function createPC(peerId) {
   const pc = new RTCPeerConnection(ICE_CFG);
   peers[peerId] = pc;
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  pc.onicecandidate = ({ candidate }) => { if (candidate) socket.emit('ice-candidate', { to: peerId, candidate }); };
+  pc.onicecandidate = ({ candidate }) => { if (candidate) rsock().emit('ice-candidate', { to: peerId, candidate }); };
   pc.ontrack = ({ streams }) => {
     if (!document.getElementById('wrapper-'+peerId)) {
       const wrapper = document.createElement('div');
@@ -2431,7 +2527,7 @@ function createPC(peerId) {
 }
 async function createOffer(peerId) {
   const pc = createPC(peerId); const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer); socket.emit('offer', { to: peerId, offer });
+  await pc.setLocalDescription(offer); rsock().emit('offer', { to: peerId, offer });
 }
 
 </script>
