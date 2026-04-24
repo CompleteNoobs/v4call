@@ -300,13 +300,76 @@
     /* Room */
     #room-screen{flex-direction:row;}
     #video-panel{display:flex;flex-direction:column;background:#080a0d;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;width:280px;}
-    @media(max-width:750px){
-      #room-screen{flex-direction:column;}
-      #video-panel{width:100%;max-height:180px;flex-direction:row;overflow-x:auto;overflow-y:hidden;border-right:none;border-bottom:1px solid var(--border);}
-      #lobby-screen{flex-direction:column;}
-      #lobby-left,#lobby-left.collapsed{width:100%!important;height:auto;max-height:220px;border-right:none;border-bottom:1px solid var(--border);overflow-y:auto;transition:none;}
-      #lobby-right,#lobby-right.collapsed{width:100%!important;height:auto;border-top:1px solid var(--border);overflow-y:auto;transition:none;}
+    /* ── Mobile bottom-tab nav (hidden on desktop) ─────────────── */
+    .mob-nav{display:none;}
+
+    @media (max-width: 720px) {
+      /* Hide the desktop side-strip toggles — bottom tabs replace them */
       .sidebar-strip{display:none;}
+
+      /* Show the bottom-tab nav, fixed full-width above viewport bottom */
+      .mob-nav{display:flex;position:fixed;left:0;right:0;bottom:0;height:54px;
+        background:var(--surface);border-top:1px solid var(--border);z-index:1500;
+        padding-bottom:env(safe-area-inset-bottom);}
+      .mob-nav button{flex:1;background:none;border:none;color:var(--subtext);
+        font-family:'IBM Plex Mono',monospace;font-size:0.62rem;letter-spacing:0.04em;
+        padding:6px 4px;cursor:pointer;display:flex;flex-direction:column;
+        align-items:center;justify-content:center;gap:2px;border-top:2px solid transparent;}
+      .mob-nav button .mob-icon{font-size:1.2rem;line-height:1;}
+      .mob-nav button.active{color:var(--accent);background:var(--surface2);border-top-color:var(--accent);}
+
+      /* Reserve bottom space for the nav bar so content isn't hidden under it */
+      #lobby-screen, #room-screen{padding-bottom:54px;}
+
+      /* ── Lobby: stack panels full-width, only show the active tab ── */
+      #lobby-screen{flex-direction:column;}
+      #lobby-left, #lobby-middle, #lobby-right{
+        width:100%!important;height:auto;flex:1;min-height:0;
+        border-right:none;border-left:none;border-bottom:none;transition:none;
+        display:none!important;
+      }
+      #lobby-screen.mob-tab-users  #lobby-left  {display:flex!important;}
+      #lobby-screen.mob-tab-chat   #lobby-middle{display:flex!important;}
+      #lobby-screen.mob-tab-rooms  #lobby-middle{display:flex!important;}
+      #lobby-screen.mob-tab-rooms  #lobby-right {display:flex!important;flex:0 0 auto;border-top:1px solid var(--border);}
+      /* Force the inner Chat/Rooms tab to match the active mobile tab */
+      #lobby-screen.mob-tab-rooms #tab-chat {display:none!important;}
+      #lobby-screen.mob-tab-rooms #tab-rooms{display:flex!important;}
+      #lobby-screen.mob-tab-chat  #tab-rooms{display:none!important;}
+      #lobby-screen.mob-tab-chat  #tab-chat {display:flex!important;}
+
+      /* Lobby left panel — collapse the .collapsed override on mobile */
+      #lobby-left.collapsed, #lobby-right.collapsed{width:100%!important;}
+
+      /* DM panel and key-bar should never block scrolling on mobile */
+      #lobby-users-list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+      #rooms-list{overflow-y:auto;-webkit-overflow-scrolling:touch;}
+
+      /* ── Room: stack panels full-width, only show the active tab ── */
+      #room-screen{flex-direction:column;}
+      #video-panel, #chat-panel, #users-panel{
+        width:100%!important;height:auto;flex:1;min-height:0;max-height:none!important;
+        border:none!important;overflow-y:auto;display:none!important;
+      }
+      #room-screen.mob-tab-video #video-panel{display:flex!important;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
+      #room-screen.mob-tab-chat  #chat-panel {display:flex!important;}
+      #room-screen.mob-tab-users #users-panel{display:flex!important;}
+
+      /* Stretch local + remote video tiles to fill the column on mobile */
+      #room-screen.mob-tab-video .video-wrapper{width:100%;}
+      #room-screen.mob-tab-video .video-wrapper video{aspect-ratio:16/9;}
+
+      /* Ticker takes too much space on phones — let it wrap */
+      #call-cost-ticker{flex-wrap:wrap;gap:6px;}
+      .ticker-item{flex:0 0 auto;}
+      #end-call-btn{margin-left:auto;}
+
+      /* Header buttons get tighter on phones */
+      #info-link{display:none;}
+      .badge{font-size:0.6rem;}
+
+      /* Modals — make sure they fit on small screens */
+      .payment-box, .receipt-box, .dm-alert-box{max-width:94vw;width:94vw;max-height:88vh;overflow-y:auto;}
     }
     .video-wrapper{position:relative;background:#000;}
     .video-wrapper video{width:100%;display:block;aspect-ratio:4/3;object-fit:cover;}
@@ -523,6 +586,12 @@
       <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);line-height:1.5;">For offline invites — enter the room name. Server checks your allowlist.</div>
     </div>
   </div>
+  <!-- Mobile bottom-tab nav (hidden on desktop via CSS) -->
+  <nav class="mob-nav" id="mob-nav-lobby">
+    <button data-tab="users" onclick="setMobLobbyTab('users')"><span class="mob-icon">👥</span><span>USERS</span></button>
+    <button data-tab="chat"  onclick="setMobLobbyTab('chat')"><span class="mob-icon">💬</span><span>CHAT</span></button>
+    <button data-tab="rooms" onclick="setMobLobbyTab('rooms')"><span class="mob-icon">🏠</span><span>ROOMS</span></button>
+  </nav>
 </div>
 
 <!-- PAYMENT MODAL -->
@@ -654,6 +723,12 @@
       </div>
     </div>
   </div>
+  <!-- Mobile bottom-tab nav (hidden on desktop via CSS) -->
+  <nav class="mob-nav" id="mob-nav-room">
+    <button data-tab="video" onclick="setMobRoomTab('video')"><span class="mob-icon">📹</span><span>VIDEO</span></button>
+    <button data-tab="chat"  onclick="setMobRoomTab('chat')"><span class="mob-icon">💬</span><span>CHAT</span></button>
+    <button data-tab="users" onclick="setMobRoomTab('users')"><span class="mob-icon">👥</span><span>MEMBERS</span></button>
+  </nav>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@hiveio/dhive@1.3.2/dist/dhive.js"></script>
@@ -780,6 +855,39 @@ const ESCROW_ACCOUNT = 'v4call-escrow';
 function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  // Default mobile tabs when entering a screen — only sets if not already chosen.
+  if (id === 'lobby-screen' && !document.getElementById('lobby-screen').className.match(/mob-tab-/)) {
+    setMobLobbyTab('users');
+  }
+  if (id === 'room-screen'  && !document.getElementById('room-screen').className.match(/mob-tab-/)) {
+    setMobRoomTab('video');
+  }
+}
+
+// ── Mobile bottom-tab nav ───────────────────────────────
+// Single-column layout on small screens shows one panel at a time;
+// the bottom-tab nav switches which one is visible. Pure-CSS visibility,
+// these helpers just toggle the parent screen's mob-tab-* class.
+function setMobLobbyTab(tab) {
+  const ls = document.getElementById('lobby-screen');
+  if (!ls) return;
+  ls.classList.remove('mob-tab-users','mob-tab-chat','mob-tab-rooms');
+  ls.classList.add('mob-tab-' + tab);
+  document.querySelectorAll('#mob-nav-lobby button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
+  // Keep the inner Chat/Rooms tab in sync so the visible panel matches the chosen tab.
+  if (tab === 'rooms') switchLobbyTab('rooms');
+  if (tab === 'chat')  switchLobbyTab('chat');
+}
+function setMobRoomTab(tab) {
+  const rs = document.getElementById('room-screen');
+  if (!rs) return;
+  rs.classList.remove('mob-tab-video','mob-tab-chat','mob-tab-users');
+  rs.classList.add('mob-tab-' + tab);
+  document.querySelectorAll('#mob-nav-room button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === tab);
+  });
 }
 
 // ── Login ───────────────────────────────────────────────
@@ -1775,6 +1883,9 @@ async function confirmPayAndCall() {
   const totalStr = total.toFixed(3);
   const memo     = `v4call:pay:${callId}:${callee}`;
   const isToken  = (cur !== 'HBD' && cur !== 'HIVE');
+  // The escrow account from the callee's rates post — for federated calls
+  // this is the peer server's escrow, not our local one.
+  const calleeEscrow = rates.escrow || paymentPending?.escrow || ESCROW_ACCOUNT;
 
   function afterPaymentSuccess() {
     addLobbyMsg({type:'system',text:`✓ Payment of ${totalStr} ${cur} submitted — verifying…`});
@@ -1782,12 +1893,12 @@ async function confirmPayAndCall() {
     paymentPending = null;
 
     setTimeout(() => {
-      socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur }, ({ verified, reason }) => {
+      socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur, escrow: calleeEscrow }, ({ verified, reason }) => {
         if (!verified && total > 0) {
           setTimeout(() => {
-            socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur }, ({ verified: v2 }) => {
+            socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur, escrow: calleeEscrow }, ({ verified: v2 }) => {
               if (v2) {
-                socket.emit('verify-deposit-payment', { callId, callee, totalAmount: total, depositAmount: deposit, connectAmount: connect, memo, currency: cur });
+                socket.emit('verify-deposit-payment', { callId, callee, totalAmount: total, depositAmount: deposit, connectAmount: connect, memo, currency: cur, escrow: calleeEscrow });
                 addLobbyMsg({type:'system',text:`✓ Payment verified — calling @${callee}…`});
                 proceedWithCall(callee, callType, rates, callId);
               } else {
@@ -1798,7 +1909,7 @@ async function confirmPayAndCall() {
           return;
         }
         if (verified || total === 0) {
-          socket.emit('verify-deposit-payment', { callId, callee, totalAmount: total, depositAmount: deposit, connectAmount: connect, memo, currency: cur });
+          socket.emit('verify-deposit-payment', { callId, callee, totalAmount: total, depositAmount: deposit, connectAmount: connect, memo, currency: cur, escrow: calleeEscrow });
           addLobbyMsg({type:'system',text:`✓ Payment verified — calling @${callee}…`});
           proceedWithCall(callee, callType, rates, callId);
         } else {
@@ -1815,7 +1926,7 @@ async function confirmPayAndCall() {
       contractAction: 'transfer',
       contractPayload: {
         symbol:   cur,
-        to:       ESCROW_ACCOUNT,
+        to:       calleeEscrow,
         quantity: totalStr,
         memo
       }
@@ -1841,7 +1952,7 @@ async function confirmPayAndCall() {
     // ── Native HBD/HIVE transfer ──────────────────────────────────────────
     window.hive_keychain.requestTransfer(
       myUsername,
-      ESCROW_ACCOUNT,
+      calleeEscrow,
       totalStr,
       memo,
       cur,
@@ -2260,23 +2371,39 @@ function showTopUpPrompt() {
   const topupAmt = parseFloat(((rate / 60) * topupMin).toFixed(3));
   if (topupAmt < 0.001) return; // free call, no top-up needed
 
-  const msg = `Add ${topupMin} minutes of credit (${topupAmt.toFixed(3)} HBD)?`;
+  // Honour the callee's escrow + currency from their rates post — for federated
+  // calls this points at the peer server's escrow, not ours.
+  const cur          = pendingRates._currency || pendingRates.currency || 'HBD';
+  const calleeEscrow = pendingRates.escrow || ESCROW_ACCOUNT;
+  const isToken      = (cur !== 'HBD' && cur !== 'HIVE');
+
+  const msg = `Add ${topupMin} minutes of credit (${topupAmt.toFixed(3)} ${cur})?`;
   if (!confirm(msg)) return;
   if (!window.hive_keychain) { addSystemMsg('Keychain required for top-up.'); return; }
 
   const memo = `v4call:topup:${currentCallId}`;
-  window.hive_keychain.requestTransfer(myUsername, 'v4call-escrow', topupAmt.toFixed(3), memo, 'HBD', (response) => {
-    if (response.success) {
+  const onResult = (response) => {
+    if (response && response.success) {
       addSystemMsg(`Top-up payment sent — verifying…`);
       setTimeout(() => {
-        rsock().emit('verify-topup-payment', { callId: currentCallId, amount: topupAmt, memo }, ({ verified }) => {
+        rsock().emit('verify-topup-payment', { callId: currentCallId, amount: topupAmt, memo, currency: cur, escrow: calleeEscrow }, ({ verified }) => {
           if (!verified) addSystemMsg('⚠ Top-up verification delayed — funds are in escrow.');
         });
-      }, 4000);
+      }, isToken ? 6000 : 4000);
     } else {
       addSystemMsg('Top-up cancelled.');
     }
-  });
+  };
+
+  if (isToken) {
+    const json = JSON.stringify({
+      contractName:'tokens', contractAction:'transfer',
+      contractPayload:{ symbol: cur, to: calleeEscrow, quantity: topupAmt.toFixed(3), memo }
+    });
+    window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Top up ${topupAmt.toFixed(3)} ${cur}`, onResult);
+  } else {
+    window.hive_keychain.requestTransfer(myUsername, calleeEscrow, topupAmt.toFixed(3), memo, cur, onResult);
+  }
 }
 
 // ── Room users ──────────────────────────────────────────
