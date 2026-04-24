@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>v4call — Server Verify Builder</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#0a0c0f;--surface:#12151a;--surface2:#1a1e26;--border:#222730;
+      --accent:#f5a623;--green:#4ade80;--blue:#38bdf8;--danger:#f87171;
+      --muted:#3d4555;--text:#dde3ed;--subtext:#7a869a;--purple:#a78bfa;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:24px;line-height:1.6;}
+    .subtitle a{color:var(--blue);}
+    .layout{display:grid;grid-template-columns:1fr 460px;gap:20px;max-width:1220px;}
+    @media(max-width:880px){.layout{grid-template-columns:1fr;}}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+    input[readonly]{color:var(--subtext);background:var(--surface2);}
+    .field{margin-bottom:12px;}
+    .row{display:flex;gap:10px;}
+    .row>.field{flex:1;}
+    .field-hint{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--muted);margin-top:4px;line-height:1.5;}
+
+    button.primary{padding:10px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.primary:hover{opacity:0.85;}
+    button.primary:disabled{opacity:0.4;cursor:not-allowed;}
+    button.secondary{padding:8px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+    button.keychain{padding:10px 18px;background:var(--green);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.keychain:hover{opacity:0.85;}
+    button.keychain:disabled{opacity:0.4;cursor:not-allowed;}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+    .warn-box{background:rgba(245,166,35,0.06);border:1px solid rgba(245,166,35,0.25);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--accent);line-height:1.6;margin-bottom:14px;}
+    .err-box{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--danger);line-height:1.6;margin-bottom:14px;display:none;}
+    .ok-box{background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--green);line-height:1.6;margin-bottom:14px;display:none;}
+
+    #output-panel{position:sticky;top:20px;}
+    #output-area{width:100%;height:360px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--green);font-family:'IBM Plex Mono',monospace;font-size:0.72rem;padding:10px;resize:vertical;white-space:pre;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.67rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+    .slabel{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.07em;margin:10px 0 5px;border-left:2px solid var(--border);padding-left:6px;}
+
+    .toggle-row{display:flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--subtext);cursor:pointer;margin-bottom:10px;user-select:none;}
+    .toggle-row input[type=checkbox]{width:auto;accent-color:var(--accent);}
+
+    .wiki-link{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.69rem;color:var(--muted);text-align:center;text-decoration:none;padding:10px;transition:color 0.2s;}
+    .wiki-link:hover{color:var(--accent);}
+
+    code{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent);}
+  </style>
+</head>
+<body>
+
+<h1>v4call — Server Verify Builder</h1>
+<div class="subtitle">
+  Generate a signed <code>.well-known/v4call-server.json</code> proving that a Hive account controls this domain.
+  <br>Signed client-side with your <strong>posting</strong> key via Hive Keychain (preferred) or manual paste — the key never hits the server.
+</div>
+
+<div class="info-box">
+  <strong>What this does:</strong> produces a JSON file signed by your Hive posting key that declares
+  <em>“I, @hiveaccount, run v4call on this-domain.com”</em>. Other federated v4call servers fetch this file
+  to verify you — the signature ties your Hive identity to domain control. Upload the output to
+  <code>/public/.well-known/v4call-server.json</code> on your server. One signing event per config change.
+</div>
+
+<div class="layout">
+
+  <!-- ═══════════════ LEFT: FORM ═══════════════ -->
+  <div id="editor">
+
+    <div class="card">
+      <div class="card-title">IDENTITY</div>
+      <div class="field">
+        <label>HIVE ACCOUNT (the one that signs)</label>
+        <input id="hive-account" type="text" placeholder="hive-book" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The account whose posting key will sign. Typically your server's <code>SERVER_HIVE_ACCOUNT</code>.</div>
+      </div>
+      <div class="field">
+        <label>DOMAIN</label>
+        <input id="domain" type="text" placeholder="hive-book.com" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The public hostname the v4call server is served from (no scheme, no trailing slash).</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">SERVER CONFIG</div>
+      <div class="row">
+        <div class="field">
+          <label>ESCROW ACCOUNT</label>
+          <input id="escrow" type="text" placeholder="hive-book-escrow" autocapitalize="none" spellcheck="false"/>
+          <div class="field-hint">Hive account holding funds in flight. Must match your server's <code>ESCROW_ACCOUNT</code>, and its active key must live on this server.</div>
+        </div>
+        <div class="field">
+          <label>FEE ACCOUNT</label>
+          <input id="fee-account" type="text" placeholder="hive-book" autocapitalize="none" spellcheck="false"/>
+          <div class="field-hint">Where platform fees land. Your <code>SERVER_HIVE_ACCOUNT</code>.</div>
+        </div>
+      </div>
+      <div class="field">
+        <label>FEDERATION WEBSOCKET URL</label>
+        <input id="fed-ws" type="text" placeholder="wss://hive-book.com/federation" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">Where peer servers connect. Usually <code>wss://&lt;domain&gt;/federation</code>.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">TIMING</div>
+      <div class="row">
+        <div class="field">
+          <label>ISSUED (UTC)</label>
+          <input id="issued" type="text" readonly/>
+          <div class="field-hint">Auto-filled with current time when you sign.</div>
+        </div>
+        <div class="field">
+          <label>NONCE</label>
+          <input id="nonce" type="text" readonly/>
+          <div class="field-hint">Auto-generated. <a href="#" onclick="regenNonce();return false;" style="color:var(--blue);">regenerate</a></div>
+        </div>
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" id="use-expiry" onchange="toggleExpiry()"/>
+        Set a hard expiry date (optional — most operators leave this blank)
+      </label>
+      <div class="field" id="expiry-wrap" style="display:none;">
+        <label>EXPIRES (YYYY-MM-DD)</label>
+        <input id="expires" type="date"/>
+        <div class="field-hint">After this date the file is considered invalid by discovering servers. Only worth setting if you have a specific rotation schedule.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">SIGN</div>
+      <div class="err-box" id="err-box"></div>
+      <div class="ok-box"  id="ok-box"></div>
+
+      <div class="slabel">PREFERRED · KEYCHAIN (key never leaves your browser)</div>
+      <button class="keychain" id="sign-keychain-btn" onclick="signWithKeychain()">⚡ Sign with Hive Keychain</button>
+      <div class="keychain-note" id="keychain-status">Detecting Keychain…</div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
+
+      <div class="slabel">FALLBACK · POSTING KEY PASTE</div>
+      <div class="field">
+        <label>POSTING PRIVATE KEY (starts with <code>5J</code>)</label>
+        <input id="posting-key" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint">Only used locally for signing. Never sent anywhere. Stays in memory until you close this tab.</div>
+      </div>
+      <button class="secondary" onclick="signWithKey()">Sign with Posting Key →</button>
+    </div>
+
+    <div class="card">
+      <div class="card-title">VERIFY (round-trip test)</div>
+      <div class="field-hint" style="margin-bottom:10px;">
+        Paste an existing <code>v4call-server.json</code> to test that its signature is valid.
+        Useful to confirm your output before publishing.
+      </div>
+      <textarea id="verify-input" rows="6" placeholder='{"claim":"v4call-server-ownership",…}' style="font-size:0.72rem;resize:vertical;height:100px;"></textarea>
+      <div class="btn-row">
+        <button class="secondary" onclick="runVerify()">Verify signature</button>
+      </div>
+      <div class="keychain-note" id="verify-result"></div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════ RIGHT: OUTPUT ═══════════════ -->
+  <div id="output-panel">
+    <div class="card">
+      <div class="card-title">
+        <span>OUTPUT — v4call-server.json</span>
+        <span style="font-size:0.65rem;color:var(--subtext);" id="output-status">unsigned</span>
+      </div>
+      <textarea id="output-area" readonly placeholder="Fill the form and click a SIGN button — signed JSON will appear here."></textarea>
+      <div class="btn-row">
+        <button class="primary" onclick="copyOutput()">📋 Copy</button>
+        <button class="primary" onclick="downloadOutput()">⬇ Download</button>
+      </div>
+      <div class="warn-box" style="margin-top:12px;">
+        <strong>Upload target:</strong> <code>/public/.well-known/v4call-server.json</code><br>
+        Served at <code>https://&lt;your-domain&gt;/.well-known/v4call-server.json</code>.
+        Rebuild / restart the container for the file to be baked into the Docker image
+        (<code>docker compose down &amp;&amp; docker compose build --no-cache &amp;&amp; docker compose up -d</code>).
+      </div>
+    </div>
+
+    <a href="/info.html" class="wiki-link">← back to v4call info</a>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@hiveio/dhive@1.3.2/dist/dhive.js"></script>
+<script>
+// ── Constants ─────────────────────────────────────────────
+const CLAIM = 'v4call-server-ownership';
+const KEY_TYPE = 'posting';
+
+// ── Utilities ─────────────────────────────────────────────
+function genNonce() {
+  const bytes = new Uint8Array(8);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function regenNonce() { document.getElementById('nonce').value = genNonce(); }
+function nowIso() {
+  const d = new Date();
+  // RFC3339 without millis, in UTC
+  return d.toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+function toggleExpiry() {
+  const on = document.getElementById('use-expiry').checked;
+  document.getElementById('expiry-wrap').style.display = on ? 'block' : 'none';
+  if (!on) document.getElementById('expires').value = '';
+}
+
+// ── Canonical payload ─────────────────────────────────────
+// Order-dependent — verifiers reproduce this exact string.
+function buildPayload(obj) {
+  return [
+    obj.claim,
+    obj.domain,
+    obj.hive_account,
+    obj.escrow,
+    obj.fee_account,
+    obj.federation_ws,
+    obj.issued,
+    obj.expires || '',
+    obj.nonce
+  ].join('|');
+}
+
+function collectFields() {
+  return {
+    claim:         CLAIM,
+    domain:        document.getElementById('domain').value.trim().toLowerCase(),
+    hive_account:  document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, ''),
+    escrow:        document.getElementById('escrow').value.trim().toLowerCase().replace(/^@/, ''),
+    fee_account:   document.getElementById('fee-account').value.trim().toLowerCase().replace(/^@/, ''),
+    federation_ws: document.getElementById('fed-ws').value.trim(),
+    issued:        '',                                     // filled at sign time
+    expires:       document.getElementById('expires').value
+                     ? new Date(document.getElementById('expires').value + 'T23:59:59Z').toISOString().replace(/\.\d{3}Z$/, 'Z')
+                     : '',
+    nonce:         document.getElementById('nonce').value,
+    key_type:      KEY_TYPE,
+    signature:     ''                                      // filled at sign time
+  };
+}
+
+function validate(fields) {
+  const missing = [];
+  if (!fields.domain)        missing.push('domain');
+  if (!fields.hive_account)  missing.push('hive account');
+  if (!fields.escrow)        missing.push('escrow');
+  if (!fields.fee_account)   missing.push('fee account');
+  if (!fields.federation_ws) missing.push('federation WS URL');
+  if (!fields.nonce)         missing.push('nonce');
+  if (missing.length) return `Missing: ${missing.join(', ')}`;
+  if (!/^[a-z0-9.-]+$/.test(fields.domain)) return 'Domain must be lowercase, no scheme or path.';
+  if (!fields.federation_ws.startsWith('ws://') && !fields.federation_ws.startsWith('wss://')) {
+    return 'Federation WS URL must start with ws:// or wss://';
+  }
+  return null;
+}
+
+function showErr(msg)  { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
+function showOk(msg)   { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
+
+// ── Render output ─────────────────────────────────────────
+function renderOutput(obj, label) {
+  document.getElementById('output-area').value = JSON.stringify(obj, null, 2);
+  document.getElementById('output-status').textContent = label;
+  document.getElementById('output-status').style.color = label === 'signed' ? 'var(--green)' : 'var(--subtext)';
+}
+
+// ── Signing — Keychain path ──────────────────────────────
+function signWithKeychain() {
+  showErr(''); showOk('');
+  const fields = collectFields();
+  const err = validate(fields);
+  if (err) return showErr(err);
+
+  if (!window.hive_keychain) {
+    return showErr('Hive Keychain not detected. Install it from https://hive-keychain.com or use the Posting Key paste option below.');
+  }
+
+  fields.issued = nowIso();
+  document.getElementById('issued').value = fields.issued;
+  const payload = buildPayload(fields);
+
+  const btn = document.getElementById('sign-keychain-btn');
+  btn.disabled = true; btn.textContent = 'Opening Keychain…';
+
+  window.hive_keychain.requestSignBuffer(fields.hive_account, payload, 'Posting', (response) => {
+    btn.disabled = false; btn.textContent = '⚡ Sign with Hive Keychain';
+    if (!response.success) {
+      return showErr(`Keychain: ${response.message || 'cancelled'}`);
+    }
+    fields.signature = response.result;
+    showOk(`✓ Signed by @${fields.hive_account} via Keychain.`);
+    renderOutput(fields, 'signed');
+  });
+}
+
+// ── Signing — posting key paste path ─────────────────────
+function signWithKey() {
+  showErr(''); showOk('');
+  const fields = collectFields();
+  const err = validate(fields);
+  if (err) return showErr(err);
+
+  const keyStr = document.getElementById('posting-key').value.trim();
+  if (!keyStr) return showErr('Paste your posting private key first.');
+
+  let priv;
+  try { priv = dhive.PrivateKey.fromString(keyStr); }
+  catch(e) { return showErr(`Invalid posting key: ${e.message}`); }
+
+  fields.issued = nowIso();
+  document.getElementById('issued').value = fields.issued;
+  const payload = buildPayload(fields);
+
+  try {
+    const hash = dhive.cryptoUtils.sha256(payload);
+    fields.signature = priv.sign(hash).toString();
+    showOk(`✓ Signed by @${fields.hive_account} with pasted posting key.`);
+    renderOutput(fields, 'signed');
+  } catch(e) {
+    showErr(`Sign error: ${e.message}`);
+  }
+}
+
+// ── Verify round-trip ─────────────────────────────────────
+async function runVerify() {
+  const resultEl = document.getElementById('verify-result');
+  resultEl.style.color = 'var(--subtext)';
+  resultEl.textContent = 'Verifying…';
+  let obj;
+  try { obj = JSON.parse(document.getElementById('verify-input').value); }
+  catch(e) { resultEl.style.color='var(--danger)'; resultEl.textContent = `✗ JSON parse: ${e.message}`; return; }
+  if (obj.claim !== CLAIM) { resultEl.style.color='var(--danger)'; resultEl.textContent = `✗ Wrong claim (expected "${CLAIM}")`; return; }
+  if (!obj.signature) { resultEl.style.color='var(--danger)'; resultEl.textContent = '✗ No signature field'; return; }
+
+  // Fetch the signer's posting pubkey from Hive
+  let pubKeyStr;
+  try {
+    const res = await fetch('https://api.hive.blog', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ jsonrpc:'2.0', method:'condenser_api.get_accounts', params:[[obj.hive_account]], id:1 })
+    });
+    const data = await res.json();
+    if (!data.result?.length) { resultEl.style.color='var(--danger)'; resultEl.textContent = `✗ Hive account @${obj.hive_account} not found`; return; }
+    pubKeyStr = data.result[0].posting?.key_auths?.[0]?.[0];
+    if (!pubKeyStr) { resultEl.style.color='var(--danger)'; resultEl.textContent = '✗ Could not fetch posting pubkey'; return; }
+  } catch(e) { resultEl.style.color='var(--danger)'; resultEl.textContent = `✗ Hive fetch error: ${e.message}`; return; }
+
+  // Reproduce payload + verify
+  try {
+    const payload = buildPayload(obj);
+    const hash    = dhive.cryptoUtils.sha256(payload);
+    const pubKey  = dhive.PublicKey.fromString(pubKeyStr);
+    const sig     = dhive.Signature.fromString(obj.signature);
+    const ok      = pubKey.verify(hash, sig);
+    if (ok) {
+      const expNote = obj.expires ? ` (expires ${obj.expires})` : ' (no expiry set)';
+      resultEl.style.color = 'var(--green)';
+      resultEl.textContent = `✓ Signature valid. Domain ${obj.domain} is signed by @${obj.hive_account}${expNote}.`;
+    } else {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = '✗ Signature does NOT match the posting key for this account.';
+    }
+  } catch(e) {
+    resultEl.style.color='var(--danger)';
+    resultEl.textContent = `✗ Verify error: ${e.message}`;
+  }
+}
+
+// ── Output helpers ────────────────────────────────────────
+function copyOutput() {
+  const text = document.getElementById('output-area').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    () => { const el = document.getElementById('output-status'); const old = el.textContent; el.textContent = 'copied!'; setTimeout(() => el.textContent = old, 1200); },
+    () => alert('Copy failed — select the text manually.')
+  );
+}
+function downloadOutput() {
+  const text = document.getElementById('output-area').value;
+  if (!text) return;
+  const blob = new Blob([text], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'v4call-server.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ── Initial setup ─────────────────────────────────────────
+document.getElementById('nonce').value  = genNonce();
+document.getElementById('issued').value = nowIso();
+
+// Prefill from URL querystring if provided: ?domain=foo.com&account=bar&escrow=...
+(() => {
+  const p = new URLSearchParams(location.search);
+  const set = (id, key) => { const v = p.get(key); if (v) document.getElementById(id).value = v; };
+  set('domain',       'domain');
+  set('hive-account', 'account');
+  set('escrow',       'escrow');
+  set('fee-account',  'fee');
+  set('fed-ws',       'ws');
+})();
+
+// Detect Keychain presence
+setTimeout(() => {
+  const el = document.getElementById('keychain-status');
+  const btn = document.getElementById('sign-keychain-btn');
+  if (window.hive_keychain) {
+    el.textContent = '✓ Keychain detected — recommended (no key paste needed).';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚠ Keychain not detected. Install from hive-keychain.com, or use the posting-key paste option below.';
+    el.style.color = 'var(--accent)';
+    btn.disabled = true;
+  }
+}, 400);
+</script>
+</body>
+</html>
