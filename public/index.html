@@ -1104,8 +1104,17 @@ async function signMessage(message, timestamp) {
       });
     });
   }
+  if (!myPrivKey) return '';
   try {
-    const hash = await sha256Subtle(payload);
+    // dhive.PrivateKey.sign requires a Buffer; the Uint8Array from
+    // SubtleCrypto isn't one in every browser bundle. Prefer dhive's own
+    // sha256 helper (returns the exact type dhive expects), fall back to
+    // Buffer.from(Uint8Array) for older bundles.
+    const hash = (dhive.cryptoUtils && dhive.cryptoUtils.sha256)
+      ? dhive.cryptoUtils.sha256(payload)
+      : (typeof Buffer !== 'undefined'
+          ? Buffer.from(await sha256Subtle(payload))
+          : await sha256Subtle(payload));
     return myPrivKey.sign(hash).toString();
   } catch(e) { console.error('Sign error:', e.message); return ''; }
 }
