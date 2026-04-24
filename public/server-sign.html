@@ -194,6 +194,10 @@
         Rebuild / restart the container for the file to be baked into the Docker image
         (<code>docker compose down &amp;&amp; docker compose build --no-cache &amp;&amp; docker compose up -d</code>).
       </div>
+      <div id="next-step-box" style="display:none;margin-top:12px;padding:10px 13px;background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:7px;font-size:0.78rem;color:var(--purple);line-height:1.6;">
+        <strong>Next step:</strong> announce this server on Hive so other v4call servers can discover you.
+        <br><a id="next-step-link" href="/server-announce.html" style="display:inline-block;margin-top:6px;color:var(--purple);font-family:'IBM Plex Mono',monospace;font-size:0.74rem;text-decoration:none;padding:6px 10px;border:1px solid rgba(167,139,250,0.3);border-radius:5px;">📡 Announce on Hive →</a>
+      </div>
     </div>
 
     <a href="/info.html" class="wiki-link">← back to v4call info</a>
@@ -283,6 +287,19 @@ function renderOutput(obj, label) {
   document.getElementById('output-area').value = JSON.stringify(obj, null, 2);
   document.getElementById('output-status').textContent = label;
   document.getElementById('output-status').style.color = label === 'signed' ? 'var(--green)' : 'var(--subtext)';
+
+  // Show the "Next step" link with prefilled querystring for server-announce.html
+  if (label === 'signed' && obj.domain && obj.hive_account) {
+    const qs = new URLSearchParams({
+      account:  obj.hive_account,
+      domain:   obj.domain,
+      escrow:   obj.escrow || '',
+      fee:      obj.fee_account || '',
+      ws:       obj.federation_ws || ''
+    }).toString();
+    document.getElementById('next-step-link').href = `/server-announce.html?${qs}`;
+    document.getElementById('next-step-box').style.display = 'block';
+  }
 }
 
 // ── Signing — Keychain path ──────────────────────────────

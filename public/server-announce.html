@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>v4call — Announce Server on Hive</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#0a0c0f;--surface:#12151a;--surface2:#1a1e26;--border:#222730;
+      --accent:#f5a623;--green:#4ade80;--blue:#38bdf8;--danger:#f87171;
+      --muted:#3d4555;--text:#dde3ed;--subtext:#7a869a;--purple:#a78bfa;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:24px;line-height:1.6;}
+    .subtitle a{color:var(--blue);}
+    .layout{display:grid;grid-template-columns:1fr 520px;gap:20px;max-width:1300px;}
+    @media(max-width:880px){.layout{grid-template-columns:1fr;}}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+    input[readonly]{color:var(--subtext);background:var(--surface2);}
+    .field{margin-bottom:12px;}
+    .row{display:flex;gap:10px;}
+    .row>.field{flex:1;}
+    .field-hint{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--muted);margin-top:4px;line-height:1.5;}
+
+    button.primary{padding:10px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.primary:hover{opacity:0.85;}
+    button.primary:disabled{opacity:0.4;cursor:not-allowed;}
+    button.secondary{padding:8px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+    button.post-btn{padding:12px 18px;background:var(--green);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.86rem;transition:opacity 0.2s;}
+    button.post-btn:hover{opacity:0.85;}
+    button.post-btn:disabled{opacity:0.4;cursor:not-allowed;}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+    .warn-box{background:rgba(245,166,35,0.06);border:1px solid rgba(245,166,35,0.25);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--accent);line-height:1.6;margin-bottom:14px;}
+    .err-box{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--danger);line-height:1.6;margin-bottom:14px;display:none;}
+    .ok-box{background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--green);line-height:1.6;margin-bottom:14px;display:none;}
+
+    #output-panel{position:sticky;top:20px;}
+    #preview-area{width:100%;height:380px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;padding:10px;resize:vertical;white-space:pre-wrap;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.67rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+    .slabel{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.07em;margin:10px 0 5px;border-left:2px solid var(--border);padding-left:6px;}
+
+    .wiki-link{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.69rem;color:var(--muted);text-align:center;text-decoration:none;padding:10px;transition:color 0.2s;}
+    .wiki-link:hover{color:var(--accent);}
+    .chain-link{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--purple);text-decoration:none;padding:6px 10px;border:1px solid rgba(167,139,250,0.3);border-radius:5px;transition:background 0.2s;margin-top:6px;}
+    .chain-link:hover{background:rgba(167,139,250,0.1);}
+
+    code{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent);}
+
+    .meta-row{display:flex;gap:14px;font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--subtext);margin-bottom:12px;flex-wrap:wrap;}
+    .meta-row span strong{color:var(--accent);}
+  </style>
+</head>
+<body>
+
+<h1>v4call — Announce Server on Hive</h1>
+<div class="subtitle">
+  Publish a <code>v4call-server</code> post to the Hive blockchain so other v4call servers discover you.
+  <br>The post is pure directory metadata — it points at your <code>/.well-known/v4call-server.json</code> which is where the cryptographic proof lives.
+</div>
+
+<div class="info-box">
+  <strong>Before posting:</strong> make sure your <code>/.well-known/v4call-server.json</code> is already signed and live at the domain below. Discovering servers will fetch that file to verify you — if it isn't there, they'll ignore the announcement.
+  <br><a href="/server-sign.html" class="chain-link">↺ open signer page</a>
+</div>
+
+<div class="layout">
+
+  <!-- ═══════════════ LEFT: FORM ═══════════════ -->
+  <div id="editor">
+
+    <div class="card">
+      <div class="card-title">IDENTITY</div>
+      <div class="field">
+        <label>HIVE ACCOUNT (poster)</label>
+        <input id="hive-account" type="text" placeholder="hive-book" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The Hive account that will author this post. Same as the one in your verify.json (<code>SERVER_HIVE_ACCOUNT</code>).</div>
+      </div>
+      <div class="field">
+        <label>DOMAIN</label>
+        <input id="domain" type="text" placeholder="hive-book.com" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The public hostname. Must match your verify.json's <code>domain</code> field.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">SERVER CONFIG</div>
+      <div class="row">
+        <div class="field">
+          <label>ESCROW ACCOUNT</label>
+          <input id="escrow" type="text" placeholder="v4call-escrow" autocapitalize="none" spellcheck="false"/>
+        </div>
+        <div class="field">
+          <label>FEE ACCOUNT</label>
+          <input id="fee-account" type="text" placeholder="hive-book" autocapitalize="none" spellcheck="false"/>
+        </div>
+      </div>
+      <div class="field">
+        <label>FEDERATION WEBSOCKET URL</label>
+        <input id="fed-ws" type="text" placeholder="wss://hive-book.com/federation" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>VERIFY URL (auto)</label>
+        <input id="verify-url" type="text" readonly placeholder="https://hive-book.com/.well-known/v4call-server.json"/>
+        <div class="field-hint">Auto-computed from DOMAIN. This is where discoverers fetch your signed proof.</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">SOFTWARE</div>
+      <div class="row">
+        <div class="field">
+          <label>SOFTWARE NAME</label>
+          <input id="software" type="text" value="v4call" spellcheck="false"/>
+          <div class="field-hint">Your implementation's name. Forks welcome — e.g. <code>hivebook-calls</code>. Informational.</div>
+        </div>
+        <div class="field">
+          <label>PROTOCOL VERSION</label>
+          <input id="protocol" type="text" value="0.3" spellcheck="false"/>
+          <div class="field-hint">Federation protocol you speak. Should match <code>FEDERATION_VERSION</code> in server.js.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">POST OPTIONS</div>
+      <div class="field">
+        <label>POST TAGS (comma separated)</label>
+        <input id="tags" type="text" value="v4call-server, v4call, hive" spellcheck="false"/>
+        <div class="field-hint">First tag becomes the post category. <code>v4call-server</code> must stay first — that's what discovery searches for.</div>
+      </div>
+      <div class="field">
+        <label>INTRO PARAGRAPH (optional)</label>
+        <textarea id="intro" rows="3" placeholder="Optional human-readable description. Shown above the machine-readable block." spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">PUBLISH</div>
+      <div class="err-box" id="err-box"></div>
+      <div class="ok-box"  id="ok-box"></div>
+
+      <div class="slabel">PREFERRED · KEYCHAIN (posting key stays in your browser)</div>
+      <button class="post-btn" id="post-btn" onclick="postToHive()">📡 Post to Hive</button>
+      <div class="keychain-note" id="keychain-status">Detecting Keychain…</div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
+
+      <div class="slabel">FALLBACK · MANUAL POST</div>
+      <div class="field-hint" style="margin-bottom:10px;">
+        If Keychain isn't available, copy or download the body below and paste it into peakd.com / hive.blog with the title <code>v4call-server</code> and the tags shown above.
+      </div>
+      <div class="btn-row">
+        <button class="secondary" onclick="copyBody()">📋 Copy body</button>
+        <button class="secondary" onclick="downloadBody()">⬇ Download .md</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════ RIGHT: PREVIEW ═══════════════ -->
+  <div id="output-panel">
+    <div class="card">
+      <div class="card-title">
+        <span>POST PREVIEW</span>
+        <span style="font-size:0.65rem;color:var(--subtext);" id="preview-status">unsigned</span>
+      </div>
+      <div class="meta-row">
+        <span>title: <strong id="meta-title">v4call-server</strong></span>
+        <span>permlink: <strong id="meta-permlink">—</strong></span>
+      </div>
+      <textarea id="preview-area" readonly placeholder="Fill the form — a live preview of the Hive post body will appear here."></textarea>
+      <div class="warn-box" style="margin-top:12px;">
+        <strong>Note:</strong> posting to Hive costs Resource Credits. Make sure <code>@your-account</code> has some Hive Power staked (or delegated).
+        A new post consumes roughly the same RC as a comment — usually fine if the account has 10+ HP.
+      </div>
+    </div>
+
+    <a href="/info.html" class="wiki-link">← back to v4call info</a>
+  </div>
+
+</div>
+
+<script>
+// ── Constants ─────────────────────────────────────────────
+const FIXED_TITLE = 'v4call-server';
+const APP_NAME    = 'v4call-announce/0.3';
+
+// ── Utilities ─────────────────────────────────────────────
+function nowIsoUtc() {
+  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
+function permlinkFor(tsMs) {
+  // Timestamp-based permlink like rate-editor does — lets operators re-post
+  // without editing (which costs RC and complicates discovery).
+  return `v4call-server-${Math.floor(tsMs / 1000)}`;
+}
+function showErr(msg) { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
+function showOk(msg)  { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
+
+// ── Collect + validate ───────────────────────────────────
+function collect() {
+  const domain = document.getElementById('domain').value.trim().toLowerCase();
+  return {
+    account:       document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, ''),
+    domain:        domain,
+    escrow:        document.getElementById('escrow').value.trim().toLowerCase().replace(/^@/, ''),
+    fee_account:   document.getElementById('fee-account').value.trim().toLowerCase().replace(/^@/, ''),
+    fed_ws:        document.getElementById('fed-ws').value.trim(),
+    verify_url:    domain ? `https://${domain}/.well-known/v4call-server.json` : '',
+    software:      document.getElementById('software').value.trim() || 'v4call',
+    protocol:      document.getElementById('protocol').value.trim() || '0.3',
+    intro:         document.getElementById('intro').value.trim(),
+    tags:          document.getElementById('tags').value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+  };
+}
+
+function validate(f) {
+  const missing = [];
+  if (!f.account)     missing.push('hive account');
+  if (!f.domain)      missing.push('domain');
+  if (!f.escrow)      missing.push('escrow');
+  if (!f.fee_account) missing.push('fee account');
+  if (!f.fed_ws)      missing.push('federation WS');
+  if (f.tags.length === 0) missing.push('at least one tag');
+  if (missing.length) return `Missing: ${missing.join(', ')}`;
+  if (!/^[a-z0-9.-]+$/.test(f.domain)) return 'Domain must be lowercase, no scheme or path.';
+  if (!f.fed_ws.startsWith('ws://') && !f.fed_ws.startsWith('wss://')) return 'Federation WS URL must start with ws:// or wss://';
+  if (f.tags[0] !== 'v4call-server') return 'First tag must be "v4call-server" — that\'s what discovery searches for.';
+  return null;
+}
+
+// ── Post body builder ────────────────────────────────────
+function buildBody(f, issued) {
+  const intro = f.intro || `This post announces a v4call federation server operated by @${f.account} at **${f.domain}**. v4call is a decentralised paid video/voice/text communication platform built on the Hive blockchain. Users set their own rates, callers pay with HBD or custom Hive-Engine tokens, and unused credit is refunded automatically.`;
+
+  const block = [
+    '[V4CALL-SERVER-V1]',
+    `DOMAIN: ${f.domain}`,
+    `HIVE-ACCOUNT: ${f.account}`,
+    `ESCROW: ${f.escrow}`,
+    `FEE-ACCOUNT: ${f.fee_account}`,
+    `FEDERATION-WS: ${f.fed_ws}`,
+    `VERIFY-URL: ${f.verify_url}`,
+    `SOFTWARE: ${f.software}`,
+    `PROTOCOL: ${f.protocol}`,
+    `DECLARED: ${issued}`,
+    '[/V4CALL-SERVER-V1]'
+  ].join('\n');
+
+  // Four-space-indented = markdown code block, safe inside a JS template.
+  const blockIndented = block.split('\n').map(l => '    ' + l).join('\n');
+
+  return [
+    `# v4call server — ${f.domain}`,
+    '',
+    intro,
+    '',
+    `**Federation WebSocket**: \`${f.fed_ws}\``,
+    `**Verify URL**: ${f.verify_url}`,
+    '',
+    `[Learn more about v4call →](https://completenoobs.com/index.php/V4call)`,
+    '',
+    '---',
+    '',
+    '## Federation directory entry (machine-readable)',
+    '',
+    blockIndented,
+    '',
+    '---',
+    '',
+    '*Discovering v4call servers parse the block above and verify ownership by fetching the signed Verify URL. This post contains no private keys or secrets — only public directory metadata.*',
+    '',
+    `*Posted via v4call server-announce tool · protocol ${f.protocol}*`
+  ].join('\n');
+}
+
+function updatePreview() {
+  const f = collect();
+  document.getElementById('verify-url').value = f.verify_url;
+  const issued    = nowIsoUtc();
+  const body      = buildBody(f, issued);
+  const permlink  = permlinkFor(Date.now());
+  document.getElementById('preview-area').value = body;
+  document.getElementById('meta-title').textContent    = FIXED_TITLE;
+  document.getElementById('meta-permlink').textContent = permlink;
+}
+
+// ── Keychain post ─────────────────────────────────────────
+function postToHive() {
+  showErr(''); showOk('');
+  const f = collect();
+  const err = validate(f);
+  if (err) return showErr(err);
+
+  if (!window.hive_keychain) {
+    return showErr('Hive Keychain not detected. Install from https://hive-keychain.com or use Copy/Download below and post manually.');
+  }
+
+  const issued    = nowIsoUtc();
+  const body      = buildBody(f, issued);
+  const permlink  = permlinkFor(Date.now());
+  const parentTag = f.tags[0]; // "v4call-server"
+
+  const jsonMeta = {
+    tags:   f.tags,
+    app:    APP_NAME,
+    format: 'markdown',
+    v4call: {
+      protocol:      f.protocol,
+      software:      f.software,
+      domain:        f.domain,
+      verify_url:    f.verify_url,
+      federation_ws: f.fed_ws,
+      escrow:        f.escrow,
+      fee_account:   f.fee_account,
+      declared:      issued
+    }
+  };
+
+  const btn = document.getElementById('post-btn');
+  btn.disabled = true; btn.textContent = 'Opening Keychain…';
+
+  // Keychain signature: requestPost(account, title, body, parentPerm, parentUser, jsonMeta, permlink, commentOptions, cb)
+  window.hive_keychain.requestPost(
+    f.account,
+    FIXED_TITLE,
+    body,
+    parentTag,        // parent_permlink = category tag
+    '',               // parent_author (empty = root post)
+    JSON.stringify(jsonMeta),
+    permlink,
+    null,             // comment_options — Hive defaults
+    (response) => {
+      btn.disabled = false; btn.textContent = '📡 Post to Hive';
+      if (!response.success) {
+        return showErr(`Keychain: ${response.message || 'cancelled'}`);
+      }
+      showOk(`✓ Posted to Hive as @${f.account}/${permlink} — transaction ${response.result?.id || 'broadcast'}.`);
+      document.getElementById('preview-status').textContent = 'posted';
+      document.getElementById('preview-status').style.color = 'var(--green)';
+    }
+  );
+}
+
+// ── Copy / Download fallback ─────────────────────────────
+function copyBody() {
+  const text = document.getElementById('preview-area').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    () => { const el=document.getElementById('preview-status'); const old=el.textContent; el.textContent='copied!'; setTimeout(()=>el.textContent=old,1200); },
+    () => alert('Copy failed — select the text manually.')
+  );
+}
+function downloadBody() {
+  const text = document.getElementById('preview-area').value;
+  if (!text) return;
+  const blob = new Blob([text], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'v4call-server-post.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ── URL querystring prefill (chain from server-sign.html) ─
+(() => {
+  const p = new URLSearchParams(location.search);
+  const set = (id, key) => { const v = p.get(key); if (v) document.getElementById(id).value = v; };
+  set('hive-account', 'account');
+  set('domain',       'domain');
+  set('escrow',       'escrow');
+  set('fee-account',  'fee');
+  set('fed-ws',       'ws');
+  set('software',     'software');
+  set('protocol',     'protocol');
+})();
+
+// ── Live preview as the user types ────────────────────────
+['hive-account','domain','escrow','fee-account','fed-ws','software','protocol','intro','tags'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updatePreview);
+});
+updatePreview();
+
+// ── Keychain presence indicator ───────────────────────────
+setTimeout(() => {
+  const el  = document.getElementById('keychain-status');
+  const btn = document.getElementById('post-btn');
+  if (window.hive_keychain) {
+    el.textContent = '✓ Keychain detected — ready to post.';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚠ Keychain not detected. Install from hive-keychain.com, or use Copy/Download below.';
+    el.style.color = 'var(--accent)';
+    btn.disabled = true;
+  }
+}, 400);
+</script>
+</body>
+</html>
