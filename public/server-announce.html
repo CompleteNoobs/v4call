@@ -342,7 +342,7 @@ function postToHive() {
     '',               // parent_author (empty = root post)
     JSON.stringify(jsonMeta),
     permlink,
-    null,             // comment_options — Hive defaults
+    '',               // comment_options — Hive defaults (empty string, not null — Keychain validates string)
     (response) => {
       btn.disabled = false; btn.textContent = '📡 Post to Hive';
       if (!response.success) {

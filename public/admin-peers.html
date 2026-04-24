@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>v4call — Peer Admin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#0a0c0f;--surface:#12151a;--surface2:#1a1e26;--border:#222730;
+      --accent:#f5a623;--green:#4ade80;--blue:#38bdf8;--danger:#f87171;
+      --muted:#3d4555;--text:#dde3ed;--subtext:#7a869a;--purple:#a78bfa;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:20px;line-height:1.6;}
+    .subtitle a{color:var(--blue);}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;}
+
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input{padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.8rem;outline:none;}
+    input:focus{border-color:var(--accent);}
+
+    button{padding:7px 12px;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;border:none;border-radius:5px;cursor:pointer;transition:opacity 0.2s;}
+    button:disabled{opacity:0.4;cursor:not-allowed;}
+    button.primary{background:var(--accent);color:#0a0c0f;}
+    button.primary:hover{opacity:0.85;}
+    button.approve{background:var(--green);color:#0a0c0f;}
+    button.approve:hover{opacity:0.85;}
+    button.revoke{background:transparent;color:var(--danger);border:1px solid rgba(248,113,113,0.35);}
+    button.revoke:hover{background:rgba(248,113,113,0.1);}
+    button.secondary{background:transparent;color:var(--subtext);border:1px solid var(--border);}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+
+    #key-row{display:flex;gap:8px;align-items:center;margin-bottom:12px;}
+    #key-row input{flex:1;}
+
+    .status-chip{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;padding:2px 7px;border-radius:999px;display:inline-block;font-weight:600;letter-spacing:0.04em;}
+    .chip-ok{background:rgba(74,222,128,0.15);color:var(--green);}
+    .chip-bad{background:rgba(248,113,113,0.15);color:var(--danger);}
+    .chip-warn{background:rgba(245,166,35,0.15);color:var(--accent);}
+    .chip-neutral{background:rgba(122,134,154,0.15);color:var(--subtext);}
+    .chip-info{background:rgba(56,189,248,0.12);color:var(--blue);}
+
+    .peer-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;}
+    .peer-header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;flex-wrap:wrap;}
+    .peer-domain{font-family:'IBM Plex Mono',monospace;font-size:0.88rem;color:var(--text);font-weight:600;}
+    .peer-status{display:flex;gap:5px;flex-wrap:wrap;}
+    .peer-meta{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);line-height:1.6;display:grid;grid-template-columns:120px 1fr;gap:2px 10px;}
+    .peer-meta .k{color:var(--muted);}
+    .peer-meta .v{color:var(--text);word-break:break-all;}
+    .peer-actions{margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;}
+
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+    .err-box{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--danger);line-height:1.6;margin-bottom:14px;display:none;}
+    .ok-box{background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--green);line-height:1.6;margin-bottom:14px;display:none;}
+
+    .empty{font-family:'IBM Plex Mono',monospace;font-size:0.8rem;color:var(--subtext);text-align:center;padding:18px;}
+    code{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent);}
+
+    .wiki-link{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.69rem;color:var(--muted);text-align:center;text-decoration:none;padding:10px;transition:color 0.2s;}
+    .wiki-link:hover{color:var(--accent);}
+
+    .own-server{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--muted);margin-top:2px;}
+    .own-server strong{color:var(--accent);}
+  </style>
+</head>
+<body>
+
+<h1>v4call — Peer Admin</h1>
+<div class="subtitle">
+  Review discovered v4call servers on Hive, approve or revoke federation.
+  Needs your <code>ADMIN_KEY</code> (set in <code>.env</code>) to talk to <code>/admin/peers/*</code> endpoints.
+  <div class="own-server" id="own-server">this server: loading…</div>
+</div>
+
+<div class="info-box">
+  <strong>How approval works:</strong> verified peers are ignored unless you explicitly approve them here.
+  Approval persists across restarts (stored in <code>/app/logs/approved-peers.json</code>).
+  Peers listed in your <code>FEDERATION_PEERS</code> env are auto-approved on startup.
+</div>
+
+<div class="card">
+  <div class="card-title">
+    <span>ADMIN KEY</span>
+  </div>
+  <div id="key-row">
+    <input id="admin-key" type="password" placeholder="ADMIN_KEY from .env" autocomplete="off"/>
+    <button class="primary" onclick="refresh()">🔄 Load / Refresh</button>
+    <button class="secondary" onclick="rescan()">🔍 Rescan Hive now</button>
+  </div>
+  <div class="err-box" id="err-box"></div>
+  <div class="ok-box"  id="ok-box"></div>
+</div>
+
+<div class="card">
+  <div class="card-title"><span>DISCOVERED PEERS</span><span id="summary" style="font-size:0.65rem;color:var(--subtext);"></span></div>
+  <div id="peers-list">
+    <div class="empty">enter your admin key and click “Load / Refresh”</div>
+  </div>
+</div>
+
+<a href="/info.html" class="wiki-link">← back to v4call info</a>
+
+<script>
+const KEY_STORAGE = 'v4call_admin_key';
+
+function showErr(msg) { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
+function showOk(msg)  { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
+
+function getKey() {
+  const k = document.getElementById('admin-key').value.trim();
+  if (k) sessionStorage.setItem(KEY_STORAGE, k);
+  return k;
+}
+
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function chip(cls, text) { return `<span class="status-chip ${cls}">${esc(text)}</span>`; }
+
+function renderPeers(data) {
+  document.getElementById('own-server').innerHTML = `this server: <strong>${esc(data.our_domain)}</strong>`;
+  const list = document.getElementById('peers-list');
+  const summary = document.getElementById('summary');
+  if (!data.discovered || data.discovered.length === 0) {
+    list.innerHTML = '<div class="empty">No v4call-server posts discovered yet. Scanner runs every 2h — try <strong>Rescan Hive now</strong>.</div>';
+    summary.textContent = '';
+    return;
+  }
+  summary.textContent = `${data.discovered.length} discovered · ${data.discovered.filter(p=>p.verified).length} verified · ${data.discovered.filter(p=>p.approved).length} approved`;
+  const html = data.discovered.map(p => {
+    const chips = [];
+    if (p.verified)           chips.push(chip('chip-ok',  '✓ verified'));
+    else                      chips.push(chip('chip-bad', '✗ unverified'));
+    if (p.approved)           chips.push(chip('chip-info','approved'));
+    else                      chips.push(chip('chip-neutral','unapproved'));
+    if (p.connected)          chips.push(chip('chip-ok',  '● connected'));
+    else if (p.approved)      chips.push(chip('chip-warn','○ not connected'));
+    const actions = [];
+    if (!p.approved && p.verified) actions.push(`<button class="approve" onclick="approve('${esc(p.domain)}')">✓ Approve</button>`);
+    if (p.approved)                actions.push(`<button class="revoke"  onclick="revoke('${esc(p.domain)}')">✗ Revoke</button>`);
+    actions.push(`<a href="${esc(p.federation_ws)}" style="display:none;"></a>`);
+    actions.push(`<button class="secondary" onclick="openVerify('${esc(p.domain)}')">view verify.json</button>`);
+    actions.push(`<button class="secondary" onclick="openPost('${esc(p.post_author)}','${esc(p.post_permlink)}')">view post</button>`);
+
+    const reason = p.verify_reason ? `<div class="peer-meta" style="margin-top:4px;"><span class="k" style="color:var(--danger);">reason</span><span class="v" style="color:var(--danger);">${esc(p.verify_reason)}</span></div>` : '';
+    return `
+      <div class="peer-card">
+        <div class="peer-header">
+          <div>
+            <div class="peer-domain">${esc(p.domain)}</div>
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);">signed by @${esc(p.hive_account)}</div>
+          </div>
+          <div class="peer-status">${chips.join('')}</div>
+        </div>
+        <div class="peer-meta">
+          <span class="k">escrow</span><span class="v">@${esc(p.escrow)}</span>
+          <span class="k">fee account</span><span class="v">@${esc(p.fee_account)}</span>
+          <span class="k">federation ws</span><span class="v">${esc(p.federation_ws)}</span>
+          <span class="k">software</span><span class="v">${esc(p.software)} / proto ${esc(p.protocol)}</span>
+          <span class="k">post age</span><span class="v">${p.post_age_h != null ? p.post_age_h + ' h' : '—'}</span>
+          <span class="k">declared</span><span class="v">${esc(p.declared)}</span>
+        </div>
+        ${reason}
+        <div class="peer-actions">${actions.join('')}</div>
+      </div>
+    `;
+  }).join('');
+  list.innerHTML = html;
+}
+
+async function refresh() {
+  showErr(''); showOk('');
+  const key = getKey();
+  if (!key) return showErr('Enter your ADMIN_KEY first.');
+  try {
+    const r = await fetch(`/admin/peers?key=${encodeURIComponent(key)}`);
+    if (r.status === 403) return showErr('Forbidden — wrong ADMIN_KEY?');
+    if (!r.ok) return showErr(`HTTP ${r.status}`);
+    const data = await r.json();
+    renderPeers(data);
+  } catch(e) { showErr(`Load failed: ${e.message}`); }
+}
+
+async function rescan() {
+  showErr(''); showOk('');
+  const key = getKey();
+  if (!key) return showErr('Enter your ADMIN_KEY first.');
+  try {
+    const r = await fetch(`/admin/peers/rescan?key=${encodeURIComponent(key)}`, { method: 'POST' });
+    if (r.status === 403) return showErr('Forbidden — wrong ADMIN_KEY?');
+    if (!r.ok) return showErr(`HTTP ${r.status}`);
+    showOk('Rescan kicked off — refreshing in 3s…');
+    setTimeout(refresh, 3000);
+  } catch(e) { showErr(`Rescan failed: ${e.message}`); }
+}
+
+async function approve(domain) {
+  showErr(''); showOk('');
+  const key = getKey();
+  if (!key) return showErr('Enter your ADMIN_KEY first.');
+  try {
+    const r = await fetch(`/admin/peers/approve?key=${encodeURIComponent(key)}&domain=${encodeURIComponent(domain)}`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) return showErr(`Approve failed: ${data.error || r.status}`);
+    showOk(`✓ Approved ${domain} — ${data.note}`);
+    refresh();
+  } catch(e) { showErr(`Approve failed: ${e.message}`); }
+}
+
+async function revoke(domain) {
+  if (!confirm(`Revoke federation with ${domain}?\nAny active connection will be closed.`)) return;
+  showErr(''); showOk('');
+  const key = getKey();
+  if (!key) return showErr('Enter your ADMIN_KEY first.');
+  try {
+    const r = await fetch(`/admin/peers/revoke?key=${encodeURIComponent(key)}&domain=${encodeURIComponent(domain)}`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) return showErr(`Revoke failed: ${data.error || r.status}`);
+    showOk(`✗ Revoked ${domain}`);
+    refresh();
+  } catch(e) { showErr(`Revoke failed: ${e.message}`); }
+}
+
+function openVerify(domain) { window.open(`https://${domain}/.well-known/v4call-server.json`, '_blank'); }
+function openPost(author, permlink) { window.open(`https://peakd.com/@${author}/${permlink}`, '_blank'); }
+
+// Restore key if previously entered this session
+const saved = sessionStorage.getItem(KEY_STORAGE);
+if (saved) document.getElementById('admin-key').value = saved;
+document.getElementById('admin-key').addEventListener('keydown', e => { if (e.key === 'Enter') refresh(); });
+</script>
+</body>
+</html>
