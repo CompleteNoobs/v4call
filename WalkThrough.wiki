@@ -1,0 +1,1225 @@
+{{:LICENCE_HEADER_MIT}}
+
+
+= v4call — Deploy Your Own Server on Ubuntu 24.04 with Docker =
+
+From CompleteNoobs
+
+This guide walks through deploying your own v4call server from scratch on a fresh Vultr Ubuntu 24.04 VPS — from first login to a working HTTPS video/audio calling service on your own domain, optionally federated with other v4call servers.
+
+v4call is an open-source, decentralised video and audio calling platform that uses Hive blockchain for identity and HBD micropayments. It supports custom Hive-Engine token payments, encrypted direct messages with persistent chat history, voice-only and video calls, and a free-market platform fee system. Fork it, run your own server, keep all your platform fees, join the federation.
+
+'''Source code''': [https://github.com/CompleteNoobs/v4call https://github.com/CompleteNoobs/v4call]
+
+'''End result''': A working v4call server at <code>https://call.yourdomain.com</code> that you can log into with a Hive account, optionally connected to other v4call servers via federation.
+
+== Contents ==
+
+* [[#What_You_Need|1 What You Need]]
+* [[#Step_1:_Create_Your_Vultr_VPS|2 Step 1: Create Your Vultr VPS]]
+* [[#Step_2:_Point_Your_Domain_at_the_VPS|3 Step 2: Point Your Domain at the VPS]]
+* [[#Step_3:_Log_into_Your_VPS|4 Step 3: Log into Your VPS]]
+* [[#Step_4:_Update_the_Server|5 Step 4: Update the Server]]
+* [[#Step_5:_Install_Docker|6 Step 5: Install Docker]]
+* [[#Step_6:_Install_Git|7 Step 6: Install Git]]
+* [[#Step_7:_Fork_and_Clone_the_Code|8 Step 7: Fork and Clone the Code]]
+* [[#Step_8:_Configure_Your_Server_(.env_file)|9 Step 8: Configure Your Server (.env file)]]
+* [[#Step_9:_Configure_Nginx_—_HTTP_Only_First|10 Step 9: Configure Nginx — HTTP Only First]]
+* [[#Step_10:_Create_Data_Directories_and_Fix_Permissions|11 Step 10: Create Data Directories and Fix Permissions]]
+* [[#Step_11:_Build_and_Start_the_Server|12 Step 11: Build and Start the Server]]
+* [[#Step_12:_Get_Your_SSL_Certificate|13 Step 12: Get Your SSL Certificate]]
+* [[#Step_13:_Enable_HTTPS_in_Nginx|14 Step 13: Enable HTTPS in Nginx]]
+* [[#Step_14:_Set_Up_SSL_Auto-Renewal|15 Step 14: Set Up SSL Auto-Renewal]]
+* [[#Step_15:_Test_Everything_is_Working|16 Step 15: Test Everything is Working]]
+* [[#Step_16:_Set_Up_Your_Call_Rates_on_Hive|17 Step 16: Set Up Your Call Rates on Hive]]
+* [[#Step_17:_Federation_Setup_(Optional)|18 Step 17: Federation Setup (Optional)]]
+* [[#Feature_Guide:_What_Your_Server_Can_Do|19 Feature Guide: What Your Server Can Do]]
+* [[#Admin_Configuration_Reference|20 Admin Configuration Reference]]
+* [[#Updating_Your_Server|21 Updating Your Server]]
+* [[#Common_Problems_and_Fixes|22 Common Problems and Fixes]]
+* [[#Quick_Reference|23 Quick Reference]]
+
+== What You Need ==
+
+Before starting, make sure you have the following:
+
+* '''A Vultr account''' — sign up at [https://vultr.com vultr.com] - please use are [https://www.vultr.com/?ref=7704739 Vultr Referral link] to help us cover server costs.
+* '''A domain name''' with DNS access — e.g. <code>call.yourdomain.com</code>
+* '''Two Hive accounts''' — one for your server identity (receives platform fees), one for escrow (holds caller funds during calls). Create free accounts at [https://signup.hive.io signup.hive.io]
+* '''Hive Keychain browser extension''' — for login and payments. Install from [https://hive-keychain.com hive-keychain.com]
+* '''A GitHub account''' — free at [https://github.com github.com]. You will fork the v4call project.
+* '''A terminal''' — Mac: Terminal app. Windows: PowerShell or PuTTY.
+
+You do not need to know how to code. Every command can be copy-pasted exactly as shown.
+
+== Step 1: Create Your Vultr VPS ==
+
+# Log into [https://my.vultr.com my.vultr.com]
+# Click '''Deploy New Server'''
+# Choose '''Cloud Compute — Shared CPU'''
+# Choose a location close to you
+# Choose '''Ubuntu 24.04 LTS x64'''
+# Choose the '''$6/month''' plan (1 CPU, 1GB RAM)
+# Set Server Hostname to something like <code>v4call-server</code>
+# Click '''Deploy Now'''
+
+Wait ~60 seconds for it to start. Click the server to find:
+* '''IP Address''' — looks like <code>123.456.789.012</code> — write it down
+* '''Password''' — click the eye icon — write it down
+
+== Step 2: Point Your Domain at the VPS ==
+
+Log into your DNS provider and add an A record:
+
+{| class="wikitable"
+|-
+! Field !! Value
+|-
+| Type || A
+|-
+| Name || <code>call</code> (or <code>@</code> for root domain)
+|-
+| Value || Your VPS IP address
+|-
+| TTL || 300
+|}
+
+DNS takes a few minutes to propagate. Check from your computer later:
+
+ nslookup call.yourdomain.com
+
+Must show your VPS IP before Step 12. You can continue with all other steps while waiting.
+
+== Step 3: Log into Your VPS ==
+
+Open a terminal on your computer:
+
+ ssh root@YOUR_SERVER_IP
+* NOTE: you can also do <code>root@your-domain.com</code>
+
+Type <code>yes</code> when asked about the fingerprint, then paste the password from Vultr (right-click to paste in most terminals).
+
+When you see <code>root@v4call-server:~#</code> you are in.
+
+== Step 4: Update the Server ==
+
+ apt update && apt upgrade -y
+
+Wait for it to complete (1-2 minutes).
+
+== Step 5: Install Docker ==
+
+Install Docker using the official installer script:
+
+ curl -fsSL https://get.docker.com | sh
+
+Verify:
+
+ docker --version
+
+Should show <code>Docker version 26.x.x</code> or similar.
+
+Install Docker Compose plugin:
+
+ apt install -y docker-compose-plugin
+
+Verify:
+
+ docker compose version
+
+Should show <code>Docker Compose version v2.x.x</code>.
+
+== Step 6: Install Git ==
+
+ apt install -y git
+ git --version
+
+== Step 7: Fork and Clone the Code ==
+
+=== Clone onto your VPS ===
+
+ cd /opt
+ git clone https://github.com/CompleteNoobs/v4call.git
+ cd v4call
+
+==== Fork on GitHub - Optional ====
+
+Forking gives you your own copy of the code that you can customise — change the name, branding, fees — without affecting the original project.
+
+# Go to [https://github.com/CompleteNoobs/v4call https://github.com/CompleteNoobs/v4call]
+# Click the '''Fork''' button (top right of the page)
+# Select your GitHub account as the destination
+# Click '''Create fork'''
+
+You now have your own copy at <code>https://github.com/YOURUSERNAME/v4call</code>
+
+==== Clone onto your VPS ====
+
+ cd /opt
+ git clone https://github.com/YOURUSERNAME/v4call.git
+ cd v4call
+
+List the files to confirm:
+
+ ls
+
+You should see: <code>server.js  public/  Dockerfile  docker-compose.yml  nginx/  package.json  .env.example  README.md</code>
+
+'''Worth knowing about the <code>public/</code> folder''' — alongside the main UI (<code>index.html</code>) you'll find:
+
+* <code>rate-editor.html</code> — generates your rates post for Hive
+* <code>server-sign.html</code> — generates the signed federation verify file (used in [[#Step_17:_Federation_Setup_(Optional)|Federation Setup]] below)
+* <code>server-announce.html</code> — publishes your server to the on-chain federation directory
+* <code>admin-peers.html</code> — manages your federation peer list
+* <code>info.html</code> — public landing page for visitors who haven't logged in
+* <code>.well-known/v4call-server.json</code> — placeholder; each operator overwrites this with their own signed file in [[#Step_17:_Federation_Setup_(Optional)|Federation Setup]]
+
+== Step 8: Configure Your Server (.env file) ==
+
+All settings live in a single <code>.env</code> file. Copy the template:
+
+ cp .env.example .env
+ nano .env
+
+Fill in your values:
+
+<pre>
+# ── Server Identity ──────────────────────────────────────
+SERVER_NAME=yourcallapp
+SERVER_DOMAIN=call.yourdomain.com
+SERVER_HIVE_ACCOUNT=yourhiveaccount
+ESCROW_ACCOUNT=yourescrowaccount
+V4CALL_ESCROW_KEY=5Kxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+# Secret key to access /admin/* endpoints.
+# Choose a long random string — treat it like a password.
+# Example: openssl rand -hex 32
+ADMIN_KEY=make-up-a-long-random-string-at-least-20-characters
+
+# ── Hive Blockchain ──────────────────────────────────────
+CHAIN=hive
+HIVE_API=
+
+# ── Platform Fee ─────────────────────────────────────────
+# Percentage your server takes from each paid call/DM (10 = 10%)
+# This is the MINIMUM fee — users whose rates post sets a lower
+# platform fee will be rejected. Users who set a higher fee
+# get the best price (your server's rate, not their higher number).
+DEFAULT_PLATFORM_FEE=10
+
+# ── Network ──────────────────────────────────────────────
+PORT=3000
+BIND_HOST=127.0.0.1
+
+# ── Chat Storage ─────────────────────────────────────────
+# How many days to keep stored DMs before automatic cleanup
+DM_RETENTION_DAYS=33
+# How many days to keep stored room messages before cleanup
+ROOM_RETENTION_DAYS=33
+# How many recent DMs per conversation to show on login (0 = off)
+DM_PREVIEW_COUNT=1
+
+# ── Call Behaviour (advanced — defaults are fine) ────────
+# CALL_COOLDOWN_MS=30000
+# MAX_CALL_DURATION_MIN=120
+# PAYMENT_VERIFY_RETRIES=3
+# PAYMENT_VERIFY_DELAY_MS=5000
+
+# ── Federation (optional) ────────────────────────────────
+# Comma-separated list of peer v4call server federation WebSocket URLs.
+# Leave blank for standalone mode (no federation).
+# Servers listed here are auto-approved on startup. Discovered peers
+# (via Hive directory) need manual approval at /admin-peers.html.
+# Example two-server setup:
+#   On call.completenoobs.com → FEDERATION_PEERS=wss://hive-book.com/federation
+#   On hive-book.com           → FEDERATION_PEERS=wss://call.completenoobs.com/federation
+FEDERATION_PEERS=
+</pre>
+
+Key points:
+
+* <code>V4CALL_ESCROW_KEY</code> — must be the '''active''' private key for your escrow account. Find it in your Hive wallet → Keys & Permissions → Active. Starts with <code>5K</code>. '''Never share this.'''
+* <code>ADMIN_KEY</code> — invent a secret password for accessing admin tools
+* <code>HIVE_API</code> — leave blank to use all built-in Hive nodes automatically
+* <code>DEFAULT_PLATFORM_FEE</code> — your server's minimum platform fee percentage. See [[#Platform_Fee_System|Platform Fee System]] below for how this works.
+* <code>DM_RETENTION_DAYS</code> / <code>ROOM_RETENTION_DAYS</code> — how long chat messages are kept in the database. A cleanup job runs every hour and deletes anything older. Set to <code>0</code> to keep messages indefinitely (not recommended).
+* <code>DM_PREVIEW_COUNT</code> — when a user logs in, this many recent DMs per conversation are loaded into the lobby chat so they can see previews. Set to <code>0</code> to disable previews (users still get an unread count alert).
+* <code>FEDERATION_PEERS</code> — leave blank for now. You can add peers later (see [[#Step_17:_Federation_Setup_(Optional)|Federation Setup]]).
+
+Save: '''Ctrl+X''' → '''Y''' → '''Enter'''
+
+== Step 9: Configure Nginx — HTTP Only First ==
+
+'''This step is critical.''' A very common mistake is putting the HTTPS/SSL config in Nginx before getting the certificate. Nginx tries to load the certificate at startup — if the file doesn't exist yet, Nginx crashes in a restart loop. Certbot then cannot serve the challenge because Nginx is down. Result: no certificate, stuck in a loop.
+
+The fix: always start with HTTP only, get the certificate, then add HTTPS.
+
+Edit the Nginx config:
+
+ nano /opt/v4call/nginx/v4call.conf
+
+Delete everything and replace with this HTTP-only config:
+
+<pre>
+server {
+    listen 80;
+    server_name call.yourdomain.com www.call.yourdomain.com;
+
+    # Certbot challenge path — do not remove this block
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # Proxy all other requests to the v4call app
+    location / {
+        proxy_pass         http://app:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+}
+</pre>
+
+Replace <code>call.yourdomain.com</code> with your actual domain in both places.
+
+Save: '''Ctrl+X''' → '''Y''' → '''Enter'''
+
+== Step 10: Create Data Directories and Fix Permissions ==
+
+Create the folders Docker uses for persistent data:
+
+ mkdir -p /opt/v4call/data/logs  \
+ mkdir -p /opt/v4call/data/certbot/conf  \
+ mkdir -p /opt/v4call/data/certbot/www/.well-known/acme-challenge  \
+ mkdir -p /opt/v4call/data/certbot/logs
+
+'''Fix permissions — do not skip this.'''
+
+The v4call app runs inside Docker as user <code>node</code> (UID 1000). On the host, these directories are created by root, so the container cannot write to them. This causes a <code>SQLITE_CANTOPEN</code> error that crashes the app.
+
+Fix the logs directory for the app:
+
+ chown -R 1000:1000 /opt/v4call/data/logs
+
+Certbot runs as root so its directories stay root-owned:
+
+ chown -R root:root /opt/v4call/data/certbot
+ chmod -R 755 /opt/v4call/data/certbot
+
+'''Note:''' The app creates two separate SQLite databases in the logs directory:
+* <code>v4call-ledger.db</code> — payment records (calls, ring fees, payouts). Only the server writes to this.
+* <code>v4call-chat.db</code> — stored DMs and room messages. Separate from the ledger for security — if a bug in chat storage were exploited, the payment ledger remains untouched.
+
+Federation also persists state in this directory:
+* <code>approved-peers.json</code> — list of federation peer domains you've approved (created on first approval; survives container restarts).
+
+== Step 11: Build and Start the Server ==
+
+ cd /opt/v4call
+ docker compose up -d --build
+
+The first build downloads dependencies and takes 2-4 minutes. Check the status:
+
+ docker compose ps
+
+You should see:
+
+<pre>
+NAME              STATUS
+v4call-app        Up (healthy)
+v4call-nginx      Up
+</pre>
+
+Check the app started correctly:
+
+ docker compose logs app
+
+Look for:
+
+<pre>
+[ledger] SQLite ready: /app/logs/v4call-ledger.db
+[chat] SQLite ready: /app/logs/v4call-chat.db
+v4call server running on 0.0.0.0:3000
+[config] Server: yourcallapp (call.yourdomain.com)
+[config] DM retention: 33 days | Room retention: 33 days | DM preview: 1
+✓ Escrow key verified — matches @yourescrowaccount active key
+✓ Escrow account @yourescrowaccount balance: 0.000 HBD
+</pre>
+
+If you see <code>SqliteError: unable to open database file</code> — run the chown command from Step 10 again then <code>docker compose restart app</code>.
+
+Test HTTP is working:
+
+ curl http://call.yourdomain.com/debug-state
+
+Should return: <code>{"lobbyUsers":[],"rooms":[]}</code>
+
+If you can see the site in a browser over HTTP at this point — everything is working and ready for the certificate.
+
+== Step 12: Get Your SSL Certificate ==
+
+'''Before running certbot''', verify DNS and the challenge path are both working:
+
+ # Check DNS points to this server
+ nslookup call.yourdomain.com
+
+ # Test the challenge path
+ echo "test" > /opt/v4call/data/certbot/www/.well-known/acme-challenge/testfile
+ curl http://call.yourdomain.com/.well-known/acme-challenge/testfile
+
+The curl command must return <code>test</code>. If it does not, Nginx is not running — check <code>docker compose ps</code> and <code>docker compose logs nginx</code>.
+
+When both work, get the certificate. The <code>--entrypoint certbot</code> flag is required — without it, Docker runs the container's default renewal loop instead of the certonly command:
+
+ docker compose run --rm \
+   --entrypoint certbot \
+   certbot certonly \
+   --webroot \
+   -w /var/www/certbot \
+   -d call.yourdomain.com \
+   --email your@email.com \
+   --agree-tos \
+   --no-eff-email
+
+Replace <code>call.yourdomain.com</code> with your domain and <code>your@email.com</code> with your email.
+
+Success looks like:
+
+<pre>
+Requesting a certificate for call.yourdomain.com
+
+Successfully received certificate.
+Certificate is saved at: /etc/letsencrypt/live/call.yourdomain.com/fullchain.pem
+Key is saved at:         /etc/letsencrypt/live/call.yourdomain.com/privkey.pem
+This certificate expires on 2026-07-09.
+</pre>
+
+Verify the files exist on the host:
+
+ ls /opt/v4call/data/certbot/conf/live/call.yourdomain.com/
+
+Should show: <code>cert.pem  chain.pem  fullchain.pem  privkey.pem  README</code>
+
+== Step 13: Enable HTTPS in Nginx ==
+
+Now the certificate exists, update Nginx to serve HTTPS.
+
+ nano /opt/v4call/nginx/v4call.conf
+
+Replace everything with the full HTTPS config:
+
+<pre>
+# HTTP — only used for certbot challenge and redirect to HTTPS
+server {
+    listen 80;
+    server_name call.yourdomain.com www.call.yourdomain.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# HTTPS — main app
+server {
+    listen 443 ssl;
+    server_name call.yourdomain.com www.call.yourdomain.com;
+
+    # CHANGE PATH: ssl certs path uses your domain — find with: ls data/certbot/conf/live/
+    ssl_certificate     /etc/letsencrypt/live/call.yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/call.yourdomain.com/privkey.pem;
+
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    add_header Strict-Transport-Security "max-age=63072000" always;
+    add_header X-Frame-Options DENY;
+    add_header X-Content-Type-Options nosniff;
+
+    # When user cancels the basic-auth login prompt, send them here
+    error_page 401 /info.html;
+
+    # info.html is served directly by Nginx — no auth, no proxy
+    location = /info.html {
+        root /usr/share/nginx/html;
+        auth_basic off;
+    }
+
+    # WebSocket — main client traffic
+    location /socket.io/ {
+        # Uncomment below to require username/password to enter site (testing only).
+        # See "Optional: Password Protect Your Server During Testing" section for setup.
+        #auth_basic           "v4call — Private Testing";
+        #auth_basic_user_file /etc/nginx/.htpasswd;
+
+        proxy_pass         http://app:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400;
+    }
+
+    # Federation WebSocket — server-to-server, NEVER auth-protected.
+    # Peer v4call servers connect here to exchange presence/DMs/call invites.
+    # Trust validation happens inside the Node app (signed verify.json check
+    # + operator approval via /admin-peers.html). Do not add basic auth here —
+    # it would block all federation.
+    location /federation {
+        proxy_pass         http://app:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade $http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+    # Everything else — main HTTP traffic
+    location / {
+        # Uncomment below to require username/password to enter site (testing only).
+        #auth_basic           "v4call — Private Testing";
+        #auth_basic_user_file /etc/nginx/.htpasswd;
+
+        proxy_pass         http://app:3000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300;
+        proxy_send_timeout 300;
+    }
+
+    # Logs failed and successful login attempts when .htpasswd is enabled
+    error_log /var/log/nginx/error.log warn;
+    access_log /var/log/nginx/access.log;
+}
+</pre>
+
+* REPLACE <code>call.yourdomain.com</code> with your domain throughout (it appears 4 times — server_name lines and ssl_certificate paths).
+* The <code>auth_basic</code> lines are '''commented out by default''' so federation and normal users work out-of-box. To enable password protection for private testing, see [[#Optional:_Password_Protect_Your_Server_During_Testing|the Optional section]] below — it shows how to uncomment them and create users.
+* '''Never''' add <code>auth_basic</code> to the <code>/federation</code> block — it would block all peer v4call servers from connecting to you.
+
+Save and restart Nginx:
+
+ docker compose restart nginx
+
+Check the logs — you should see '''no''' <code>[emerg]</code> errors:
+
+ docker compose logs nginx
+
+The last lines should show:
+
+<pre>
+nginx/1.x.x ...
+start worker processes
+</pre>
+
+* If you see an error such as:
+<pre>[emerg] 1#1: cannot load certificate "/etc/letsencrypt/live/call.yourdomain.com/fullchain.pem": BIO_new_file() failed (SSL: error:80000002:system library::No such file or directory:calling fopen(/etc/letsencrypt/live/call.yourdomain.com/fullchain.pem, r) error:10000080:BIO routines::no such file)</pre>
+
+* Make sure you edited <code>nginx/v4call.conf</code> correctly.
+* To find the path for your SSL certs look in path <code>data/certbot/conf/live/</code>
+* There are 4 lines to check in <code>nginx/v4call.conf</code>:
+** <code>server_name call.yourdomain.com www.call.yourdomain.com;</code> (HTTP block)
+** <code>server_name call.yourdomain.com www.call.yourdomain.com;</code> (HTTPS block)
+** <code>ssl_certificate     /etc/letsencrypt/live/call.yourdomain.com/fullchain.pem;</code>
+** <code>ssl_certificate_key /etc/letsencrypt/live/call.yourdomain.com/privkey.pem;</code>
+* When done restart nginx with: <code>docker compose restart nginx</code>
+
+== Step 14: Set Up SSL Auto-Renewal ==
+
+Let's Encrypt certificates expire after 90 days. A cron job renews them automatically.
+
+ crontab -e
+
+Add this line at the bottom:
+
+ 0 3 * * * cd /opt/v4call && docker compose run --rm --entrypoint certbot certbot renew --quiet && docker compose exec nginx nginx -s reload
+
+Save and exit. This runs at 3am every day, renews if the cert is close to expiry, and reloads Nginx to pick up the new certificate.
+
+== Step 15: Test Everything is Working ==
+
+Test HTTPS:
+
+ curl https://call.yourdomain.com/debug-state
+
+Should return: <code>{"lobbyUsers":[],"rooms":[]}</code>
+
+Test admin access:
+
+ curl "https://call.yourdomain.com/admin/balance?key=YOUR_ADMIN_KEY"
+
+Should return your escrow account balance.
+
+Open your browser and go to <code>https://call.yourdomain.com</code>
+
+You should see the v4call login page with:
+* A padlock icon in the browser address bar
+* A green '''⚡ Sign in with Keychain''' button (if Hive Keychain is installed)
+* A manual posting key login option below it
+* A '''📖 New here? Learn the v4call basics →''' link at the bottom
+
+Log in with Hive Keychain or a posting key to confirm the login flow works. 🎉
+
+== Step 16: Set Up Your Call Rates on Hive ==
+
+For callers to be charged when they ring you, publish your rates on the Hive blockchain:
+
+# Make sure Hive Keychain is installed in your browser
+# Go to <code>https://call.yourdomain.com/rate-editor.html</code>
+# Enter your Hive username
+# Set your rates — ring fee, connect fee, duration rate per hour, minimum credit deposit
+# Set <code>PLATFORM-FEE</code> to at least your server's <code>DEFAULT_PLATFORM_FEE</code> percentage (e.g. <code>10</code> for 10%). If you set it lower, paid contacts to your account will be rejected on this server.
+# Optionally add custom token sections (e.g. <code>[TOKEN:CNOOBS]</code>) to offer discounted rates for callers who hold your token
+# Click '''Generate''' to preview the rates block
+# Click '''Post to Hive''' — Keychain will ask you to approve the post
+
+This creates a post titled <code>v4call-rates</code> on your Hive blog. Your server reads this post automatically.
+
+To verify your server read the rates correctly:
+
+ https://call.yourdomain.com/debug-rates/yourusername
+
+To test with a specific caller (checks their token balances too):
+
+ https://call.yourdomain.com/debug-rates/yourusername?caller=theirusername&type=voice
+
+You should see your rates as JSON, including which currency and rates apply for that caller.
+
+== Step 17: Federation Setup (Optional) ==
+
+If you want your server to talk to other v4call servers — so users on different servers can call/DM each other — set up federation. This is optional. A standalone server works fine without it.
+
+Federation has two trust steps:
+
+# '''Domain proof''' — you publish a signed JSON file at <code>https://yourdomain.com/.well-known/v4call-server.json</code> proving that your Hive account controls this domain
+# '''Directory listing''' — you publish a Hive post tagged <code>v4call-server</code> announcing your server exists, so other operators can discover you
+
+'''Important escrow rule''': the <code>ESCROW_ACCOUNT</code> in your <code>.env</code> must match the <code>ESCROW:</code> field in your users' rates posts. The active key for that escrow has to live on '''this''' server. If a user's rates post points at a different escrow than what your server holds the key for, paid calls/DMs to that user will fail (your server can't disburse from an escrow it doesn't control).
+
+=== Step 17a: Generate and Host the Verify File ===
+
+# Open <code>https://yourdomain.com/server-sign.html</code> in a browser with Hive Keychain installed
+# Fill in: Hive account (same as <code>SERVER_HIVE_ACCOUNT</code>), domain, escrow account, fee account, federation WS URL (<code>wss://yourdomain.com/federation</code>)
+# Click '''⚡ Sign with Hive Keychain'''
+# Click '''⬇ Download''' — saves <code>v4call-server.json</code>
+# Upload to your server, replacing the placeholder file. From your local machine:
+   scp v4call-server.json root@yourvps:/opt/v4call/public/.well-known/
+
+(Or use any other transfer method you prefer — SFTP client, paste via SSH, etc.)
+
+Verify it's served:
+ curl https://yourdomain.com/.well-known/v4call-server.json
+
+You should see your signed JSON. If you see <code>404</code>, check the file is at exactly <code>public/.well-known/v4call-server.json</code> — the directory uses a '''hyphen''', not an underscore (RFC 8615), and the filename must be exactly <code>v4call-server.json</code>.
+
+Rebuild so the file is baked into the Docker image:
+ docker compose down && docker compose build --no-cache && docker compose up -d
+
+'''Tip''': commit the generated file to your git repo so future fresh installs include it automatically. It contains only public data — safe to commit. The placeholder shipped in the repo is overwritten by your file.
+
+=== Step 17b: Announce on Hive ===
+
+For other operators to discover you, publish a Hive post advertising your server:
+
+# After signing in Step 17a, click the '''📡 Announce on Hive →''' link on the signer output card (auto-fills the announce page)
+# Or open <code>https://yourdomain.com/server-announce.html</code> directly
+# Confirm the prefilled values
+# Click '''📡 Post to Hive''' — Keychain will broadcast the post
+
+The post lives forever on Hive. If your config changes, just post a new one — the most recent post per Hive account wins. No need to delete old posts (Hive posts are effectively permanent anyway).
+
+=== Step 17c: Connect to Known Peers (Manual Mode) ===
+
+Skip the discovery step and go straight to a known peer by adding their WebSocket URL to <code>FEDERATION_PEERS</code> in <code>.env</code>:
+ FEDERATION_PEERS=wss://otherserver.com/federation
+
+Both servers must list each other. Rebuild after editing <code>.env</code>:
+ docker compose down && docker compose build --no-cache && docker compose up -d
+
+Servers in <code>FEDERATION_PEERS</code> are auto-approved on startup — they bypass the manual approval step.
+
+=== Step 17d: Discover and Approve Peers (Auto Mode) ===
+
+Your server scans Hive for <code>v4call-server</code> posts on startup and every 2 hours. Discovered peers are NOT auto-connected — you must approve each one.
+
+# Open <code>https://yourdomain.com/admin-peers.html</code>
+# Paste your <code>ADMIN_KEY</code> (from <code>.env</code>) and click '''🔄 Load / Refresh'''
+# Each discovered peer shows a card with verification status, escrow, fee account, post age
+# Click '''✓ Approve''' to add them to your federation
+# Click '''✗ Revoke''' to remove an approved peer
+
+Approvals persist to <code>/app/logs/approved-peers.json</code> so they survive container restarts.
+
+=== Federation Health Check ===
+
+Watch the federation logs:
+ docker compose logs -f app | grep -E "\[federation\]|\[discovery\]|\[peers\]"
+
+Healthy startup looks like:
+
+<pre>
+[federation] Approved peers: peer-domain.com
+[federation] Connecting to wss://peer-domain.com/federation...
+[federation] Outbound connected: wss://peer-domain.com/federation
+[federation] ✓ Peer verified: @peer-domain.com (signer: @peer-account, escrow: @peer-escrow)
+[discovery] Hive returned 2 post(s) under v4call-server tag
+[discovery] Scan complete — 2 v4call-server post(s), 2 verified
+</pre>
+
+When a user logs in on either server, you should see:
+
+<pre>
+[federation] → user-online @username → 1 peer(s)         (on their home server)
+[federation] ← user-online @username@theirhome.com       (on your server)
+</pre>
+
+== Feature Guide: What Your Server Can Do ==
+
+This section explains all the features available in v4call and how they work. No code changes needed — everything described here is built in and ready to use.
+
+=== Login Options ===
+
+v4call supports two ways to sign in:
+
+* '''Hive Keychain''' (recommended) — click the green '''⚡ Sign in with Keychain''' button. Keychain signs a challenge to prove your identity. No key paste needed. After login, a 🔑 panel appears in the lobby where you can optionally enter your posting key to unlock encrypted messaging (Keychain cannot expose private keys, so encryption needs the key entered once per session).
+* '''Manual posting key''' — paste your Hive posting private key (starts with <code>5J</code>) directly. The key stays in browser session memory only — never sent to the server.
+
+Both methods verify your identity against the Hive blockchain.
+
+=== Voice and Video Calls ===
+
+Each online user in the lobby shows three action buttons:
+
+* '''📞 Green phone icon''' — start a '''voice-only''' call (audio, no camera)
+* '''🎥 Blue camera icon''' — start a '''video''' call (audio + camera)
+* '''💬 Purple chat bubble icon''' — open the '''DM panel''' to send a direct message
+
+Voice calls request microphone only — no camera permission prompt. Video calls request both. The caller and callee can have different call types — the type is set by whoever initiates the call.
+
+Separate rates can be set for voice and video calls in the rates post (voice is typically cheaper).
+
+Federated users (on a different v4call server) appear in the lobby with a small server-domain badge under their username. The call/DM buttons work the same — federation routing is transparent.
+
+=== Direct Messages (DMs) ===
+
+Click the purple 💬 button next to any online user to open the DM panel. DMs are end-to-end encrypted using Hive posting keys — the server stores only ciphertext it cannot read.
+
+'''Chat storage:''' DMs are stored on the server in an encrypted database (<code>v4call-chat.db</code>) for up to <code>DM_RETENTION_DAYS</code> (default: 33 days). Both sender and recipient get their own encrypted copy stored, so both can retrieve their history later.
+
+'''Unread alerts:''' When you log in, if you have unread DMs, a popup appears showing how many messages from how many users. Click a username in the popup to open their DM history.
+
+'''DM previews:''' The last <code>DM_PREVIEW_COUNT</code> messages per conversation are loaded into the lobby chat on login, so you can see recent activity at a glance. Set to <code>0</code> in <code>.env</code> to disable.
+
+'''Full history:''' Click the DM button for any user to load the complete conversation history, shown between "— DM history —" dividers.
+
+=== Rooms ===
+
+Users can create private rooms by selecting users in the lobby (toggle switch) and clicking '''Create & Invite'''. Rooms support encrypted messaging, video, and voice.
+
+'''Room history:''' When a new user joins a room, they see past messages — broadcasts in full, encrypted messages only if they were addressed to them. A "— earlier messages —" divider separates history from live messages.
+
+'''Ephemeral rooms:''' A warning banner at the top of every room says: "⚠ Room is ephemeral — if all users leave, the room and its history are deleted. New members can only read messages encrypted to their key." When the last person leaves a room, all stored messages for that room are deleted from the database.
+
+=== Custom Token Payments (Hive-Engine) ===
+
+v4call supports payment in any Hive-Engine token, not just HBD. This is configured per-user in their rates post using <code>[TOKEN:SYMBOL]</code> sections.
+
+'''How it works:'''
+# A user (e.g. @cnoobz) creates a custom token on Hive-Engine (e.g. CNOOBS)
+# In their rates post, they add a <code>[TOKEN:CNOOBS]</code> section with lower rates than their default HBD rates
+# When a caller who holds CNOOBS contacts @cnoobz, the server detects the token balance and offers the token rates
+# If the caller holds multiple qualifying tokens, '''all options are shown''' in a currency picker — the caller chooses which to pay with
+# The payment goes through Hive Keychain as a <code>custom_json</code> Hive-Engine transfer
+
+'''For the escrow account:''' Your escrow account needs to hold some of each custom token that users on your server accept. Token payouts (to the callee) and refunds (to the caller) are sent from the escrow account's token balance, just like HBD.
+
+'''Payment picker:''' When multiple payment options exist (e.g. CNOOBS at 1 per message, HBD at 100000 per message), the payment modal shows clickable currency buttons so the caller can see all rates and choose the best option.
+
+=== Platform Fee System ===
+
+The platform fee is how your server earns revenue from paid calls and DMs.
+
+'''How it works:'''
+* Your server's <code>DEFAULT_PLATFORM_FEE</code> in <code>.env</code> is the '''minimum''' percentage your server accepts (e.g. <code>10</code> = 10%)
+* Each user sets <code>PLATFORM-FEE</code> in their Hive rates post — this is the maximum fee they are willing to pay to a server
+* If the user's posted fee is '''lower''' than your server's minimum → '''rejected'''. The caller sees a message explaining the mismatch, and the callee is told to raise their fee.
+* If the user's posted fee '''meets or exceeds''' your server's minimum → '''accepted''', and '''the server charges its own rate''' (the minimum), not the user's higher number. The callee gets the best price.
+* If the user has '''no <code>PLATFORM-FEE</code> line''' in their rates post → the server's default is used automatically. No mismatch.
+* '''Free contacts''' (no payment involved) are never affected by fee enforcement.
+
+'''Why this matters for federation:''' Different servers can set different platform fees. Users can shop around — pick a server with a fee they find agreeable. This creates a free market for server operators.
+
+'''Example:'''
+* Your server: <code>DEFAULT_PLATFORM_FEE=3</code> (3%)
+* @alice posts: <code>PLATFORM-FEE: 5%</code> → accepted, server charges 3% (best price for alice)
+* @bob posts: <code>PLATFORM-FEE: 1%</code> → rejected, bob needs to raise to at least 3%
+* @charlie has no fee line → defaults to 3%, automatically accepted
+
+=== Federation ===
+
+Federation lets users on different v4call servers see, call, and DM each other. Each server independently:
+
+* Holds its own escrow account (the active key never leaves the server it belongs to)
+* Verifies and disburses payments through its own escrow
+* Takes the platform fee for calls/DMs received by its own users
+
+Cross-server payments work like this: caller pays the callee's escrow on Hive (read from the callee's rates post), the callee's server verifies the payment on-chain and forwards a notification, both servers exchange call/DM signalling, and the callee's server disburses callee-net + platform-fee from its own escrow at call end (with refunds going cross-server back to the caller as a normal Hive transfer).
+
+WebRTC media stays peer-to-peer — neither server sees the audio/video.
+
+See [[#Step_17:_Federation_Setup_(Optional)|Step 17: Federation Setup]] for the setup steps.
+
+== Admin Configuration Reference ==
+
+All settings are in the <code>.env</code> file. After changing any value, rebuild:
+
+ docker compose down && docker compose build --no-cache && docker compose up -d
+
+{| class="wikitable"
+|-
+! Variable !! Default !! Description
+|-
+| <code>SERVER_NAME</code> || <code>v4call</code> || Display name for your server
+|-
+| <code>SERVER_DOMAIN</code> || <code>v4call.com</code> || Your server's domain
+|-
+| <code>SERVER_HIVE_ACCOUNT</code> || <code>v4call</code> || Hive account that receives platform fees (and signs your federation verify file)
+|-
+| <code>ESCROW_ACCOUNT</code> || <code>v4call-escrow</code> || Hive account that holds funds during calls. The active key for this account must live on '''this''' server.
+|-
+| <code>V4CALL_ESCROW_KEY</code> || ''(none)'' || Active private key for the escrow account. '''Required.'''
+|-
+| <code>ADMIN_KEY</code> || ''(none)'' || Password for admin endpoints (<code>/admin/balance</code>, <code>/admin/ledger</code>, <code>/admin/peers</code>)
+|-
+| <code>DEFAULT_PLATFORM_FEE</code> || <code>10</code> || Server's minimum platform fee percentage
+|-
+| <code>FEDERATION_PEERS</code> || ''(blank)'' || Comma-separated peer WebSocket URLs (e.g. <code>wss://peer.com/federation</code>). Listed peers are auto-approved on startup. Blank = standalone mode.
+|-
+| <code>DM_RETENTION_DAYS</code> || <code>33</code> || Days to keep stored DMs before cleanup
+|-
+| <code>ROOM_RETENTION_DAYS</code> || <code>33</code> || Days to keep stored room messages before cleanup
+|-
+| <code>DM_PREVIEW_COUNT</code> || <code>1</code> || Recent DMs per conversation shown on login (0 = off)
+|-
+| <code>HIVE_API</code> || ''(blank)'' || Override primary Hive API node. Blank = auto-select from built-in list
+|-
+| <code>MAX_CALL_DURATION_MIN</code> || <code>120</code> || Maximum call length in minutes before auto-disconnect
+|-
+| <code>CALL_COOLDOWN_MS</code> || <code>30000</code> || Milliseconds between call attempts to same user
+|-
+| <code>PAYMENT_VERIFY_RETRIES</code> || <code>3</code> || Number of attempts to verify a blockchain payment
+|-
+| <code>PAYMENT_VERIFY_DELAY_MS</code> || <code>5000</code> || Delay between verification retry attempts
+|}
+
+=== Debug & Admin Endpoints ===
+
+These are useful for testing without making actual calls:
+
+* <code>/debug-state</code> — shows current lobby users and active rooms (no auth required)
+* <code>/debug-rates/USERNAME</code> — shows parsed rates for a user
+* <code>/debug-rates/USERNAME?caller=CALLER&type=voice</code> — shows what rates a specific caller would receive (checks token balances too)
+* <code>/admin/balance?key=YOUR_ADMIN_KEY</code> — shows escrow account HBD balance
+* <code>/admin/ledger?key=YOUR_ADMIN_KEY</code> — shows recent payment records
+* <code>/admin/peers?key=YOUR_ADMIN_KEY</code> — JSON list of discovered + approved federation peers
+* <code>/admin/peers/approve?key=YOUR_ADMIN_KEY&domain=peer.com</code> (POST) — approve a discovered peer
+* <code>/admin/peers/revoke?key=YOUR_ADMIN_KEY&domain=peer.com</code> (POST) — revoke approval
+* <code>/admin/peers/rescan?key=YOUR_ADMIN_KEY</code> (POST) — force a Hive directory rescan
+
+=== Operator Tool Pages ===
+
+* <code>/rate-editor.html</code> — generate your <code>v4call-rates</code> Hive post
+* <code>/server-sign.html</code> — generate your signed federation verify file
+* <code>/server-announce.html</code> — publish your server announcement on Hive
+* <code>/admin-peers.html</code> — UI for federation peer approve/revoke/rescan
+* <code>/info.html</code> — public landing page (shown to users who hit the basic-auth login cancel)
+
+== Updating Your Server ==
+
+'''Important:''' Always use <code>docker compose down</code> before rebuilding. Without this step, Docker may reuse the old container even after a rebuild, and your changes will not take effect.
+
+ cd /opt/v4call
+ docker compose down
+ docker compose build --no-cache
+ docker compose up -d
+
+Your data, SQLite databases and <code>.env</code> config are preserved — they live in <code>data/logs/</code> which is a mounted volume.
+
+To pull updates from GitHub and deploy:
+
+ cd /opt/v4call
+ git pull
+ docker compose down
+ docker compose build --no-cache
+ docker compose up -d
+
+To push your own customisations to GitHub:
+
+ # On your local computer after making changes:
+ git add .
+ git commit -m "describe what you changed"
+ git push
+
+ # On the VPS:
+ cd /opt/v4call
+ git pull
+ docker compose down
+ docker compose build --no-cache
+ docker compose up -d
+
+== Common Problems and Fixes ==
+
+=== Changes not showing after rebuild ===
+
+If you edited <code>server.js</code> or <code>index.html</code> but changes are not visible, you probably forgot to bring Docker down first. <code>docker compose restart</code> and even <code>docker compose up -d --build</code> can reuse old containers.
+
+'''Fix:'''
+
+ docker compose down
+ docker compose build --no-cache
+ docker compose up -d
+
+=== SqliteError: unable to open database file ===
+
+The app container runs as UID 1000 but the logs directory was created by root. Fix:
+
+ chown -R 1000:1000 /opt/v4call/data/logs
+ docker compose restart app
+
+=== Certbot says "No renewals were attempted" ===
+
+The certbot container's default behaviour is a renewal loop. Your <code>certonly</code> command is being ignored. Always use <code>--entrypoint certbot</code> to override it:
+
+ docker compose run --rm --entrypoint certbot certbot certonly ...
+
+Without <code>--entrypoint certbot</code> the container runs its renewal script instead of your command.
+
+=== Nginx crashes with "cannot load certificate: No such file" ===
+
+You added the HTTPS server block before getting the certificate. Nginx reads all server blocks at startup — if the cert file doesn't exist, the entire process fails.
+
+Fix: revert nginx config to HTTP-only (Step 9), restart Nginx, get the certificate (Step 12), then re-add HTTPS (Step 13).
+
+=== Webroot challenge test returns nothing ===
+
+Nginx is not running. Check:
+
+ docker compose ps
+ docker compose logs nginx
+
+If Nginx is restarting — it has the HTTPS config with a missing cert file. Use the HTTP-only config.
+
+=== "Escrow key does NOT match" warning on startup ===
+
+The key in <code>.env</code> is the wrong type. You need the '''active''' private key, not the posting or owner key. Find it in your Hive wallet → Keys & Permissions → Active. It starts with <code>5K</code>.
+
+=== Site unreachable on port 443 ===
+
+Check that the certificate was issued:
+
+ ls /opt/v4call/data/certbot/conf/live/
+
+Should show a folder with your domain name. If empty — go back to Step 12.
+
+=== npm ci error during Docker build ===
+
+The <code>npm ci</code> command requires a <code>package-lock.json</code> file. The project uses <code>npm install</code> instead. If you see this error, check your <code>Dockerfile</code> — it should say <code>npm install</code> not <code>npm ci</code>.
+
+=== Custom token payments not working ===
+
+If token rates are detected but payments fail:
+* Check the escrow account holds the token — send some tokens to your escrow account on Hive-Engine
+* Check the token symbol matches exactly (case-sensitive) between the rates post and Hive-Engine
+* Check the server logs: <code>docker compose logs app | grep -i "token\|cnoobs\|escrow-token"</code>
+* The Hive-Engine API endpoint must be <code>https://api.hive-engine.com/rpc/contracts</code> — this is built into the code
+
+=== [encrypted — unlock with 🔑 key panel to read] ===
+
+You logged in with Hive Keychain. Keychain does not expose private keys, so encrypted messages cannot be decrypted without your posting key. Enter your posting key in the 🔑 panel at the bottom of the online users list. The key stays in browser session memory only — it is needed once per session.
+
+=== Federation peer verification fails with HTTP 404 ===
+
+Logs show:
+ [federation] ✗ Peer verification failed for X: Cannot fetch verify.json: HTTP 404
+
+The peer's <code>/.well-known/v4call-server.json</code> file isn't being served. Common causes:
+
+* '''Wrong directory name''' — must be <code>.well-known</code> with a hyphen, not <code>.well_known</code> with an underscore (RFC 8615).
+* '''Wrong filename''' — must be <code>v4call-server.json</code>, not <code>verify.json</code> or anything else. The verifier code looks for this exact name.
+* '''Not in the Docker image''' — file lives at <code>public/.well-known/v4call-server.json</code> in the repo and is copied into the image at build time. After placing the file, rebuild: <code>docker compose down && docker compose build --no-cache && docker compose up -d</code>.
+* '''Placeholder not replaced''' — the repo ships with a tiny placeholder. You must overwrite it with your own signed file from <code>/server-sign.html</code> before federation will work.
+
+Test from outside the container:
+ curl https://yourdomain.com/.well-known/v4call-server.json
+
+Should return your signed JSON, not <code>404</code> or the placeholder.
+
+=== Federation connection flapping (rapid disconnect/reconnect loop) ===
+
+If logs show repeated <code>Outbound connected</code> followed by <code>Disconnected — retry in 2s</code> with no successful handshake, check verify.json:
+
+* Is the file present at the path above?
+* Does its <code>signature</code> match the Hive account's posting key? Test by pasting the JSON into the '''Verify''' panel on <code>/server-sign.html</code> — should say "✓ Signature valid".
+* Does <code>hive_account</code> in the JSON match <code>SERVER_HIVE_ACCOUNT</code> in the peer's .env? They must match.
+
+=== Federation peer connects but my user can't be seen on the other side ===
+
+If two servers connect successfully but a user on Server A doesn't appear in Server B's lobby, check:
+
+* Server A logs: <code>[federation] → user-online @username → 1 peer(s)</code> — confirms A broadcast the presence
+* Server B logs: <code>[federation] ← user-online @username@A.com</code> — confirms B received it
+
+If A logs the broadcast but B never received it, the federation socket might be one-way. Check both servers have approved each other (visible at <code>/admin-peers.html</code>).
+
+=== Federated paid call/DM fails silently after payment ===
+
+Most common cause: the user's <code>v4call-rates</code> post declares an <code>ESCROW:</code> account whose active key isn't on their home server. The caller's payment lands in that escrow correctly, but no server can disburse from it.
+
+Fix: have the user re-post their rates with an <code>ESCROW:</code> matching their home server's <code>ESCROW_ACCOUNT</code> in <code>.env</code>. Or migrate that escrow account's active key to the right server.
+
+The federation handshake also surfaces this as a clear error message via the escrow-mismatch guard — check the caller-side server logs for it.
+
+=== Discovery scanner finds 0 posts ===
+
+If <code>/admin-peers.html</code> shows "No v4call-server posts discovered yet" even after rescanning:
+
+* Click '''🔍 Rescan Hive now''' and watch logs:  <code>docker compose logs -f app | grep discovery</code>
+* Expected: <code>[discovery] Hive returned N post(s) under v4call-server tag</code>
+* If N = 0, no Hive posts exist with that tag yet — publish your own via <code>/server-announce.html</code>
+* If you see <code>[discovery] No response from Hive tag query</code>, the Hive API is unreachable from inside the container. Test container DNS / outbound HTTPS by hitting any external HTTPS URL from the container.
+
+== Quick Reference ==
+
+{| class="wikitable"
+|-
+! Command !! What it does
+|-
+| <code>docker compose ps</code> || Show status of all containers
+|-
+| <code>docker compose logs app</code> || Show app logs
+|-
+| <code>docker compose logs nginx</code> || Show Nginx logs
+|-
+| <code>docker compose logs -f app</code> || Watch live logs (Ctrl+C to stop)
+|-
+| <code>docker compose down</code> || Stop everything ('''always do this before rebuilding''')
+|-
+| <code>docker compose build --no-cache</code> || Rebuild without using cached layers
+|-
+| <code>docker compose up -d</code> || Start everything in background
+|-
+| <code>docker compose down && docker compose build --no-cache && docker compose up -d</code> || Full rebuild cycle (use after any code change)
+|-
+| <code>docker compose restart nginx</code> || Restart Nginx after config-only changes (no rebuild needed)
+|-
+| <code>chown -R 1000:1000 /opt/v4call/data/logs</code> || Fix SQLite write permissions
+|-
+| <code>docker compose run --rm --entrypoint certbot certbot certificates</code> || List SSL certificates
+|-
+| <code>curl http://yourdomain.com/.well-known/acme-challenge/testfile</code> || Test certbot webroot works
+|-
+| <code>docker compose logs app &#124; grep -i "token\|escrow"</code> || Check token payment logs
+|-
+| <code>docker compose logs -f app &#124; grep -E "\[federation\]&#124;\[discovery\]"</code> || Watch federation activity
+|-
+| <code>curl https://yourdomain.com/.well-known/v4call-server.json</code> || Check verify file is served
+|-
+| <code>https://yourdomain.com/server-sign.html</code> || Generate signed federation verify file
+|-
+| <code>https://yourdomain.com/server-announce.html</code> || Publish server to Hive directory
+|-
+| <code>https://yourdomain.com/admin-peers.html</code> || Manage federation peer approvals
+|}
+
+== Optional: Password Protect Your Server During Testing ==
+
+<div class="toccolours mw-collapsible mw-collapsed">
+<strong>Optional: Password Protect Your Server During Testing (HTTP Basic Auth)</strong>
+<div class="mw-collapsible-content">
+
+During development and testing you may want to restrict access so only people you invite can use your server. This uses Nginx HTTP Basic Auth — a simple username and password prompt that appears before the v4call login screen.
+
+When a visitor cancels the login prompt they are shown a public <code>info.html</code> page where they can read about the project and request access.
+
+'''Important''': do NOT add basic auth to the <code>/federation</code> location block. Federation peers cannot supply HTTP credentials and the connection will fail. The auth lines below are added only to <code>/socket.io/</code> and <code>/</code>.
+
+*<b> Step 1 — Install the htpasswd tool</b>
+
+<code>apt install -y apache2-utils</code>
+
+*<b> Step 2 — Create the password file and add your first user </b>
+
+<code>htpasswd -c /opt/v4call/nginx/.htpasswd yourusername</code>
+
+You will be prompted to enter and confirm a password. The <code>-c</code> flag creates the file. Do not use <code>-c</code> again or it will overwrite the file and delete existing users.
+
+To add more users later:
+
+<code>htpasswd /opt/v4call/nginx/.htpasswd anotherusername</code>
+
+To remove a user:
+
+<code>htpasswd -D /opt/v4call/nginx/.htpasswd username</code>
+
+*<b> Step 3 — Create the public info page </b>
+
+<code>nano /opt/v4call/public/info.html</code>
+
+Paste your HTML content — a page explaining the project and how to request access. This page is served publicly without a password so visitors who cancel the login prompt can still read it.
+
+*<b> Step 4 — Mount the files into the Nginx container </b>
+
+Edit <code>docker-compose.yml</code> and add two lines to the nginx volumes section:
+
+<pre>
+  nginx:
+    volumes:
+      - ./nginx/v4call.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/.htpasswd:/etc/nginx/.htpasswd:ro          # add this
+      - ./public/info.html:/usr/share/nginx/html/info.html:ro  # add this
+      - ./data/certbot/conf:/etc/letsencrypt:ro
+      - ./data/certbot/www:/var/www/certbot:ro
+</pre>
+
+*<b> Step 5 — Enable auth in your Nginx config </b>
+
+The HTTPS config from Step 13 already includes the <code>auth_basic</code> lines, just commented out. Open <code>nginx/v4call.conf</code> and uncomment them in BOTH the <code>/socket.io/</code> and <code>/</code> location blocks (4 lines total, two pairs):
+
+<pre>
+        auth_basic           "v4call — Private Testing";
+        auth_basic_user_file /etc/nginx/.htpasswd;
+</pre>
+
+'''Do not''' uncomment auth in the <code>/federation</code> block — leave it as-is.
+
+*<b> Step 6 — Recreate the Nginx container to pick up the new volume mounts </b>
+
+'''Important''': <code>docker compose restart nginx</code> is not enough — it reuses the old container and ignores new volume mounts. You must recreate it:
+
+<code>docker compose down && docker compose up -d</code>
+
+After this, verify the files are mounted inside the container:
+
+<code>docker compose exec nginx ls /usr/share/nginx/html/</code>
+
+You should see <code>info.html</code> listed alongside <code>50x.html</code> and <code>index.html</code>.
+
+*<b> Step 7 — Test it works </b>
+
+<code>curl -o /dev/null -s -w "%{http_code}" https://call.yourdomain.com/</code>
+
+Should return <code>401</code> (login required).
+
+<code>curl -o /dev/null -s -w "%{http_code}" https://call.yourdomain.com/info.html</code>
+
+Should return <code>200</code> (public, no auth needed).
+
+<code>curl -u youruser:yourpassword -o /dev/null -s -w "%{http_code}" https://call.yourdomain.com/</code>
+
+Should return <code>200</code> (correct credentials accepted).
+
+*<b> Managing users without restarting </b>
+
+After adding or removing users from the <code>.htpasswd</code> file, reload Nginx config without downtime:
+
+<code>docker compose exec nginx nginx -s reload</code>
+
+No restart needed — Nginx re-reads the <code>.htpasswd</code> file on every request anyway.
+
+*<b> Keep .htpasswd out of GitHub </b>
+
+The password file should never be committed to your repository. It's already in the project's <code>.gitignore</code>, but if you forked, double-check:
+
+<code>echo "nginx/.htpasswd" >> /opt/v4call/.gitignore</code>
+
+*<b> Removing auth when you go public </b>
+
+When you are ready to open your server to everyone, simply re-comment the <code>auth_basic</code> lines from <code>nginx/v4call.conf</code> and reload:
+
+<code>docker compose exec nginx nginx -s reload</code>
+
+No other changes needed.
+
+</div>
+</div>
+
+<div class="toccolours mw-collapsible mw-collapsed">
+'''How to check if anyone tried to log in (failed attempts) or successfully logged in with .htpasswd on Nginx in Docker'''
+
+<div class="mw-collapsible-content">
+
+'''Important Tip:''' Always run these commands in the same folder where your <code>docker-compose.yml</code> file is located. If you are in the wrong directory the commands will not find your container and nothing will show up.
+
+* ''''' Basic Commands '''''
+
+; '''See everything live (good while testing)'''
+: <code>docker compose logs -f nginx</code><br>
+: <code>-f</code> means "follow/live" – new log lines appear automatically. Remove <code>-f</code> if you only want to read the current logs once and stop.
+
+; '''Best command to watch failed login attempts (people guessing passwords)'''
+: <code>docker compose logs -f nginx | grep -E "mismatch|not found|401"</code>
+
+; '''See who successfully logged in'''
+: <code>docker compose logs nginx | grep "remote_user"</code>
+
+; '''Combined view – most useful for daily checking (failed + successful)'''
+: <code>docker compose logs -f --tail=100 nginx | grep -E "(mismatch|not found|remote_user|401)"</code>
+
+* ''''' What the Logs Look Like '''''
+
+'''Failed attempt (wrong password):'''
+<pre>2026/04/17 01:23:45 [error] ... user "admin": password mismatch, client: 185.123.45.67, ...</pre>
+
+'''Failed attempt (wrong username):'''
+<pre>2026/04/17 01:24:12 [error] ... user "hacker123" was not found in "/etc/nginx/.htpasswd", client: 45.67.89.10, ...</pre>
+
+'''Successful login:'''
+<pre>... "GET /protected/ HTTP/1.1" 200 ... remote_user: "myuser" ...</pre>
+
+* ''''' How to Customise These Commands '''''
+
+* Change <code>nginx</code> to the exact name of your service if it is different in docker-compose.yml.
+* Remove <code>-f</code> to read the full log once without live following.
+* Change <code>--tail=100</code> to <code>--tail=500</code> (or any number) to show more or fewer old lines.
+* Add or remove words in the <code>grep</code> part to filter differently.
+  Examples:
+  * Only failed attempts: <code>grep -E "mismatch|not found"</code>
+  * Only 401 errors: <code>grep " 401 "</code>
+  * Everything auth related: <code>grep -E "(auth|password|mismatch|not found|remote_user)"</code>
+
+* '''''Quick Copy-Paste Commands '''''
+
+# Watch failed guesses live
+docker compose logs -f nginx | grep -E "mismatch|not found|401"
+
+# Check successful logins
+docker compose logs nginx | grep "remote_user"
+
+# Combined quick check (recommended)
+docker compose logs -f --tail=100 nginx | grep -E "(mismatch|not found|remote_user|401)"
+
+</div>
+</div>
+
+[[Category:Docker]]
+[[Category:Ubuntu]]
+[[Category:Hive]]
+[[Category:v4call]]
+[[Category:WebRTC]]
