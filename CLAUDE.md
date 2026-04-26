@@ -287,6 +287,7 @@ The active development plan, in order. Each version is independently shippable.
 - **Live-appendable banlist** — admin can ban any user (in-room or by name), banned overrides allowlist + token gate
 - Auto-kick currently-in-room user on ban (server emits `kicked` event)
 - Banlist visibility toggle: admin chooses at room creation whether banlist is admin-only-visible or visible to all members. Default admin-only.
+- **Forward-compat reminder:** when designing per-room state, leave room for a `paidInvitees: Map` alongside `allowlist` and `banlist`. v0.17 (Paid Expert Invites) populates this — keeping the data structure pluggable now means no refactor later.
 
 ### v0.15 — Spotlight Room Layout + Admin Delegation (2–3 sessions)
 - Centre spotlight tile (active speaker), other participants tiled below
@@ -299,10 +300,32 @@ The active development plan, in order. Each version is independently shippable.
 - Cross-server room join: callee's browser opens temporary cross-server Socket.io to caller's server (same pattern as 1:1 federated calls already work)
 - Token-gating works across federation (Hive-Engine balance check is chain-side, peer-agnostic)
 - Federation message types added: `room-invite`, `room-response`, `room-ended`
+- **Forward-compat reminder:** design `room-invite` as a generic envelope with a free-form `payload` object rather than fixed fields. v0.17 (Paid Expert Invites) reuses this with `payload: { connectFee, ratePerHour, currency, maxDuration, ... }` instead of inventing a separate `paid-room-invite` message type.
+- **Forward-compat reminder:** the cross-server room-join flow should track an optional per-user "billing context" alongside the join (null for free invitees, an `activePayments` reference for paid invitees in v0.17).
+
+### v0.17 / federation v0.5 — Paid Expert Invites (2–3 sessions)
+**The seed feature.** Reverse the v4call payment direction: instead of "caller pays callee for receiving", the room admin pays an invited expert for joining and contributing. Turns v4call from personal paid comms into paid consulting infrastructure (Clarity.fm / Maven / Intro / Fiverr-Consultations territory). Requires v0.16 federated rooms to land first.
+
+**Locked-in design:**
+- **Payer model — admin only.** The room admin pays the expert from their own escrow. Splitting between members deferred (see Deferred section).
+- **The invite IS the negotiated contract.** Admin sets `connectFee + ratePerHour + currency + maxDuration` in the invite payload. Expert sees explicit terms before accepting — no surprise rates. Accept = consent to those exact terms; expert's normal rates post is ignored. Optional client helper: pre-fill the offer with the expert's posted rates so admin can negotiate from there.
+- **Connect fee billing — bundled with final settlement, NOT charged on join.** The connect fee is added to the bill when the expert joins the room and paid out together with the pro-rated duration cost when the session ends. This protects against accidental disconnects: if the expert drops by mistake and admin re-invites, admin can choose to waive the connect fee on the second invite. (Future toggle: `connect_fee_charged_upfront: bool` if some admins prefer the upfront model — defer.)
+- **Termination flows** — voluntary leave / kick / room-end / connection-drop all settle the same way: final bill = connect fee + (actual duration × ratePerHour), capped at `maxDuration × ratePerHour`. 30-second grace period for reconnect (mirrors existing call disconnect handling) before settling.
+- **Same-room model** — expert joins as a normal participant with a 💎 "paid expert" badge in the user list. Sees and speaks with everyone. Not a sub-room or special bubble.
+- **Federation natural fit** — invite flows via federation `room-invite` (with paid `payload` per the v0.16 forward-compat note). Expert's home server delivers the popup. Cross-server escrow flow already works (admin's server verifies, expert's server disburses to expert + takes its platform fee).
+- **Expert UI** — earnings ticker mirroring the existing caller's spend ticker (counts up instead of down). Clear "✓ Accept terms" / "✗ Decline" modal with the explicit rate breakdown.
+- **Admin UI** — offer-builder modal at invite time (currency picker, fee fields, max duration), live-spend ticker per paid invitee while session runs.
+
+**Estimated scope:** ~300 lines server (paid invite flow, per-expert escrow tracking, end-of-session settlement), ~150 lines client (offer-builder, accept modal, expert earnings ticker). 2–3 sessions.
+
+**Why this is the seed worth building toward:** paid 1:1 calls (current v4call) compete with WhatsApp + voluntary tipping — hard sell, low values. Paid expert-invites compete with Clarity.fm / Maven / Intro — markets where $50–500/hr is normal, on-chain settlement is a feature (transparent, trustless, instant), and Hive's micropayments are competitive vs. Stripe/PayPal fees. Real wedge.
 
 ### Deferred / On Hold
 - **Paid lobby posting** (charge per message in lobby) — interesting but operational complexity > value at this stage
 - **Paid room creation** (charge fee to create a room) — same reasoning
+- **Split-equal expert pay** (v0.17 extension) — N members pre-fund their share before the invite goes out; invite holds until everyone's funded. More coordination friction; defer until single-payer is proven and there's demand.
+- **Pay-as-you-add expert pay** (v0.17 extension) — admin invites the expert, individual members opt in to sponsor a share. Most complex of the three payer models; defer.
+- **Connect fee charged upfront on accept** (v0.17 toggle) — opposite of the locked-in "bundle with final bill" mode. Some admins may prefer it; add as a per-invite toggle if requested.
 
 ### Longer-Term Future Work
 - Persistent (non-ephemeral) rooms option
