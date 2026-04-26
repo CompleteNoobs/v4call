@@ -201,6 +201,20 @@ PORT                     — Server port (default: 3000)
 BIND_HOST                — Bind address (default: 127.0.0.1)
 FEDERATION_PEERS         — Comma-separated peer WS URLs (e.g. wss://peer.com/federation).
                            Listed peers are auto-approved on startup. Blank = standalone mode.
+
+# v0.13 additions (planned — not yet built)
+LOBBY_NOTICE             — Custom text shown under the lobby title. Blank = auto-generated
+                           from SERVER_DOMAIN + "Local lobby — federation via DM/calls".
+LOBBY_REQUIREMENTS_TEXT  — Custom text describing posting requirements. Blank = auto-
+                           generated from the gate vars below.
+LOBBY_POST_MIN_HP        — Minimum Hive Power to post in lobby (e.g. 100). Blank = no HP gate.
+LOBBY_POST_MIN_TOKEN     — Minimum custom token to post in lobby (format: SYMBOL:amount,
+                           e.g. HIVEBOOK:10). Blank = no token gate.
+LOBBY_POST_GATE_MODE     — or | and. Only used when BOTH gates above are set.
+                           "or"  = user passes if EITHER HP or token threshold met (default)
+                           "and" = user passes only if BOTH HP and token thresholds met
+                           Set just HP (token blank) → HP-only gate.
+                           Set just token (HP blank) → token-only gate.
 ```
 
 ## Security Assessment (from VS Code review)
@@ -253,10 +267,18 @@ The active development plan, in order. Each version is independently shippable.
   - Refresh fallback Hive node list (anyx.io / hived.emre.sh have been intermittent/dead)
   - Verify the request from inside the container
 
-### v0.13 — Lobby Reorganization (1–2 sessions)
+### v0.13 — Lobby Reorganization + Notice + Anti-Spam Gate (1–2 sessions)
 - 4-tab lobby layout: **DM / Local Lobby / Active Rooms / Included Rooms**
 - "Included Rooms" = rooms you're allowlisted to but not currently in
 - Migrate the DM panel into its own tab cleanly (resolves the "DMs mixing into lobby chat" UX issue)
+- **Lobby title / notice** — server emits `lobby-config` event on connect with admin-set text:
+  - `LOBBY_NOTICE` — short text under the lobby title, makes it clear the lobby is local-server-only ("for federated contacts use rooms / DMs / calls"). Auto-generated from `SERVER_DOMAIN` if blank.
+  - `LOBBY_REQUIREMENTS_TEXT` — short text describing the posting gate (auto-generated from the gate vars if blank).
+- **Anti-spam gate on lobby posting** — server-side check on `lobby-chat` and `lobby-encrypted`. Three configs:
+  - `LOBBY_POST_MIN_HP` — minimum Hive Power required (lookup via `condenser_api.get_accounts` → `vesting_shares` → convert to HP using `dynamic_global_properties.hive_per_vest`). Cached per-user, 5-min TTL like the existing token cache.
+  - `LOBBY_POST_MIN_TOKEN` — minimum custom token balance, format `SYMBOL:amount`. Reuses existing `getHiveEngineTokenBalance`.
+  - `LOBBY_POST_GATE_MODE` — `or` (default) or `and`. Only relevant when both gates above are set. Set just one to require only that one. Set neither = no gate (current behaviour).
+  - Rejection emits a clear error: *"This server requires 100 HP or 10 HIVEBOOK to post. You have 50 HP and 0 HIVEBOOK."* Same shape as existing rate-rejection messages.
 
 ### v0.14 — Token-Gated Rooms + Banlist (1 session)
 - Room creator can set optional `min_token_balance: { symbol, amount }` gate at room creation
