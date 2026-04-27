@@ -370,13 +370,45 @@
 
       /* Modals — make sure they fit on small screens */
       .payment-box, .receipt-box, .dm-alert-box{max-width:94vw;width:94vw;max-height:88vh;overflow-y:auto;}
+
+      /* iOS Safari/WebKit auto-zooms when an input has font-size < 16px on
+         focus, leaving the page zoomed-in afterward. Force ≥16px on every
+         text-entry control on phones to disable that behaviour. */
+      input[type=text], input[type=password], input[type=search],
+      input[type=email], input[type=number], input:not([type]),
+      textarea, select {
+        font-size: 16px !important;
+      }
+
+      /* DM panel header — let the rate badge (which holds the multi-token
+         picker chips) wrap onto its own row so the chips are reachable
+         instead of crammed into the title row with the close button. */
+      #dm-panel-header{flex-wrap:wrap;row-gap:6px;}
+      #dm-panel-header > div:first-child{flex:1;min-width:0;display:flex!important;flex-wrap:wrap;align-items:center;gap:6px;}
+      #dm-panel-rate{flex-basis:100%;margin-left:0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+      #dm-panel-rate .dm-cur-btn{font-size:0.78rem;padding:6px 10px;}
+
+      /* DM panel body — stack the textarea on its own full-width row, with
+         the cancel + send buttons in a row below it. The single-line layout
+         crammed the textarea down to ~30% of the viewport on phones, which
+         was effectively unusable for typing more than a word or two. */
+      #dm-panel-body{flex-wrap:wrap;align-items:stretch;}
+      #dm-panel-input{flex:1 1 100%;height:auto;min-height:64px;max-height:160px;}
+      #dm-panel-cancel{flex:0 0 auto;}
+      #dm-panel-send{flex:1 1 auto;min-width:160px;}
     }
     .video-wrapper{position:relative;background:#000;}
     .video-wrapper video{width:100%;display:block;aspect-ratio:4/3;object-fit:cover;}
     .video-label{position:absolute;bottom:5px;left:7px;font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:#fff;background:rgba(0,0,0,0.6);padding:2px 6px;border-radius:4px;}
     #chat-panel{display:flex;flex-direction:column;flex:1;overflow:hidden;}
-    #chat-header{padding:9px 14px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:8px;}
+    #chat-header{padding:9px 14px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
     #peer-count{margin-left:auto;}
+    #enable-mic-btn,#enable-cam-btn{display:none;padding:5px 11px;background:transparent;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;transition:background 0.15s,opacity 0.2s;}
+    #enable-mic-btn{color:var(--green);border:1px solid rgba(74,222,128,0.4);}
+    #enable-mic-btn:hover{background:rgba(74,222,128,0.1);}
+    #enable-cam-btn{color:var(--blue);border:1px solid rgba(56,189,248,0.4);}
+    #enable-cam-btn:hover{background:rgba(56,189,248,0.1);}
+    #enable-mic-btn.shown,#enable-cam-btn.shown{display:inline-flex;align-items:center;}
     #users-panel{width:160px;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
     #users-panel-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);}
     #users-panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);letter-spacing:0.05em;}
@@ -685,6 +717,8 @@
     <div id="chat-header">
       <span id="chat-room-name">ROOM</span>
       <span id="peer-count">no others yet</span>
+      <button id="enable-mic-btn" onclick="enableMic()" title="Turn on your microphone for this room">🎤 Enable Mic</button>
+      <button id="enable-cam-btn" onclick="enableCam()" title="Turn on your camera for this room">🎥 Enable Cam</button>
     </div>
     <div id="call-cost-ticker">
       <div class="ticker-item"><div class="ticker-label">DURATION</div><div class="ticker-value" id="ticker-duration">00:00</div></div>
@@ -1305,6 +1339,11 @@ let dmPanelRate   = 0;
 let dmPanelEscrow = ESCROW_ACCOUNT;
 let dmPanelBlocked = false;
 let dmPanelCurrency = 'HBD';
+// Conversations whose history has already been fetched + rendered this
+// session. Prevents the "every DM-button click re-appends history" bug —
+// the message-level dedup in addLobbyMsg would silently drop the duplicates,
+// but suppressing the fetch entirely also avoids extra dividers/network.
+const dmHistoryLoaded = new Set();
 
 async function openDmPanel(username) {
   if (dmPanelTarget === username && document.getElementById('dm-panel').classList.contains('active')) {
@@ -1330,8 +1369,12 @@ async function openDmPanel(username) {
   sendBtn.disabled   = true;
   switchLobbyTab('chat');
 
-  // Load full DM history for this conversation
-  socket.emit('dm-history', { withUser: username }, (history) => {
+  // Load full DM history for this conversation — only once per session.
+  // Subsequent opens are a no-op so the history doesn't re-append.
+  // Live `lobby-dm` events still flow normally; the message-level dedup in
+  // addLobbyMsg also prevents duplicates if both signals ever overlap.
+  if (!dmHistoryLoaded.has(username)) socket.emit('dm-history', { withUser: username }, (history) => {
+    dmHistoryLoaded.add(username);
     if (history && history.length > 0) {
       // Add history divider before the history messages
       const c = document.getElementById('lobby-messages');
@@ -1344,16 +1387,19 @@ async function openDmPanel(username) {
         const isSelf = (msg.from_user === myUsername);
         try {
           const plaintext = decryptMsg(msg.ciphertext);
-          const time = msg.created_at ? new Date(msg.created_at + 'Z').toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
           addLobbyMsg({
             type: 'dm', from: msg.from_user, text: plaintext,
             isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null,
-            textPaid: msg.text_paid || 0
+            textPaid: msg.text_paid || 0,
+            currency: msg.currency,
+            signature: msg.signature,
+            timestamp: msg.timestamp
           });
         } catch(e) {
           addLobbyMsg({
             type: 'dm', from: msg.from_user, text: '[could not decrypt]',
-            isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null
+            isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null,
+            signature: msg.signature, timestamp: msg.timestamp
           });
         }
       });
@@ -1524,10 +1570,10 @@ async function sendDmMessage() {
     }
     addLobbyMsg({type:'system', text:`✓ ${dmPanelRate.toFixed(3)} ${cur} submitted — sending to @${dmPanelTarget}…`});
     socket.emit('lobby-dm', { to: dmPanelTarget, ciphertext, senderCiphertext, signature, timestamp, msgId, textPaid: dmPanelRate, textMemo: memo, textCurrency: cur });
-    addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:dmPanelTarget, sigOk:true, textPaid: dmPanelRate });
+    addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:dmPanelTarget, sigOk:true, textPaid: dmPanelRate, currency: cur, signature, timestamp });
   } else {
     socket.emit('lobby-dm', { to: dmPanelTarget, ciphertext, senderCiphertext, signature, timestamp });
-    addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:dmPanelTarget, sigOk:true });
+    addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:dmPanelTarget, sigOk:true, signature, timestamp });
   }
 
   inputEl.value = '';
@@ -1567,12 +1613,12 @@ socket.on('lobby-chat', async ({ from, message, signature, timestamp }) => {
 socket.on('lobby-encrypted', async ({ from, ciphertext, signature, timestamp }) => {
   const plaintext = decryptMsg(ciphertext);
   const sigOk     = await verifySignature(plaintext, timestamp, signature, from);
-  addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk });
+  addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk, signature, timestamp });
 });
-socket.on('lobby-dm', async ({ from, ciphertext, signature, timestamp, textPaid }) => {
+socket.on('lobby-dm', async ({ from, ciphertext, signature, timestamp, textPaid, textCurrency }) => {
   const plaintext = decryptMsg(ciphertext);
   const sigOk     = await verifySignature(plaintext, timestamp, signature, from);
-  addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk, textPaid: textPaid || 0 });
+  addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk, textPaid: textPaid || 0, currency: textCurrency, signature, timestamp });
 });
 socket.on('lobby-dm-error', (msg) => { addLobbyMsg({type:'system', text:`⚠ ${msg}`}); });
 socket.on('lobby-dm-payment-required', ({ to, rate, currency }) => {
@@ -1612,37 +1658,57 @@ socket.on('dm-previews', (previews) => {
   if (!previews || !previews.length) return;
   previews.forEach(msg => {
     const isSelf = (msg.from_user === myUsername);
-    const other  = isSelf ? msg.to_user : msg.from_user;
     try {
       const plaintext = decryptMsg(msg.ciphertext);
       addLobbyMsg({
         type: 'dm', from: msg.from_user, text: plaintext,
         isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null,
-        textPaid: msg.text_paid || 0
+        textPaid: msg.text_paid || 0,
+        currency: msg.currency,
+        signature: msg.signature,
+        timestamp: msg.timestamp
       });
     } catch(e) {
       addLobbyMsg({
         type: 'dm', from: msg.from_user, text: '[could not decrypt]',
-        isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null
+        isSelf, to: isSelf ? msg.to_user : undefined, sigOk: null,
+        signature: msg.signature, timestamp: msg.timestamp
       });
     }
   });
 });
 
-function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid }) {
+// Dedup keys for already-rendered DMs. Live `lobby-dm` events, on-connect
+// `dm-previews`, and on-open `dm-history` can all surface the same message;
+// keying by the per-message signature (already unique) is the simplest fix.
+const renderedDmKeys = new Set();
+
+function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid, currency, signature, timestamp }) {
   const c = document.getElementById('lobby-messages');
   if (!c) return;
+  if (type === 'dm' && signature) {
+    if (renderedDmKeys.has(signature)) return;
+    renderedDmKeys.add(signature);
+  }
   const el = document.createElement('div');
   if (type === 'system') {
     el.className = 'lmsg system';
     el.innerHTML = `<div class="lmsg-text">${escHtml(text)}</div>`;
   } else {
     el.className = 'lmsg' + (isSelf ? ' self' : ' other') + (type==='dm' ? ' dm' : '');
-    const now       = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    // Use stored timestamp (millis-as-string) for history replays so old
+    // messages keep their real time — fall back to "now" for live messages.
+    let when;
+    if (timestamp) {
+      const ms = typeof timestamp === 'number' ? timestamp : parseInt(timestamp, 10);
+      when = !isNaN(ms) ? new Date(ms) : new Date(timestamp);
+    } else { when = new Date(); }
+    const stampText = !isNaN(when.getTime()) ? when.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}) : '';
     const sigBadge  = sigOk===true ? `<span class="sig-ok">✓ signed</span>` : sigOk===false ? `<span class="sig-bad">⚠ bad sig</span>` : sigOk===null ? `<span style="font-size:0.58rem;color:var(--muted)">~ signed</span>` : '';
     const typeBadge = type==='dm' ? `<span class="dm-tag">🔒 ${isSelf?'→ '+to:'DM'}</span>` : `<span class="broadcast-tag">📢</span>`;
-    const paidBadge = (textPaid && textPaid >= 0.001) ? `<span style="font-size:0.58rem;color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);padding:1px 5px;border-radius:3px;">💰 ${parseFloat(textPaid).toFixed(3)} HBD</span>` : '';
-    el.innerHTML = `<div class="lmsg-meta"><span>@${isSelf?myUsername:from}</span>${typeBadge}${paidBadge}${sigBadge}<span>${now}</span></div><div class="lmsg-text">${linkify(text)}</div>`;
+    const cur       = currency || 'HBD';
+    const paidBadge = (textPaid && textPaid >= 0.001) ? `<span style="font-size:0.58rem;color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);padding:1px 5px;border-radius:3px;">💰 ${parseFloat(textPaid).toFixed(3)} ${escHtml(cur)}</span>` : '';
+    el.innerHTML = `<div class="lmsg-meta"><span>@${isSelf?myUsername:from}</span>${typeBadge}${paidBadge}${sigBadge}<span>${stampText}</span></div><div class="lmsg-text">${linkify(text)}</div>`;
   }
   c.appendChild(el); c.scrollTop = c.scrollHeight;
 }
@@ -1701,7 +1767,8 @@ socket.on('room-created', ({ roomName }) => {
   document.getElementById('room-name-input').value = '';
   document.getElementById('room-name-status').textContent = '';
   document.getElementById('create-btn').disabled = true;
-  amCreator = true; pendingCallType = 'video'; enterRoom(roomName);
+  // Rooms enter in text-only mode; user clicks Enable Mic / Enable Cam to opt in.
+  amCreator = true; pendingCallType = 'text'; enterRoom(roomName);
 });
 socket.on('room-create-error', (msg) => {
   document.getElementById('room-name-status').textContent = msg;
@@ -1722,7 +1789,8 @@ let pendingInvite = null;
 function acceptInvite() {
   if (!pendingInvite) return;
   document.getElementById('invite-popup').style.display = 'none';
-  amCreator = false; pendingCallType = 'video'; enterRoom(pendingInvite.roomName); pendingInvite = null;
+  // Room invites enter in text-only mode; user can Enable Mic / Cam in-room.
+  amCreator = false; pendingCallType = 'text'; enterRoom(pendingInvite.roomName); pendingInvite = null;
 }
 function declineInvite() {
   document.getElementById('invite-popup').style.display = 'none';
@@ -1732,7 +1800,8 @@ function declineInvite() {
 function knockRoom(name) {
   const roomName = name || document.getElementById('knock-input').value.trim();
   if (!roomName) return;
-  amCreator = false; pendingCallType = 'video'; enterRoom(roomName);
+  // Knocking joins in text-only mode; user can Enable Mic / Cam in-room.
+  amCreator = false; pendingCallType = 'text'; enterRoom(roomName);
 }
 socket.on('join-rejected', ({ room, reason }) => {
   addLobbyMsg({type:'system',text:`Could not join #${room}: ${reason}`});
@@ -2159,14 +2228,30 @@ function hideIncomingOverlay() {
 async function enterRoom(roomName) {
   currentRoom = roomName;
   return new Promise(async (resolve) => {
-  try {
-    const wantVideo = (pendingCallType === 'video');
-    localStream = await navigator.mediaDevices.getUserMedia({ video: wantVideo, audio: true });
-    document.getElementById('local-video').srcObject  = localStream;
-    document.getElementById('local-label').textContent = '@' + myUsername + (wantVideo ? ' (you)' : ' (voice)');
-    // Hide video panel for voice-only calls
-    document.getElementById('video-panel').style.display = wantVideo ? '' : 'none';
-  } catch(err) { alert('Camera/mic error: ' + err.message); currentRoom = ''; return; }
+  const micBtn = document.getElementById('enable-mic-btn');
+  const camBtn = document.getElementById('enable-cam-btn');
+  micBtn.classList.remove('shown');
+  camBtn.classList.remove('shown');
+  if (pendingCallType === 'text') {
+    // Text-only entry — no media acquisition. User opts in via the
+    // Enable Mic / Enable Cam buttons in the chat header.
+    localStream = null;
+    document.getElementById('video-panel').style.display = 'none';
+    document.getElementById('local-label').textContent = '@' + myUsername + ' (text)';
+    micBtn.classList.add('shown');
+    camBtn.classList.add('shown');
+  } else {
+    try {
+      const wantVideo = (pendingCallType === 'video');
+      localStream = await navigator.mediaDevices.getUserMedia({ video: wantVideo, audio: true });
+      document.getElementById('local-video').srcObject  = localStream;
+      document.getElementById('local-label').textContent = '@' + myUsername + (wantVideo ? ' (you)' : ' (voice)');
+      // Hide video panel for voice-only calls
+      document.getElementById('video-panel').style.display = wantVideo ? '' : 'none';
+      // If voice-only, let user upgrade to video mid-call via the Enable Cam button.
+      if (!wantVideo) camBtn.classList.add('shown');
+    } catch(err) { alert('Camera/mic error: ' + err.message); currentRoom = ''; return; }
+  }
   showScreen('room-screen');
   document.getElementById('room-badge').textContent   = '# ' + roomName;
   document.getElementById('room-badge').style.display = '';
@@ -2193,6 +2278,9 @@ function leaveRoom() {
   selectedRecipients.clear();
   document.querySelectorAll('#video-panel .video-wrapper:not(:first-child)').forEach(w => w.remove());
   document.getElementById('video-panel').style.display = ''; // restore for next call
+  document.getElementById('local-video').srcObject = null;
+  document.getElementById('enable-mic-btn').classList.remove('shown');
+  document.getElementById('enable-cam-btn').classList.remove('shown');
   document.getElementById('room-users-list').innerHTML = '';
   document.getElementById('messages').innerHTML = '<div class="msg-system">Messages are signed and encrypted with Hive keys.</div>';
   document.getElementById('allowlist-panel').style.display = 'none';
@@ -2632,12 +2720,67 @@ socket.on('user-left', (socketId) => {
 
 // ── WebRTC ───────────────────────────────────────────────
 socket.on('offer', async ({ from, offer }) => {
-  const pc = createPC(from);
+  // Reuse the existing peer connection on renegotiation (e.g. when a
+  // text-only joiner clicks Enable Mic / Enable Cam). createPC would
+  // otherwise stomp on an established connection and drop tracks.
+  const pc = peers[from] || createPC(from);
   await pc.setRemoteDescription(new RTCSessionDescription(offer));
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
   rsock().emit('answer', { to: from, answer });
 });
+
+// ── Mic / Cam opt-in (text-only room joiners or voice-only callers) ───
+async function enableMic() {
+  if (localStream && localStream.getAudioTracks().length > 0) return;
+  try {
+    const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const audioTrack  = audioStream.getAudioTracks()[0];
+    if (!localStream) {
+      localStream = new MediaStream();
+      document.getElementById('local-video').srcObject = localStream;
+    }
+    localStream.addTrack(audioTrack);
+    // Push the new track to every peer + renegotiate.
+    for (const peerId in peers) {
+      const pc = peers[peerId];
+      pc.addTrack(audioTrack, localStream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      rsock().emit('offer', { to: peerId, offer });
+    }
+    document.getElementById('enable-mic-btn').classList.remove('shown');
+    addSystemMsg('🎤 Microphone enabled');
+  } catch(err) {
+    alert('Microphone error: ' + err.message);
+  }
+}
+
+async function enableCam() {
+  if (localStream && localStream.getVideoTracks().length > 0) return;
+  try {
+    const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const videoTrack  = videoStream.getVideoTracks()[0];
+    if (!localStream) {
+      localStream = new MediaStream();
+    }
+    localStream.addTrack(videoTrack);
+    document.getElementById('local-video').srcObject  = localStream;
+    document.getElementById('local-label').textContent = '@' + myUsername + ' (you)';
+    document.getElementById('video-panel').style.display = '';
+    for (const peerId in peers) {
+      const pc = peers[peerId];
+      pc.addTrack(videoTrack, localStream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      rsock().emit('offer', { to: peerId, offer });
+    }
+    document.getElementById('enable-cam-btn').classList.remove('shown');
+    addSystemMsg('🎥 Camera enabled');
+  } catch(err) {
+    alert('Camera error: ' + err.message);
+  }
+}
 socket.on('answer',        async ({ from, answer })    => { if (peers[from]) await peers[from].setRemoteDescription(new RTCSessionDescription(answer)); });
 socket.on('ice-candidate', async ({ from, candidate }) => { if (peers[from]&&candidate) try { await peers[from].addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} });
 function createPC(peerId) {
