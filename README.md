@@ -173,6 +173,14 @@ Each online user shows three action buttons:
 
 Separate rates can be set for voice and video in the rates post. Federated users (on a different v4call server) appear in the lobby with a small server-domain badge — calling/DMing them works the same way.
 
+**In-room media controls:** Once you're in a room (1:1 call or multi-party room), three buttons in the chat header let you toggle your own devices on the fly:
+
+- 🎤 **Enable Mic / Disable Mic** — full release on disable, so the browser's microphone indicator actually goes away (not a soft mute). Re-enable re-acquires the device.
+- 🎥 **Enable Cam / Disable Cam** — same pattern; the camera light turns off when disabled.
+- 🖥️ **Share Screen** — placeholder in v0.13 (visible button so the layout is stable); the real `getDisplayMedia()` flow lands in v0.15 with the spotlight room layout.
+
+Room joins (knock, accept invite, room creation) default to **text-only** — no camera/mic prompt until you click one of the toggle buttons.
+
 ### Direct Messages
 
 - End-to-end encrypted using Hive posting keys — server stores only ciphertext
@@ -408,9 +416,9 @@ The active development plan, in order. Each version ships independently. Full de
 | Version | Scope |
 |---------|-------|
 | ~~**v0.12**~~ ✅ shipped | Polish: iOS zoom, mobile DM picker layout, room joins default to text-only with mid-room 🎤/🎥 enable + WebRTC renegotiation, DM dedup, paid-DM currency badge fix, discovery scanner repaired (Hive `limit` cap), `/admin/discovery-test` diagnostic |
-| ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated (no more mixing into lobby chat) + server-driven lobby notice + anti-spam gate (HP / token / both, owned-HP only) |
+| ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated + server-driven lobby notice + anti-spam gate (HP / liquid HIVE / Hive-Engine token, configurable OR/AND) + mid-room mic/cam toggles (full release on disable) + 🖥️ Share Screen button placeholder for v0.15 |
 | **v0.14** | Token-gated rooms (allowlist OR balance) + live banlist with optional public visibility |
-| **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation |
+| **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation + 🖥️ Share Screen wired up (the v0.13 placeholder) |
 | **v0.16 / fed v0.4** | Cross-server rooms — federated invites, multi-party cross-server WebRTC, token-gating across federation |
 | **v0.17 / fed v0.5** | **Paid Expert Invites** — admin pays an invited expert to join a room; reverses the v4call payment direction. Turns v4call into paid consulting infrastructure. The seed feature. |
 

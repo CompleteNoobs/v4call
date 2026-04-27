@@ -418,12 +418,14 @@
     #chat-panel{display:flex;flex-direction:column;flex:1;overflow:hidden;}
     #chat-header{padding:9px 14px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
     #peer-count{margin-left:auto;}
-    #enable-mic-btn,#enable-cam-btn{display:none;padding:5px 11px;background:transparent;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;transition:background 0.15s,opacity 0.2s;}
+    #enable-mic-btn,#enable-cam-btn,#share-screen-btn{display:none;padding:5px 11px;background:transparent;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;transition:background 0.15s,opacity 0.2s;}
     #enable-mic-btn{color:var(--green);border:1px solid rgba(74,222,128,0.4);}
     #enable-mic-btn:hover{background:rgba(74,222,128,0.1);}
     #enable-cam-btn{color:var(--blue);border:1px solid rgba(56,189,248,0.4);}
     #enable-cam-btn:hover{background:rgba(56,189,248,0.1);}
-    #enable-mic-btn.shown,#enable-cam-btn.shown{display:inline-flex;align-items:center;}
+    #share-screen-btn{color:var(--accent);border:1px solid rgba(245,166,35,0.4);}
+    #share-screen-btn:hover{background:rgba(245,166,35,0.1);}
+    #enable-mic-btn.shown,#enable-cam-btn.shown,#share-screen-btn.shown{display:inline-flex;align-items:center;}
     #users-panel{width:160px;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
     #users-panel-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);}
     #users-panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);letter-spacing:0.05em;}
@@ -747,8 +749,9 @@
     <div id="chat-header">
       <span id="chat-room-name">ROOM</span>
       <span id="peer-count">no others yet</span>
-      <button id="enable-mic-btn" onclick="enableMic()" title="Turn on your microphone for this room">🎤 Enable Mic</button>
-      <button id="enable-cam-btn" onclick="enableCam()" title="Turn on your camera for this room">🎥 Enable Cam</button>
+      <button id="enable-mic-btn"   onclick="toggleMic()"    title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
+      <button id="enable-cam-btn"   onclick="toggleCam()"    title="Turn your camera on or off for this room">🎥 Enable Cam</button>
+      <button id="share-screen-btn" onclick="toggleScreen()" title="Share your screen with the room">🖥️ Share Screen</button>
     </div>
     <div id="call-cost-ticker">
       <div class="ticker-item"><div class="ticker-label">DURATION</div><div class="ticker-value" id="ticker-duration">00:00</div></div>
@@ -2339,18 +2342,17 @@ function hideIncomingOverlay() {
 async function enterRoom(roomName) {
   currentRoom = roomName;
   return new Promise(async (resolve) => {
-  const micBtn = document.getElementById('enable-mic-btn');
-  const camBtn = document.getElementById('enable-cam-btn');
-  micBtn.classList.remove('shown');
-  camBtn.classList.remove('shown');
+  // Always show the three media-control buttons in-room. Their labels track
+  // current state; the Share Screen button is a v0.13 placeholder until v0.15.
+  document.getElementById('enable-mic-btn').classList.add('shown');
+  document.getElementById('enable-cam-btn').classList.add('shown');
+  document.getElementById('share-screen-btn').classList.add('shown');
   if (pendingCallType === 'text') {
     // Text-only entry — no media acquisition. User opts in via the
     // Enable Mic / Enable Cam buttons in the chat header.
     localStream = null;
     document.getElementById('video-panel').style.display = 'none';
     document.getElementById('local-label').textContent = '@' + myUsername + ' (text)';
-    micBtn.classList.add('shown');
-    camBtn.classList.add('shown');
   } else {
     try {
       const wantVideo = (pendingCallType === 'video');
@@ -2359,10 +2361,9 @@ async function enterRoom(roomName) {
       document.getElementById('local-label').textContent = '@' + myUsername + (wantVideo ? ' (you)' : ' (voice)');
       // Hide video panel for voice-only calls
       document.getElementById('video-panel').style.display = wantVideo ? '' : 'none';
-      // If voice-only, let user upgrade to video mid-call via the Enable Cam button.
-      if (!wantVideo) camBtn.classList.add('shown');
     } catch(err) { alert('Camera/mic error: ' + err.message); currentRoom = ''; return; }
   }
+  updateMediaButtons();
   showScreen('room-screen');
   document.getElementById('room-badge').textContent   = '# ' + roomName;
   document.getElementById('room-badge').style.display = '';
@@ -2392,6 +2393,11 @@ function leaveRoom() {
   document.getElementById('local-video').srcObject = null;
   document.getElementById('enable-mic-btn').classList.remove('shown');
   document.getElementById('enable-cam-btn').classList.remove('shown');
+  document.getElementById('share-screen-btn').classList.remove('shown');
+  // Reset button labels for the next room
+  document.getElementById('enable-mic-btn').textContent = '🎤 Enable Mic';
+  document.getElementById('enable-cam-btn').textContent = '🎥 Enable Cam';
+  document.getElementById('share-screen-btn').textContent = '🖥️ Share Screen';
   document.getElementById('room-users-list').innerHTML = '';
   document.getElementById('messages').innerHTML = '<div class="msg-system">Messages are signed and encrypted with Hive keys.</div>';
   document.getElementById('allowlist-panel').style.display = 'none';
@@ -2841,7 +2847,25 @@ socket.on('offer', async ({ from, offer }) => {
   rsock().emit('answer', { to: from, answer });
 });
 
-// ── Mic / Cam opt-in (text-only room joiners or voice-only callers) ───
+// ── Mic / Cam toggles (Enable ↔ Disable) — full stop + re-acquire ─────
+// Disable fully releases the device (browser mic/cam indicator goes away);
+// Enable re-acquires from scratch with getUserMedia. Each transition does a
+// proper WebRTC renegotiation so peers see/hear the right thing.
+
+async function toggleMic() {
+  if (localStream && localStream.getAudioTracks().length > 0) await disableMic();
+  else                                                        await enableMic();
+}
+async function toggleCam() {
+  if (localStream && localStream.getVideoTracks().length > 0) await disableCam();
+  else                                                        await enableCam();
+}
+function toggleScreen() {
+  // v0.13 placeholder — real getDisplayMedia() flow lands in v0.15 alongside
+  // the spotlight room layout. Button visible now so the UI is stable.
+  addSystemMsg('🖥️ Screen sharing arrives in v0.15 — UI placeholder for now.');
+}
+
 async function enableMic() {
   if (localStream && localStream.getAudioTracks().length > 0) return;
   try {
@@ -2852,7 +2876,6 @@ async function enableMic() {
       document.getElementById('local-video').srcObject = localStream;
     }
     localStream.addTrack(audioTrack);
-    // Push the new track to every peer + renegotiate.
     for (const peerId in peers) {
       const pc = peers[peerId];
       pc.addTrack(audioTrack, localStream);
@@ -2860,11 +2883,33 @@ async function enableMic() {
       await pc.setLocalDescription(offer);
       rsock().emit('offer', { to: peerId, offer });
     }
-    document.getElementById('enable-mic-btn').classList.remove('shown');
+    updateMediaButtons();
     addSystemMsg('🎤 Microphone enabled');
   } catch(err) {
     alert('Microphone error: ' + err.message);
   }
+}
+
+async function disableMic() {
+  if (!localStream) return;
+  const audioTracks = localStream.getAudioTracks();
+  if (audioTracks.length === 0) return;
+  const audioTrack = audioTracks[0];
+  // Stop the device first so the browser's mic indicator disappears even if
+  // the renegotiation is slow. Then drop senders + renegotiate so peers see
+  // the track removal.
+  audioTrack.stop();
+  localStream.removeTrack(audioTrack);
+  for (const peerId in peers) {
+    const pc = peers[peerId];
+    const sender = pc.getSenders().find(s => s.track === audioTrack);
+    if (sender) pc.removeTrack(sender);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    rsock().emit('offer', { to: peerId, offer });
+  }
+  updateMediaButtons();
+  addSystemMsg('🎤 Microphone disabled');
 }
 
 async function enableCam() {
@@ -2886,11 +2931,43 @@ async function enableCam() {
       await pc.setLocalDescription(offer);
       rsock().emit('offer', { to: peerId, offer });
     }
-    document.getElementById('enable-cam-btn').classList.remove('shown');
+    updateMediaButtons();
     addSystemMsg('🎥 Camera enabled');
   } catch(err) {
     alert('Camera error: ' + err.message);
   }
+}
+
+async function disableCam() {
+  if (!localStream) return;
+  const videoTracks = localStream.getVideoTracks();
+  if (videoTracks.length === 0) return;
+  const videoTrack = videoTracks[0];
+  videoTrack.stop();
+  localStream.removeTrack(videoTrack);
+  for (const peerId in peers) {
+    const pc = peers[peerId];
+    const sender = pc.getSenders().find(s => s.track === videoTrack);
+    if (sender) pc.removeTrack(sender);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    rsock().emit('offer', { to: peerId, offer });
+  }
+  // Hide the local video panel if we no longer have any video to show.
+  if (localStream.getVideoTracks().length === 0) {
+    document.getElementById('video-panel').style.display = 'none';
+  }
+  updateMediaButtons();
+  addSystemMsg('🎥 Camera disabled');
+}
+
+function updateMediaButtons() {
+  const micBtn = document.getElementById('enable-mic-btn');
+  const camBtn = document.getElementById('enable-cam-btn');
+  const hasAudio = localStream && localStream.getAudioTracks().length > 0;
+  const hasVideo = localStream && localStream.getVideoTracks().length > 0;
+  if (micBtn) micBtn.textContent = hasAudio ? '🎤 Disable Mic' : '🎤 Enable Mic';
+  if (camBtn) camBtn.textContent = hasVideo ? '🎥 Disable Cam' : '🎥 Enable Cam';
 }
 socket.on('answer',        async ({ from, answer })    => { if (peers[from]) await peers[from].setRemoteDescription(new RTCSessionDescription(answer)); });
 socket.on('ice-candidate', async ({ from, candidate }) => { if (peers[from]&&candidate) try { await peers[from].addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} });
