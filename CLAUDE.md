@@ -10,8 +10,8 @@ v4call is a decentralised paid video, voice, and text communication platform bui
 
 ## Current Version
 
-- **Software:** v0.11 — multi-server federation working between two production-deployed servers (call.completenoobs.com ↔ hive-book.com).
-- **Federation protocol:** v0.3 — verify.json domain proof, Hive-tag discovery directory, manual peer approval, paid cross-server calls + DMs.
+- **Software:** v0.13 — 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) on top of v0.12. DMs no longer mix into lobby chat (own message container). Server-driven lobby notice + requirements text via new `lobby-config` event. Anti-spam gate on lobby posting (HP and/or Hive-Engine token threshold, configurable, cached, short-circuits when disabled). Production-deployed on call.completenoobs.com ↔ hive-book.com.
+- **Federation protocol:** v0.3 — unchanged from v0.11. verify.json domain proof, Hive-tag discovery directory, manual peer approval, paid cross-server calls + DMs.
 
 The version split is intentional: the application keeps evolving (UI/UX/features), the federation protocol bumps separately when wire-format changes.
 
@@ -88,7 +88,7 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 5. On the wire, federation messages: `hello` (with verify recheck), `presence`, `user-online`/`user-offline`, `dm`, `call-invite`/`call-response`/`call-declined`/`call-cancelled`/`call-missed`, `payment-verified`, `call-ended`, `call-receipt-fed`.
 6. For paid cross-server calls/DMs, the caller pays the *callee's escrow on Hive* directly. The caller's server verifies on-chain and forwards the payment notification to the callee's server. The callee's server independently re-verifies and disburses (callee-net, platform-fee) from its own escrow at call end. Refunds to the caller are cross-server Hive transfers from the callee's escrow.
 
-## Features (What's Built and Working in v0.11)
+## Features (What's Built and Working in v0.13)
 
 ### Core (single-server)
 - **Login:** Hive Keychain (recommended, no key paste) or manual posting key
@@ -111,6 +111,28 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **Payment flow:** Ring fee → connect fee → duration deposit. Unused credit refunded. Platform fee deducted. All verified on-chain before proceeding.
 - **Call types:** Voice and video have separate rate tiers in the rates post
 - **Mobile UI:** Responsive `@media (max-width: 720px)` collapses three columns into a full-width single column with a fixed bottom-tab nav (USERS/CHAT/ROOMS for lobby, VIDEO/CHAT/MEMBERS for room)
+
+### v0.12 polish (added on top of v0.11)
+- **iOS viewport zoom fix:** Inputs/textareas forced to 16px on `≤720px` so iOS Safari/WebKit doesn't auto-zoom on focus and leave the page zoomed-in afterward.
+- **Mobile DM panel layout:** Header wraps so multi-token picker chips appear on their own row below the title; body stacks textarea on its own full-width row with cancel + send below (the prior single-row layout cramped the textarea down to ~30% of the viewport).
+- **DM dedup:** Per-conversation history is fetched once per session (`dmHistoryLoaded` Set); message-level dedup by signature in `addLobbyMsg` catches reconnect/preview overlaps. Fixes the "every DM-button click re-appends history" bug.
+- **Paid-DM currency badge:** `dm_messages` schema migrated to add a `currency` column. `lobby-dm` socket payload + federation `dm` message now carry `textCurrency`; client renders the actual currency in the badge instead of hardcoded "HBD". History rows now display their original send timestamp instead of `new Date()`.
+- **Room joins default to text-only:** `room-created` / `acceptInvite` / `knockRoom` paths set `pendingCallType = 'text'` — no media acquisition on join. Two new buttons in the room chat header (`🎤 Enable Mic`, `🎥 Enable Cam`) opt the user in mid-room with proper WebRTC renegotiation. The `socket.on('offer')` handler reuses an existing peer connection if one exists, so adding tracks mid-call works without dropping the connection. 1:1 voice/video calls still acquire media as before.
+- **Discovery scanner repaired:** Hive nodes tightened `condenser_api.get_discussions_by_created` to a max `limit` of 20 (was 50). Every node was returning `Assert Exception` and `hivePost` was silently swallowing it. Cap reduced to 20; Hive node fallback list refreshed (dropped `anyx.io`, `hived.emre.sh`; added `hive-api.arcange.eu`, `api.openhive.network`, `techcoderx.com`).
+- **`hivePost` logging:** Now logs HTTP status, JSON-RPC errors, and raw body preview when a node returns 200 OK but no `result` field. The previous silent skip turned every protocol-level breakage into "discovery returned 0 — must be a network bug".
+- **Token balance cache hardening:** `getHiveEngineTokenBalance` no longer caches a 0 result from API errors, error responses, or unexpected response shapes — only from genuine empty-balance responses. Prevents a transient Hive-Engine hiccup from poisoning the picker for 5 minutes.
+- **`/admin/discovery-test` endpoint:** Auth-protected diagnostic that hits each Hive node directly with the discovery query and returns per-node HTTP status + result count + raw preview, plus the cached peer list. Designed to be run via `docker compose exec app curl` (curl now installed in the container) so you see what the running container sees.
+- **`/debug-rates` extended:** Now includes `picker_diagnostics` showing per-token caller balance, qualifies-flag, and which call types each token covers — so picker UI mismatches can be diagnosed without a fresh build.
+
+### v0.13 polish (added on top of v0.12)
+- **4-tab lobby UI:** Lobby panel now has four tabs — `💬 DMs / 📢 Local Lobby / 🚪 Active Rooms / ✉️ Included Rooms`. Default active tab on login is `lobby`. Mobile bottom-tab nav mirrors the new structure with four buttons (`USERS / DMS / LOBBY / ROOMS`); `Included Rooms` is reachable on mobile via the inline `#lobby-tabs` strip at the top.
+- **DM panel relocated:** `#dm-panel` now lives inside the DM tab. DM messages render into a dedicated `#dm-messages` container; `addLobbyMsg` routes by `type === 'dm'` so DMs no longer mix into the lobby broadcast/system feed. Resolves the "DMs mixing into lobby chat" UX issue without changing the existing `dm-history` / `lobby-dm` / dedup machinery.
+- **DM tab user picker:** Top of the DM tab shows a chip-row of currently-online users (sourced from `window.lobbyUsers` set in the existing `lobby-users` handler). Click a chip → `openDmPanel(username)` opens the conversation.
+- **Included Rooms tab:** Rooms where the current user is on the allowlist *and* `memberCount === 0` show with a "Knock →" button (reuses existing `knockRoom(name)`). Active Rooms tab continues to show rooms with `memberCount > 0`. Both lists update from the same `lobby-rooms` socket event by partitioning the payload client-side; server payload unchanged.
+- **`lobby-config` socket event:** Server emits on `lobby-join` with `{ serverName, serverDomain, notice, requirementsText }`. Client renders `notice` as a `.lobby-notice` block above lobby messages; `requirementsText` renders as a `.lobby-requirements` block below it (hidden if empty). Both texts auto-generate from gate vars + `SERVER_DOMAIN` when the corresponding env var is blank.
+- **Anti-spam gate on lobby posting:** Server-side check on both `lobby-chat` (broadcast) and `lobby-encrypted` (toggle) handlers. Three new env vars: `LOBBY_POST_MIN_HP`, `LOBBY_POST_MIN_TOKEN` (`SYMBOL:amount` format), `LOBBY_POST_GATE_MODE` (`or` default / `and`). Gate is **fully short-circuited** when both thresholds are disabled — no extra Hive API calls per message. DMs and calls are unaffected.
+- **`getHivePower` helper:** New helper at the same level as `getHiveEngineTokenBalance`. Looks up `vesting_shares` via `condenser_api.get_accounts`, converts using `total_vesting_fund_hive / total_vesting_shares` from `condenser_api.get_dynamic_global_properties`. **Owned VESTS only** — does NOT include `delegated_vesting_shares` or `received_vesting_shares` so a whale can't rent out posting privileges. 5-min cache (mirrors token cache pattern), with a 1-hour cache for `hive_per_vest` (it moves slowly). Failures don't poison the cache.
+- **`lobby-post-rejected` event:** New socket event the server emits when the gate fails. Client renders it as a system message: `⚠ This server requires X HP OR Y TOKEN to post in the lobby. You have ... .`
 
 ### Federation (v0.3)
 - **Server-to-server WebSocket:** persistent connection on `/federation`, domain tiebreaker so only the lower-domain initiates outbound (avoids flapping)
@@ -166,7 +188,10 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **Verify.json placeholder:** The repo ships a tiny placeholder at `public/.well-known/v4call-server.json`. Each operator must overwrite it with their own signed file from `/server-sign.html` before federation works. Commit your generated file so fresh installs include it.
 - **Federation flapping:** If you see endless `Outbound connected → Disconnected` cycles, the domain tiebreaker may be misconfigured or the peer's verify.json isn't matching. Check both sides' logs for `✓ Peer verified` or `✗ Peer verification failed`.
 - **Federated paid call/DM fails silently:** Likely an escrow mismatch — the user's rates post points at an escrow not controlled by their home server. Caller-side server emits a clear `lobby-dm-error` or `call-failed` explaining this once the federation hello has exchanged escrow info.
-- **Hive node failures look quiet:** The `hivePost` helper only logs nodes that *throw*. Nodes returning `{error: ...}` (no `result` field) are silently skipped to the next node. If discovery returns "No response", grep `[hive]` in logs to see partial failure data — but two of four nodes can fail invisibly.
+- **Hive node failures look quiet:** Fixed in v0.12 — `hivePost` now logs HTTP status, JSON-RPC errors, and a raw body preview when a node returns 200 OK without `result`. If you ever see this regress, check `server.js`'s `hivePost` helper.
+- **`condenser_api.get_discussions_by_created` `limit` cap is 20:** Hive nodes enforce this with `Assert Exception` on values > 20. The discovery scanner's `limit` was 50 in v0.11 and silently failed on every node; fixed in v0.12. If you add another `get_discussions_by_*` query, keep `limit ≤ 20` and paginate via `start_author + start_permlink` if you need more.
+- **Browser cache hides client fixes:** After a `docker compose ... up -d` of new client code, mobile Safari/Brave can keep serving the cached `index.html` for hours. If a fix that should be visible isn't, clear browser history/site data on the device first.
+- **iPhone Hive Keychain doesn't inject `window.hive_keychain`:** iOS Safari and iOS Brave (also WebKit) don't allow extensions that inject scripts into pages. The Hive Keychain *mobile app* exists but can't talk to web pages the way the desktop extension does, so paid actions fall through the "Keychain required" error on iOS. **Not a v4call bug.** Future workaround options: HiveSigner web flow (`https://hivesigner.com/sign/transfer?...`) as a fallback when `window.hive_keychain` is undefined; or `@hiveio/keychain-sdk` for QR/deep-link handshake to the mobile app. See "Future Work" for the planned approach.
 
 ## Coding Style
 
@@ -202,13 +227,16 @@ BIND_HOST                — Bind address (default: 127.0.0.1)
 FEDERATION_PEERS         — Comma-separated peer WS URLs (e.g. wss://peer.com/federation).
                            Listed peers are auto-approved on startup. Blank = standalone mode.
 
-# v0.13 additions (planned — not yet built)
+# v0.13 — Lobby Notice + Anti-Spam Gate (built)
 LOBBY_NOTICE             — Custom text shown under the lobby title. Blank = auto-generated
-                           from SERVER_DOMAIN + "Local lobby — federation via DM/calls".
+                           from SERVER_DOMAIN ("<domain> — local lobby. For federated
+                           contacts use rooms / DMs / calls.").
 LOBBY_REQUIREMENTS_TEXT  — Custom text describing posting requirements. Blank = auto-
                            generated from the gate vars below.
-LOBBY_POST_MIN_HP        — Minimum Hive Power to post in lobby (e.g. 100). Blank = no HP gate.
-LOBBY_POST_MIN_TOKEN     — Minimum custom token to post in lobby (format: SYMBOL:amount,
+LOBBY_POST_MIN_HP        — Minimum *owned* Hive Power to post in lobby (broadcast or
+                           encrypted-toggle). 0 or blank = no HP gate. Does not affect
+                           DMs or calls. Owned-only — delegated-in HP does NOT count.
+LOBBY_POST_MIN_TOKEN     — Minimum custom token balance to post (format: SYMBOL:amount,
                            e.g. HIVEBOOK:10). Blank = no token gate.
 LOBBY_POST_GATE_MODE     — or | and. Only used when BOTH gates above are set.
                            "or"  = user passes if EITHER HP or token threshold met (default)
@@ -256,29 +284,26 @@ LOBBY_POST_GATE_MODE     — or | and. Only used when BOTH gates above are set.
 
 The active development plan, in order. Each version is independently shippable.
 
-### v0.12 — Polish + Diagnose (1–2 sessions)
-- Mobile viewport zoom fix (lobby starts zoomed-in on first load)
-- Mobile DM panel — currency picker (CNOOBS / token chooser) parity with desktop
-- Room joins default to **text-only**; user clicks explicit button to enable cam/mic
-- DM preview duplication fix — client-side dedup so reconnects don't append the same message multiple times
-- `text-payment-received` event leaking to sender side — investigate + fix
-- Discovery scanner returning 0 peers despite Hive having posts:
-  - Better logging in `hivePost` helper (currently silently skips nodes that return without `result`)
-  - Refresh fallback Hive node list (anyx.io / hived.emre.sh have been intermittent/dead)
-  - Verify the request from inside the container
+### v0.12 — Polish + Diagnose ✅ shipped
+All items below landed. See "v0.12 polish" section above for what each fix does.
+- ~~Mobile viewport zoom fix~~ → 16px input rule on `≤720px` (iOS-only issue, Android was fine)
+- ~~Mobile DM panel currency picker parity with desktop~~ → header wrapping + body stacking on mobile
+- ~~Room joins default to text-only~~ → with `🎤 Enable Mic` / `🎥 Enable Cam` buttons + WebRTC renegotiation
+- ~~DM preview duplication fix~~ → `dmHistoryLoaded` Set + signature dedup in `addLobbyMsg`
+- ~~`text-payment-received` event leaking to sender~~ → wasn't actually leaking; same root cause as the dedup bug (sender was seeing repeated history renders, mistook for a server-side leak)
+- ~~Discovery scanner returning 0 peers~~ → Hive node `limit` capped at 20 (was 50). Fixed + improved logging exposed it within minutes.
+- **Bonus fixes added during the pass:**
+  - Paid-DM badge now shows the actual currency (was hardcoded "HBD"); `dm_messages` schema migrated to add `currency` column
+  - Token balance cache no longer poisons itself with 0 from API errors
+  - `/admin/discovery-test` + extended `/debug-rates` for fast diagnosis without a fresh build
+  - `curl` added to the container (was missing — alpine ships only `wget`)
 
-### v0.13 — Lobby Reorganization + Notice + Anti-Spam Gate (1–2 sessions)
-- 4-tab lobby layout: **DM / Local Lobby / Active Rooms / Included Rooms**
-- "Included Rooms" = rooms you're allowlisted to but not currently in
-- Migrate the DM panel into its own tab cleanly (resolves the "DMs mixing into lobby chat" UX issue)
-- **Lobby title / notice** — server emits `lobby-config` event on connect with admin-set text:
-  - `LOBBY_NOTICE` — short text under the lobby title, makes it clear the lobby is local-server-only ("for federated contacts use rooms / DMs / calls"). Auto-generated from `SERVER_DOMAIN` if blank.
-  - `LOBBY_REQUIREMENTS_TEXT` — short text describing the posting gate (auto-generated from the gate vars if blank).
-- **Anti-spam gate on lobby posting** — server-side check on `lobby-chat` and `lobby-encrypted`. Three configs:
-  - `LOBBY_POST_MIN_HP` — minimum Hive Power required (lookup via `condenser_api.get_accounts` → `vesting_shares` → convert to HP using `dynamic_global_properties.hive_per_vest`). Cached per-user, 5-min TTL like the existing token cache.
-  - `LOBBY_POST_MIN_TOKEN` — minimum custom token balance, format `SYMBOL:amount`. Reuses existing `getHiveEngineTokenBalance`.
-  - `LOBBY_POST_GATE_MODE` — `or` (default) or `and`. Only relevant when both gates above are set. Set just one to require only that one. Set neither = no gate (current behaviour).
-  - Rejection emits a clear error: *"This server requires 100 HP or 10 HIVEBOOK to post. You have 50 HP and 0 HIVEBOOK."* Same shape as existing rate-rejection messages.
+### v0.13 — Lobby Reorganization + Notice + Anti-Spam Gate ✅ shipped
+All items below landed. See "v0.13 polish" section above for what each fix does.
+- ~~4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms)~~
+- ~~DM panel relocated into its own tab + dedicated `#dm-messages` container~~
+- ~~`lobby-config` event with `LOBBY_NOTICE` / `LOBBY_REQUIREMENTS_TEXT`~~ (auto-generated from gate vars + `SERVER_DOMAIN` when blank)
+- ~~Anti-spam gate on `lobby-chat` / `lobby-encrypted` with `LOBBY_POST_MIN_HP` / `LOBBY_POST_MIN_TOKEN` / `LOBBY_POST_GATE_MODE`~~ — short-circuits when disabled, owned-HP only (no delegated)
 
 ### v0.14 — Token-Gated Rooms + Banlist (1 session)
 - Room creator can set optional `min_token_balance: { symbol, amount }` gate at room creation
@@ -328,9 +353,10 @@ The active development plan, in order. Each version is independently shippable.
 - **Connect fee charged upfront on accept** (v0.17 toggle) — opposite of the locked-in "bundle with final bill" mode. Some admins may prefer it; add as a per-invite toggle if requested.
 
 ### Longer-Term Future Work
+- **iPhone paid-action workaround** — see "iPhone Hive Keychain doesn't inject" in Known Gotchas. Plan: detect missing `window.hive_keychain` on mobile and fall back to a HiveSigner web URL (`https://hivesigner.com/sign/transfer?...` for HBD, `/sign/custom-json?...` for Hive-Engine tokens). User approves in the HiveSigner tab and returns to v4call. Adds an external dependency (hivesigner.com uptime + trust) but works with no extension and no SDK. Bigger version with `@hiveio/keychain-sdk` (QR/deep-link to the Keychain mobile app) is more polished but requires a build step.
 - Persistent (non-ephemeral) rooms option
 - Per-conversation read tracking (currently per-user last_seen)
-- Voice-to-video upgrade mid-call
+- Voice-to-video upgrade mid-call (now half-built — v0.12 added enable-mic / enable-cam mid-room with renegotiation; the 1:1-call upgrade variant would reuse the same mechanism)
 - STUN/TURN server configuration via .env
 - Server-side signature verification
 - Rate limiting middleware

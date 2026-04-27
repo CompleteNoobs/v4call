@@ -7,8 +7,8 @@ Video, audio and text calling with Hive blockchain identity, HBD micropayments, 
 Callers pay to ring. Callees set their own rates. Unused credit is refunded. Everything is on-chain.
 
 **Current version**
-- Software **v0.11** — production-deployed, multi-server federation working between [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com)
-- Federation protocol **v0.3** — verify.json domain proof, on-chain peer discovery, operator approval, paid cross-server calls + DMs
+- Software **v0.13** — 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) on top of v0.12. DMs no longer mix into lobby chat. Server-driven lobby notice + requirements text. Anti-spam gate on lobby posting (HP and/or Hive-Engine token thresholds, configurable per server). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
+- Federation protocol **v0.3** — unchanged from v0.11. verify.json domain proof, on-chain peer discovery, operator approval, paid cross-server calls + DMs
 
 **Key features**
 - Voice-only and video calls with separate rate tiers
@@ -50,6 +50,8 @@ Hive blockchain transactions themselves are **free** (no per-tx cost like Bitcoi
 **New to self-hosting?** Follow the complete step-by-step walkthrough:
 
 **[→ Deploy v4call v0.11 on Ubuntu 24.04 with Docker](https://www.completenoobs.com/noobs/V4call-v0.11)**
+
+(The v0.11 walkthrough remains accurate for v0.12 — same deploy steps, same `.env` shape, same `docker compose down && docker compose build --no-cache && docker compose up -d` rebuild cycle.)
 
 The guide covers everything from creating a VPS to a working HTTPS server with federation enabled — no coding knowledge required.
 
@@ -157,8 +159,10 @@ Visit `https://yourdomain.com/server-sign.html` to generate your signed verify f
 ### Login Options
 
 Two ways to sign in:
-- **Hive Keychain** (recommended) — no key paste needed. Keychain signs a challenge to prove identity. A 🔑 panel in the lobby lets you optionally enter your posting key to unlock encrypted messaging.
+- **Hive Keychain** (recommended on desktop) — no key paste needed. Keychain signs a challenge to prove identity. A 🔑 panel in the lobby lets you optionally enter your posting key to unlock encrypted messaging.
 - **Manual posting key** — paste your Hive posting private key directly. Stays in browser session memory only.
+
+**iPhone / iPad note:** iOS Safari and iOS Brave (also WebKit) do not allow browser extensions that inject `window.hive_keychain` into web pages. The Hive Keychain *mobile app* exists but cannot talk to web pages the way the desktop extension does. **Free** calls, DMs, presence, and federation work fine on iPhone — but **paid** actions (paid DMs, paid calls, custom-token payments) need a desktop browser with the Hive Keychain extension installed. A HiveSigner-based fallback for iOS is on the longer-term roadmap.
 
 ### Voice and Video Calls
 
@@ -252,6 +256,11 @@ Standalone HTML pages bundled with v4call. Each signs with the operator's Hive k
 | `CALL_COOLDOWN_MS` | `30000` | Cooldown between call attempts |
 | `PAYMENT_VERIFY_RETRIES` | `3` | Payment verification retry attempts |
 | `PAYMENT_VERIFY_DELAY_MS` | `5000` | Delay between verification retries |
+| `LOBBY_NOTICE` | *(blank)* | Custom text under lobby title — auto-generated from `SERVER_DOMAIN` if blank |
+| `LOBBY_REQUIREMENTS_TEXT` | *(blank)* | Custom posting requirements text — auto-generated from gate vars if blank |
+| `LOBBY_POST_MIN_HP` | `0` | Minimum *owned* Hive Power to post in lobby. 0 or blank = no HP gate. Owned-only — delegated HP doesn't count. |
+| `LOBBY_POST_MIN_TOKEN` | *(blank)* | `SYMBOL:amount` (e.g. `HIVEBOOK:10`) — minimum Hive-Engine token balance to post. Blank = no token gate. |
+| `LOBBY_POST_GATE_MODE` | `or` | `or` (default) or `and` — combine HP + token gates when BOTH are set. Doesn't gate DMs or calls. |
 
 ---
 
@@ -273,6 +282,7 @@ GET  /admin/peers?key=YOUR_ADMIN_KEY                 # Discovered + approved pee
 POST /admin/peers/approve?key=YOUR_ADMIN_KEY&domain=peer.com
 POST /admin/peers/revoke?key=YOUR_ADMIN_KEY&domain=peer.com
 POST /admin/peers/rescan?key=YOUR_ADMIN_KEY          # Force a Hive directory rescan
+GET  /admin/discovery-test?key=YOUR_ADMIN_KEY        # Per-Hive-node raw response + cached peer list (diagnostic)
 ```
 
 ---
@@ -396,8 +406,8 @@ The active development plan, in order. Each version ships independently. Full de
 
 | Version | Scope |
 |---------|-------|
-| **v0.12** | Polish: mobile zoom, mobile DM token picker, room joins default to text-only, DM dedup, discovery scanner fix |
-| **v0.13** | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + lobby notice + anti-spam gate (HP / token / both) |
+| ~~**v0.12**~~ ✅ shipped | Polish: iOS zoom, mobile DM picker layout, room joins default to text-only with mid-room 🎤/🎥 enable + WebRTC renegotiation, DM dedup, paid-DM currency badge fix, discovery scanner repaired (Hive `limit` cap), `/admin/discovery-test` diagnostic |
+| ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated (no more mixing into lobby chat) + server-driven lobby notice + anti-spam gate (HP / token / both, owned-HP only) |
 | **v0.14** | Token-gated rooms (allowlist OR balance) + live banlist with optional public visibility |
 | **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation |
 | **v0.16 / fed v0.4** | Cross-server rooms — federated invites, multi-party cross-server WebRTC, token-gating across federation |
