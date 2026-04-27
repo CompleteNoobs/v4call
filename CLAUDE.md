@@ -130,8 +130,8 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **DM tab user picker:** Top of the DM tab shows a chip-row of currently-online users (sourced from `window.lobbyUsers` set in the existing `lobby-users` handler). Click a chip → `openDmPanel(username)` opens the conversation.
 - **Included Rooms tab:** Rooms where the current user is on the allowlist *and* `memberCount === 0` show with a "Knock →" button (reuses existing `knockRoom(name)`). Active Rooms tab continues to show rooms with `memberCount > 0`. Both lists update from the same `lobby-rooms` socket event by partitioning the payload client-side; server payload unchanged.
 - **`lobby-config` socket event:** Server emits on `lobby-join` with `{ serverName, serverDomain, notice, requirementsText }`. Client renders `notice` as a `.lobby-notice` block above lobby messages; `requirementsText` renders as a `.lobby-requirements` block below it (hidden if empty). Both texts auto-generate from gate vars + `SERVER_DOMAIN` when the corresponding env var is blank.
-- **Anti-spam gate on lobby posting:** Server-side check on both `lobby-chat` (broadcast) and `lobby-encrypted` (toggle) handlers. Three new env vars: `LOBBY_POST_MIN_HP`, `LOBBY_POST_MIN_TOKEN` (`SYMBOL:amount` format), `LOBBY_POST_GATE_MODE` (`or` default / `and`). Gate is **fully short-circuited** when both thresholds are disabled — no extra Hive API calls per message. DMs and calls are unaffected.
-- **`getHivePower` helper:** New helper at the same level as `getHiveEngineTokenBalance`. Looks up `vesting_shares` via `condenser_api.get_accounts`, converts using `total_vesting_fund_hive / total_vesting_shares` from `condenser_api.get_dynamic_global_properties`. **Owned VESTS only** — does NOT include `delegated_vesting_shares` or `received_vesting_shares` so a whale can't rent out posting privileges. 5-min cache (mirrors token cache pattern), with a 1-hour cache for `hive_per_vest` (it moves slowly). Failures don't poison the cache.
+- **Anti-spam gate on lobby posting:** Server-side check on both `lobby-chat` (broadcast) and `lobby-encrypted` (toggle) handlers. Three independent gate env vars: `LOBBY_POST_MIN_HP` (staked Hive Power), `LOBBY_POST_MIN_HIVE` (liquid HIVE balance), `LOBBY_POST_MIN_TOKEN` (`SYMBOL:amount` for any Hive-Engine token). `LOBBY_POST_GATE_MODE` (`or` default / `and`) controls how 2+ gates combine. Gate is **fully short-circuited** when all three thresholds are disabled — no extra Hive API calls per message. DMs and calls are never gated.
+- **`getAccountStats` helper:** Single Hive API call (`condenser_api.get_accounts`) populates both `hp` (computed from `vesting_shares × hive_per_vest`) and `liquidHive` (`acct.balance`). Wrappers `getHivePower(username)` and `getLiquidHive(username)` share one cache and one network round-trip. **HP is owned VESTS only** — does NOT include `delegated_vesting_shares` or `received_vesting_shares` so a whale can't rent out posting privileges by delegation. 5-min cache (mirrors token cache pattern), with a separate 1-hour cache for `hive_per_vest` (it moves slowly). Failures don't poison the cache.
 - **`lobby-post-rejected` event:** New socket event the server emits when the gate fails. Client renders it as a system message: `⚠ This server requires X HP OR Y TOKEN to post in the lobby. You have ... .`
 
 ### Federation (v0.3)
@@ -233,16 +233,19 @@ LOBBY_NOTICE             — Custom text shown under the lobby title. Blank = au
                            contacts use rooms / DMs / calls.").
 LOBBY_REQUIREMENTS_TEXT  — Custom text describing posting requirements. Blank = auto-
                            generated from the gate vars below.
-LOBBY_POST_MIN_HP        — Minimum *owned* Hive Power to post in lobby (broadcast or
-                           encrypted-toggle). 0 or blank = no HP gate. Does not affect
-                           DMs or calls. Owned-only — delegated-in HP does NOT count.
-LOBBY_POST_MIN_TOKEN     — Minimum custom token balance to post (format: SYMBOL:amount,
-                           e.g. HIVEBOOK:10). Blank = no token gate.
-LOBBY_POST_GATE_MODE     — or | and. Only used when BOTH gates above are set.
-                           "or"  = user passes if EITHER HP or token threshold met (default)
-                           "and" = user passes only if BOTH HP and token thresholds met
-                           Set just HP (token blank) → HP-only gate.
-                           Set just token (HP blank) → token-only gate.
+LOBBY_POST_MIN_HP        — Minimum *owned, staked* Hive Power to post in lobby
+                           (broadcast or encrypted-toggle). 0 or blank = no HP gate.
+                           Owned-only — delegated-in HP does NOT count.
+                           HP = vesting_shares × hive_per_vest.
+LOBBY_POST_MIN_HIVE      — Minimum *liquid* HIVE balance (the spendable wallet balance,
+                           NOT staked HP). 0 or blank = no liquid-HIVE gate.
+LOBBY_POST_MIN_TOKEN     — Minimum custom Hive-Engine token balance to post (format:
+                           SYMBOL:amount, e.g. HIVEBOOK:10). Blank = no token gate.
+LOBBY_POST_GATE_MODE     — or | and. Only used when 2+ of the gates above are set.
+                           "or"  = user passes if ANY single threshold is met (default)
+                           "and" = user passes only if ALL configured thresholds are met
+                           One gate set → that one gate is the requirement.
+                           No gates set → no posting restriction.
 ```
 
 ## Security Assessment (from VS Code review)

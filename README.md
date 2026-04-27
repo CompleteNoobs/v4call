@@ -258,9 +258,10 @@ Standalone HTML pages bundled with v4call. Each signs with the operator's Hive k
 | `PAYMENT_VERIFY_DELAY_MS` | `5000` | Delay between verification retries |
 | `LOBBY_NOTICE` | *(blank)* | Custom text under lobby title — auto-generated from `SERVER_DOMAIN` if blank |
 | `LOBBY_REQUIREMENTS_TEXT` | *(blank)* | Custom posting requirements text — auto-generated from gate vars if blank |
-| `LOBBY_POST_MIN_HP` | `0` | Minimum *owned* Hive Power to post in lobby. 0 or blank = no HP gate. Owned-only — delegated HP doesn't count. |
+| `LOBBY_POST_MIN_HP` | `0` | Minimum *owned, staked* Hive Power (vesting_shares × hive_per_vest). 0 or blank = no HP gate. Delegated-in HP doesn't count. |
+| `LOBBY_POST_MIN_HIVE` | `0` | Minimum *liquid* HIVE balance (the spendable wallet balance, not staked HP). 0 or blank = no liquid-HIVE gate. |
 | `LOBBY_POST_MIN_TOKEN` | *(blank)* | `SYMBOL:amount` (e.g. `HIVEBOOK:10`) — minimum Hive-Engine token balance to post. Blank = no token gate. |
-| `LOBBY_POST_GATE_MODE` | `or` | `or` (default) or `and` — combine HP + token gates when BOTH are set. Doesn't gate DMs or calls. |
+| `LOBBY_POST_GATE_MODE` | `or` | `or` (default) or `and` — combine the gates when 2+ are set. Doesn't gate DMs or calls. |
 
 ---
 

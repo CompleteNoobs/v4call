@@ -1805,11 +1805,15 @@ socket.on('lobby-rooms', (roomsData) => {
     });
   }
 
-  // Included rooms: allowlisted but memberCount === 0 (empty)
+  // Included rooms: I'm on the allowlist AND I'm not currently in this room.
+  // Whether the room has other people in it is not relevant — Included is "rooms
+  // I have a key to" regardless of who else is currently there.
   const incList = document.getElementById('included-rooms-list');
   const noInc = document.getElementById('no-included-msg');
   incList.innerHTML = '';
-  const includedRooms = roomsData.filter(r => r.allowlist.some(u => u.username === myUsername) && r.memberCount === 0);
+  const includedRooms = roomsData.filter(r =>
+    r.allowlist.some(u => u.username === myUsername) && r.name !== currentRoom
+  );
   if (includedRooms.length === 0) {
     incList.appendChild(noInc);
   } else {
