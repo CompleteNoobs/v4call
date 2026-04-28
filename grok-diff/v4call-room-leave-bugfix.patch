@@ -1,0 +1,58 @@
+diff --git a/public/index.html b/public/index.html
+index 8e8e6e3..f23d2e1 100644
+--- a/public/index.html
++++ b/public/index.html
+@@ -XXXX,XX +XXXX,XX @@  (client-side JS in <script> or inline)
+ // Key bug fix: peer-hung-up was forcing ALL room members to leaveRoom()
+ // when ONE user ended the call. This broke multi-user rooms (admin creates
+ // room + invites multiple). Now only the leaver exits; others stay in room
+ // for chat/media with remaining participants. Matches ban behavior (targeted kick).
+ 
+ socket.on('peer-hung-up', ({ by }) => {
+   addSystemMsg(`@${by} ended the call.`);
+   stopCallTicker();
+-  setTimeout(() => leaveRoom(), 2500);  // <-- BUG: evicted everyone in group rooms
++  // Removed auto-leaveRoom(): only the user who clicked End Call / left should exit.
++  // In group rooms (multiple invitees), remaining users stay and can continue chatting/calling.
++  // The 'user-left' event (emitted by server) already cleans up that peer's UI entry.
++  // If this becomes a 1:1-only call in future, could add: if (Object.keys(peers).length === 0) leaveRoom();
+ });
+ 
+diff --git a/server.js b/server.js
+index 1234567..89abcde 100644
+--- a/server.js
++++ b/server.js
+@@ -YYYY,ZZ +YYYY,ZZ @@  (call-end handler)
+ // Make voluntary 'call-end' (End Call button) consistent with 'disconnect':
+ // remove the leaving user from room.members, emit user-left (so client UI updates),
+ // check for empty room and delete it (ephemeral rooms), broadcastRooms().
+ // Previously, 'call-end' only emitted peer-hung-up + processCallEnd but NEVER
+ // removed the leaver from members list or cleaned empty room. This left stale
+ // members and prevented proper last-user room deletion. Now fixed so rooms
+ // behave correctly when users leave via UI (not just tab close).
+ 
+ socket.on('call-end', async ({ callId }) => {
+   const username = socket._username;
+   const room     = socket._room;
+   if (room && rooms[room]) {
++    // Remove leaver from members (was missing!)
++    rooms[room].members = rooms[room].members.filter(u => u.socketId !== socket.id);
++    socket.to(room).emit('user-left', socket.id);
++
+     socket.to(room).emit('peer-hung-up', { by: username });
+     const cid = rooms[room].callId || callId;
+     if (cid) await processCallEnd(cid, room, io, lobbyUsers);
++
++    // Cleanup if now empty (consistent with disconnect handler)
++    if (rooms[room].members.length === 0) {
++      if (rooms[room]._capTimer)  clearTimeout(rooms[room]._capTimer);
++      if (rooms[room]._warnTimer) clearTimeout(rooms[room]._warnTimer);
++      delete rooms[room];
++      chatDeleteRoom(room);
++      console.log(`Room #${room} closed (last participant ended call)`);
++    }
++    broadcastRooms();
+   }
+   console.log(`@${username} ended call`);
+ });
+ 

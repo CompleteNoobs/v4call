@@ -41,6 +41,8 @@
     #status-dot.live{background:var(--green);box-shadow:0 0 6px var(--green);}
     #leave-room-btn{display:none;padding:5px 12px;background:transparent;color:var(--danger);border:1px solid rgba(248,113,113,0.4);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;transition:background 0.2s;}
     #leave-room-btn:hover{background:rgba(248,113,113,0.1);}
+    #end-room-btn{display:none;padding:5px 12px;background:rgba(248,113,113,0.1);color:var(--danger);border:1px solid var(--danger);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:600;transition:background 0.2s;}
+    #end-room-btn:hover{background:rgba(248,113,113,0.2);}
     #popout-btn{display:none;padding:5px 12px;background:transparent;color:var(--blue);border:1px solid rgba(56,189,248,0.35);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;}
     #popout-btn:hover{background:rgba(56,189,248,0.08);}
 
@@ -545,6 +547,7 @@
   <span class="badge" id="enc-badge">⚡ e2e encrypted</span>
   <button id="popout-btn"     onclick="popOutRoom()">⧉ Pop out</button>
   <button id="leave-room-btn" onclick="leaveRoom()">✕ Leave Room</button>
+  <button id="end-room-btn"   onclick="endRoomForAll()" title="Admin only — close this room for everyone and delete its history">✕✕ End Room</button>
   <a href="/info.html" target="_blank" rel="noopener noreferrer" id="info-link" style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--blue);text-decoration:none;margin-left:auto;margin-right:6px;white-space:nowrap;">📖 Basics</a>
   <div id="status-dot"></div>
 </header>
@@ -2424,6 +2427,9 @@ async function enterRoom(roomName) {
   document.getElementById('leave-room-btn').style.display = '';
   document.getElementById('popout-btn').style.display     = '';
   document.getElementById('chat-room-name').textContent   = '#' + roomName;
+  // End-Room button is admin-only; if amCreator gets set later via room-info,
+  // we re-show it there too.
+  document.getElementById('end-room-btn').style.display = amCreator ? '' : 'none';
   if (amCreator) document.getElementById('allowlist-panel').style.display = 'flex';
   rsock().emit('join', { room: roomName, username: myUsername, pubKey: myPubKey });
   setTimeout(() => rsock().emit('resync'), 1500);
@@ -2464,6 +2470,7 @@ function leaveRoom() {
   document.getElementById('allowlist-members').innerHTML   = '';
   currentRoom = ''; amCreator = false; socket._room = null;
   document.getElementById('leave-room-btn').style.display = 'none';
+  document.getElementById('end-room-btn').style.display   = 'none';
   document.getElementById('popout-btn').style.display     = 'none';
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
@@ -2738,6 +2745,9 @@ function updatePeerCount() {
 // ── Allowlist ───────────────────────────────────────────
 socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibility }) => {
   if (!amCreator && creator === myUsername) amCreator = true;
+  // Reveal admin-only buttons whenever amCreator is true (covers the case
+  // where it gets discovered after enterRoom — e.g. on auto-create-on-join).
+  document.getElementById('end-room-btn').style.display = amCreator ? '' : 'none';
   currentRoomTokenGate = tokenGate || null;
 
   // Banlist is non-null when this user is allowed to see it (creator always;
@@ -2803,6 +2813,14 @@ function banUser(u) {
 function unbanUser(username) {
   if (!currentRoom) return;
   rsock().emit('room-unban', { room: currentRoom, username });
+}
+
+// v0.14: admin closes the entire room. Every member receives a `kicked` event
+// and the room (plus its stored messages) is deleted server-side.
+function endRoomForAll() {
+  if (!currentRoom || !amCreator) return;
+  if (!confirm(`End #${currentRoom} for everyone? All members will be kicked back to the lobby and the room (plus its history) will be deleted. This cannot be undone.`)) return;
+  rsock().emit('room-end-all');
 }
 
 // ── Encryption ──────────────────────────────────────────
