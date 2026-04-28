@@ -43,6 +43,10 @@
     #leave-room-btn:hover{background:rgba(248,113,113,0.1);}
     #end-room-btn{display:none;padding:5px 12px;background:rgba(248,113,113,0.1);color:var(--danger);border:1px solid var(--danger);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:600;transition:background 0.2s;}
     #end-room-btn:hover{background:rgba(248,113,113,0.2);}
+    #export-room-btn{display:none;padding:5px 12px;background:transparent;color:var(--purple);border:1px solid rgba(167,139,250,0.4);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;transition:background 0.2s;}
+    #export-room-btn:hover{background:rgba(167,139,250,0.1);}
+    #import-room-btn{padding:7px 11px;background:transparent;color:var(--purple);border:1px solid rgba(167,139,250,0.4);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;transition:background 0.2s;width:100%;text-align:center;margin-bottom:6px;}
+    #import-room-btn:hover{background:rgba(167,139,250,0.1);}
     #popout-btn{display:none;padding:5px 12px;background:transparent;color:var(--blue);border:1px solid rgba(56,189,248,0.35);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;}
     #popout-btn:hover{background:rgba(56,189,248,0.08);}
 
@@ -546,6 +550,7 @@
   <span class="badge" id="room-badge"></span>
   <span class="badge" id="enc-badge">⚡ e2e encrypted</span>
   <button id="popout-btn"     onclick="popOutRoom()">⧉ Pop out</button>
+  <button id="export-room-btn" onclick="exportRoom()" title="Download a snapshot of this room (members + ciphertext history) as a .v4room file">📥 Export</button>
   <button id="leave-room-btn" onclick="leaveRoom()">✕ Leave Room</button>
   <button id="end-room-btn"   onclick="endRoomForAll()" title="Admin only — close this room for everyone and delete its history">✕✕ End Room</button>
   <a href="/info.html" target="_blank" rel="noopener noreferrer" id="info-link" style="font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--blue);text-decoration:none;margin-left:auto;margin-right:6px;white-space:nowrap;">📖 Basics</a>
@@ -683,6 +688,10 @@
       <input id="knock-input" type="text" placeholder="room name…" maxlength="32" autocomplete="off" spellcheck="false"/>
       <button class="secondary" onclick="knockRoom()" style="font-size:0.75rem;padding:7px;">Knock →</button>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);line-height:1.5;">For offline invites — enter the room name. Server checks your allowlist.</div>
+      <h3 style="margin-top:10px;">IMPORT ROOM</h3>
+      <input type="file" id="import-room-input" accept=".v4room,application/json" style="display:none" onchange="handleImportFile(event)"/>
+      <button id="import-room-btn" onclick="document.getElementById('import-room-input').click()">📤 Import .v4room file</button>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);line-height:1.5;">Restore a room exported from this or another v4call server. You become the new admin; original allowlist + history are preserved.</div>
     </div>
   </div>
   <!-- Mobile bottom-tab nav (hidden on desktop via CSS) -->
@@ -2426,6 +2435,7 @@ async function enterRoom(roomName) {
   document.getElementById('enc-badge').style.display  = '';
   document.getElementById('leave-room-btn').style.display = '';
   document.getElementById('popout-btn').style.display     = '';
+  document.getElementById('export-room-btn').style.display = ''; // any member can export
   document.getElementById('chat-room-name').textContent   = '#' + roomName;
   // End-Room button is admin-only; if amCreator gets set later via room-info,
   // we re-show it there too.
@@ -2471,6 +2481,7 @@ function leaveRoom() {
   currentRoom = ''; amCreator = false; socket._room = null;
   document.getElementById('leave-room-btn').style.display = 'none';
   document.getElementById('end-room-btn').style.display   = 'none';
+  document.getElementById('export-room-btn').style.display = 'none';
   document.getElementById('popout-btn').style.display     = 'none';
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
@@ -2823,6 +2834,64 @@ function endRoomForAll() {
   rsock().emit('room-end-all');
 }
 
+// v0.14.5: download the current room as a .v4room JSON snapshot. Filename
+// convention: <roomname>@<source-domain>__<ISO-timestamp>.v4room — sortable
+// alphabetically = sortable chronologically. Available to any room member.
+function exportRoom() {
+  if (!currentRoom) return;
+  rsock().emit('room-export', { roomName: currentRoom }, (resp) => {
+    if (!resp || resp.error) { alert('Export failed: ' + (resp?.error || 'no response')); return; }
+    const ts = new Date().toISOString().replace(/\.\d+Z$/, 'Z').replace(/:/g, '-');
+    const filename = `${currentRoom}@${MY_SERVER_DOMAIN}__${ts}.v4room`;
+    const blob = new Blob([JSON.stringify(resp.file, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    addSystemMsg(`📥 Exported as ${filename} (${resp.file.messages.length} messages)`);
+  });
+}
+
+// v0.14.5: import a .v4room file uploaded by the user. Reads the file in the
+// browser, parses JSON, sends to server. On name collision, prompts for a
+// different name and retries.
+function handleImportFile(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (file.size > 20 * 1024 * 1024) {
+    alert('File too large (max 20MB)');
+    event.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    let parsed;
+    try { parsed = JSON.parse(e.target.result); }
+    catch(err) { alert('Invalid file — not valid JSON: ' + err.message); return; }
+    submitImport(parsed);
+  };
+  reader.onerror = () => alert('Failed to read file');
+  reader.readAsText(file);
+  event.target.value = ''; // allow re-importing the same file
+}
+
+function submitImport(parsed, requestedName) {
+  socket.emit('room-import', { file: parsed, roomName: requestedName }, (resp) => {
+    if (!resp) { alert('Import failed: no response from server'); return; }
+    if (resp.collision) {
+      const suggest = (parsed.room?.name || 'imported') + '-imported';
+      const newName = prompt(`A room with that name already exists on this server.\n\nEnter a different name (a-z, 0-9, _ and - only):`, suggest);
+      if (!newName) return;
+      submitImport(parsed, newName.trim());
+      return;
+    }
+    if (resp.error) { alert('Import failed: ' + resp.error); return; }
+    const skippedNote = resp.messagesSkipped > 0 ? `, ${resp.messagesSkipped} skipped (malformed)` : '';
+    addLobbyMsg({ type: 'system', text: `📤 Imported room as #${resp.roomName} (${resp.messagesImported} messages restored${skippedNote}). Knock to join.` });
+  });
+}
+
 // ── Encryption ──────────────────────────────────────────
 function encryptMsg(plaintext, recipientPubStr) {
   if (!myPrivKeyStr) {
@@ -2967,6 +3036,7 @@ socket.on('user-left', (socketId) => {
   removeRoomUser(socketId);
   if (peers[socketId]) { peers[socketId].close(); delete peers[socketId]; }
   document.getElementById('wrapper-'+socketId)?.remove();
+  refreshVideoPanelVisibility();
 });
 
 // ── WebRTC ───────────────────────────────────────────────
@@ -3087,10 +3157,9 @@ async function disableCam() {
     await pc.setLocalDescription(offer);
     rsock().emit('offer', { to: peerId, offer });
   }
-  // Hide the local video panel if we no longer have any video to show.
-  if (localStream.getVideoTracks().length === 0) {
-    document.getElementById('video-panel').style.display = 'none';
-  }
+  // Re-evaluate panel visibility — keep it visible if any peer is still
+  // sending video; only hide when both we and every peer are video-less.
+  refreshVideoPanelVisibility();
   updateMediaButtons();
   addSystemMsg('🎥 Camera disabled');
 }
@@ -3123,8 +3192,23 @@ function createPC(peerId) {
       document.getElementById('video-panel').appendChild(wrapper);
     }
     document.getElementById('video-'+peerId).srcObject = streams[0];
+    // Reveal the panel even if WE have no local media — otherwise the
+    // incoming peer video plays into a hidden parent and the user has to
+    // enable their own cam to see anyone else's.
+    refreshVideoPanelVisibility();
   };
   return pc;
+}
+
+// Show the video panel whenever there's anything to render — local stream
+// has video, OR any peer has sent us a track (their wrapper exists). Hides
+// only when the room is purely text and no peer is sharing media.
+function refreshVideoPanelVisibility() {
+  const panel       = document.getElementById('video-panel');
+  if (!panel) return;
+  const hasLocal    = !!(localStream && localStream.getVideoTracks().length > 0);
+  const peerCount   = document.querySelectorAll('#video-panel .video-wrapper:not(:first-child)').length;
+  panel.style.display = (hasLocal || peerCount > 0) ? '' : 'none';
 }
 async function createOffer(peerId) {
   const pc = createPC(peerId); const offer = await pc.createOffer();
