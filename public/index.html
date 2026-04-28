@@ -49,6 +49,7 @@
     #import-room-btn:hover{background:rgba(167,139,250,0.1);}
     #popout-btn{display:none;padding:5px 12px;background:transparent;color:var(--blue);border:1px solid rgba(56,189,248,0.35);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;}
     #popout-btn:hover{background:rgba(56,189,248,0.08);}
+    #leave-room-btn.shown,#popout-btn.shown,#export-room-btn.shown,#end-room-btn.shown{display:inline-block;}
 
     /* Screens */
     .screen{display:none;flex:1;overflow:hidden;}
@@ -505,7 +506,7 @@
     #char-count.warn{color:var(--danger);}
 
     /* Live call cost ticker */
-    #call-cost-ticker{display:none;background:var(--surface);border-top:1px solid var(--border);padding:8px 14px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--subtext);display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
+    #call-cost-ticker{display:none;background:var(--surface);border-top:1px solid var(--border);padding:8px 14px;flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--subtext);align-items:center;gap:12px;flex-wrap:wrap;}
     #call-cost-ticker.active{display:flex;}
     .ticker-item{display:flex;flex-direction:column;align-items:center;gap:1px;}
     .ticker-label{font-size:0.6rem;color:var(--muted);letter-spacing:0.05em;}
@@ -1985,8 +1986,8 @@ function knockRoom(name) {
 socket.on('join-rejected', ({ room, reason }) => {
   addLobbyMsg({type:'system',text:`Could not join #${room}: ${reason}`});
   showScreen('lobby-screen');
-  document.getElementById('leave-room-btn').style.display = 'none';
-  document.getElementById('popout-btn').style.display     = 'none';
+  document.getElementById('leave-room-btn').classList.remove('shown');
+  document.getElementById('popout-btn').classList.remove('shown');
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
 });
@@ -2433,13 +2434,13 @@ async function enterRoom(roomName) {
   document.getElementById('room-badge').textContent   = '# ' + roomName;
   document.getElementById('room-badge').style.display = '';
   document.getElementById('enc-badge').style.display  = '';
-  document.getElementById('leave-room-btn').style.display = '';
-  document.getElementById('popout-btn').style.display     = '';
-  document.getElementById('export-room-btn').style.display = ''; // any member can export
+  document.getElementById('leave-room-btn').classList.add('shown');
+  document.getElementById('popout-btn').classList.add('shown');
+  document.getElementById('export-room-btn').classList.add('shown'); // any member can export
   document.getElementById('chat-room-name').textContent   = '#' + roomName;
   // End-Room button is admin-only; if amCreator gets set later via room-info,
   // we re-show it there too.
-  document.getElementById('end-room-btn').style.display = amCreator ? '' : 'none';
+  document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
   if (amCreator) document.getElementById('allowlist-panel').style.display = 'flex';
   rsock().emit('join', { room: roomName, username: myUsername, pubKey: myPubKey });
   setTimeout(() => rsock().emit('resync'), 1500);
@@ -2479,10 +2480,10 @@ function leaveRoom() {
   document.getElementById('allowlist-panel').style.display = 'none';
   document.getElementById('allowlist-members').innerHTML   = '';
   currentRoom = ''; amCreator = false; socket._room = null;
-  document.getElementById('leave-room-btn').style.display = 'none';
-  document.getElementById('end-room-btn').style.display   = 'none';
-  document.getElementById('export-room-btn').style.display = 'none';
-  document.getElementById('popout-btn').style.display     = 'none';
+  document.getElementById('leave-room-btn').classList.remove('shown');
+  document.getElementById('end-room-btn').classList.remove('shown');
+  document.getElementById('export-room-btn').classList.remove('shown');
+  document.getElementById('popout-btn').classList.remove('shown');
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
   // If we joined a federated room, drop that connection and tell our home
@@ -2758,7 +2759,7 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   if (!amCreator && creator === myUsername) amCreator = true;
   // Reveal admin-only buttons whenever amCreator is true (covers the case
   // where it gets discovered after enterRoom — e.g. on auto-create-on-join).
-  document.getElementById('end-room-btn').style.display = amCreator ? '' : 'none';
+  document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
   currentRoomTokenGate = tokenGate || null;
 
   // Banlist is non-null when this user is allowed to see it (creator always;
