@@ -1,0 +1,43 @@
+--- a/server.js
++++ b/server.js
+@@ -419,7 +419,7 @@ function ledgerPaymentUpdate(callId, type, status, txId = null) {
+
+ // ─────────────────────────────────────────────────────────────────────────────
+ // ── Lobby & Rooms ─────────────────────────────────────────────────────────────
+-// ─────────────────────────────────────────────────────────────────────────────
++// ───────────────────────────────────────────────────────────────────────────── (v0.14: banlist + tokenGate + paidInvitees forward-compat)
+
+ const lobbyUsers = {}; // username → { socketId, pubKey, invisible, inCall? }
+-const rooms      = {}; // roomName → { creator, allowlist(Set), members[], isCall?, callId?, ... }
++const rooms      = {}; // roomName → { creator, allowlist(Set), banlist(Set), tokenGate:{symbol,amount}|null, banlistVisibility:'admin'|'all', paidInvitees:Map, members[], createdAt, ... }
+
+ // Federation state — populated by federation message handlers (see below).
+@@ -492,11 +492,22 @@ function peerForUser(username) {
+
+ function roomsSnapshot() {
+   return Object.entries(rooms).map(([name, r]) => ({
+-    name,
+-    creator:     r.creator,
+-    memberCount: r.members.length,
+-    isCall:      r.isCall || false,
+-    allowlist:   [...r.allowlist].map(username => ({
++    name, creator: r.creator, memberCount: r.members.length, isCall: r.isCall || false,
++    tokenGate: r.tokenGate, // v0.14
++    allowlist:   [...r.allowlist].map(username => ({
+       username,
+       online: !!lobbyUsers[username] || r.members.some(m => m.username === username)
+     }))
+   }));
+ }
++
++function emitRoomInfoToMembers(r, roomName) {
++  for (const m of r.members) {
++    const visibleBanlist = (m.username === r.creator || r.banlistVisibility === 'all') ? [...r.banlist] : null;
++    io.to(m.socketId).emit('room-info', {
++      creator: r.creator, allowlist: [...r.allowlist], tokenGate: r.tokenGate,
++      banlist: visibleBanlist, banlistVisibility: r.banlistVisibility
++    });
++  }
++}
++
+ function broadcastRooms() { io.emit('lobby-rooms', roomsSnapshot()); }

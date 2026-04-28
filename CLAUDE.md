@@ -10,7 +10,7 @@ v4call is a decentralised paid video, voice, and text communication platform bui
 
 ## Current Version
 
-- **Software:** v0.13 — 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) on top of v0.12. DMs no longer mix into lobby chat (own message container). Server-driven lobby notice + requirements text via new `lobby-config` event. Anti-spam gate on lobby posting (HP and/or Hive-Engine token threshold, configurable, cached, short-circuits when disabled). Production-deployed on call.completenoobs.com ↔ hive-book.com.
+- **Software:** v0.14 — Token-Gated Rooms + Live Banlist (on top of v0.13). Optional Hive-Engine token-balance gate at room creation lets non-allowlisted holders join (with a "via TOKEN" badge). Live admin banlist overrides allowlist + tokenGate, auto-kicks if currently in-room, with a per-room visibility toggle (admin-only default; can be made public to all members). Forward-compat `paidInvitees: Map` initialised on every room (empty in v0.14, v0.17 populates). Production-deployed on call.completenoobs.com ↔ hive-book.com.
 - **Federation protocol:** v0.3 — unchanged from v0.11. verify.json domain proof, Hive-tag discovery directory, manual peer approval, paid cross-server calls + DMs.
 
 The version split is intentional: the application keeps evolving (UI/UX/features), the federation protocol bumps separately when wire-format changes.
@@ -88,7 +88,7 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 5. On the wire, federation messages: `hello` (with verify recheck), `presence`, `user-online`/`user-offline`, `dm`, `call-invite`/`call-response`/`call-declined`/`call-cancelled`/`call-missed`, `payment-verified`, `call-ended`, `call-receipt-fed`.
 6. For paid cross-server calls/DMs, the caller pays the *callee's escrow on Hive* directly. The caller's server verifies on-chain and forwards the payment notification to the callee's server. The callee's server independently re-verifies and disburses (callee-net, platform-fee) from its own escrow at call end. Refunds to the caller are cross-server Hive transfers from the callee's escrow.
 
-## Features (What's Built and Working in v0.13)
+## Features (What's Built and Working in v0.14)
 
 ### Core (single-server)
 - **Login:** Hive Keychain (recommended, no key paste) or manual posting key
@@ -135,6 +135,14 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **`lobby-post-rejected` event:** New socket event the server emits when the gate fails. Client renders it as a system message: `⚠ This server requires X HP OR Y TOKEN to post in the lobby. You have ... .`
 - **Mid-room media toggles:** The two `🎤 Enable Mic` / `🎥 Enable Cam` buttons from v0.12 are now full toggles — click again to fully release the device (`track.stop()` + `pc.removeTrack(sender)` + renegotiate, not `track.enabled = false` mute). Browser mic/cam indicators genuinely go away on disable, and the camera light turns off. Each transition is a proper WebRTC renegotiation; the offer-handler's existing-PC reuse from v0.12 makes this work without dropping the connection.
 - **🖥️ Share Screen button (placeholder):** Third button alongside mic/cam in the room chat header. UI is in place now so the room toolbar layout is stable; the actual `getDisplayMedia()` flow lands in v0.15 alongside the spotlight room layout. Clicking it today posts `🖥️ Screen sharing arrives in v0.15 — UI placeholder for now.` as a system message.
+
+### v0.14 polish (added on top of v0.13)
+- **Token-gated rooms:** Room creator can optionally set `tokenGate: { symbol, amount }` at creation (UI fields tucked into the create-room panel, off by default). Server `join` check is now: banlist → reject; allowlist → allow as `joinedVia: 'allowlist'`; v0.17 paidInvitees hook (no-op in v0.14); tokenGate balance check via existing `getHiveEngineTokenBalance` → allow as `joinedVia: 'token'` if `bal >= amount`. Otherwise reject with a clear "needs allowlist or X SYMBOL" message. Room `roomsSnapshot()` now includes `tokenGate` so lobby room cards show "🪙 Open to holders of X SYMBOL".
+- **"via TOKEN" badge:** Members who joined via token-gate (not allowlist) get a small accent-coloured `via SYMBOL` badge in the room user list. Threaded through `addRoomUser`, `applyRoomUsers`, `socket.on('user-joined', ...)`, and `room-users-resync` so it survives reconnects.
+- **Live banlist:** Two new socket events — `room-ban` (admin-only; auto-kicks if currently in-room via existing `kicked` event) and `room-unban`. Banlist overrides allowlist + tokenGate. Username normalised lowercase, optional leading `@` stripped.
+- **Banlist visibility:** Per-room `banlistVisibility: 'admin' | 'all'` (admin default). Server's per-member `room-info` emit (`emitRoomInfoToMembers`) sends the banlist array to the creator unconditionally and to other members only when visibility is `'all'`; non-visible members get `banlist: null` and the client hides the section. Non-creators never see the unban buttons even when they can see the banlist.
+- **Forward-compat for v0.17:** Every room is created with `paidInvitees: new Map()`. The join check evaluates `r.paidInvitees.has(username)` between the allowlist and tokenGate checks — always falsy in v0.14 (Map stays empty). v0.17 populates this Map with `username → { connectFee, ratePerHour, currency, maxDuration, ... }` and the join flow needs zero refactor — just an additional `joinedVia: 'paid'` branch.
+- **`emitRoomInfoToMembers(r, roomName)` helper:** Replaces the existing `io.to(room).emit('room-info', ...)` calls in `allowlist-add` / `allowlist-remove` / `room-ban` / `room-unban` so the per-recipient banlist visibility logic runs on every state change.
 
 ### Federation (v0.3)
 - **Server-to-server WebSocket:** persistent connection on `/federation`, domain tiebreaker so only the lower-domain initiates outbound (avoids flapping)
@@ -310,14 +318,31 @@ All items below landed. See "v0.13 polish" section above for what each fix does.
 - ~~`lobby-config` event with `LOBBY_NOTICE` / `LOBBY_REQUIREMENTS_TEXT`~~ (auto-generated from gate vars + `SERVER_DOMAIN` when blank)
 - ~~Anti-spam gate on `lobby-chat` / `lobby-encrypted` with `LOBBY_POST_MIN_HP` / `LOBBY_POST_MIN_TOKEN` / `LOBBY_POST_GATE_MODE`~~ — short-circuits when disabled, owned-HP only (no delegated)
 
-### v0.14 — Token-Gated Rooms + Banlist (1 session)
-- Room creator can set optional `min_token_balance: { symbol, amount }` gate at room creation
-- Server-side join check: allowlisted **OR** token balance ≥ threshold
-- Token-gate joiners get a "via TOKEN" badge in the room user list (vs allowlisted users who appear normally)
-- **Live-appendable banlist** — admin can ban any user (in-room or by name), banned overrides allowlist + token gate
-- Auto-kick currently-in-room user on ban (server emits `kicked` event)
-- Banlist visibility toggle: admin chooses at room creation whether banlist is admin-only-visible or visible to all members. Default admin-only.
-- **Forward-compat reminder:** when designing per-room state, leave room for a `paidInvitees: Map` alongside `allowlist` and `banlist`. v0.17 (Paid Expert Invites) populates this — keeping the data structure pluggable now means no refactor later.
+### v0.14 — Token-Gated Rooms + Banlist ✅ shipped
+All items below landed in one focused session. See the "v0.14 polish" subsection above for what each fix does.
+- ~~Token-gate at room creation~~ → optional `tokenGate: { symbol, amount }`, off by default
+- ~~Server join check: allowlist OR token balance~~ → with explicit `joinedVia` tag
+- ~~"via TOKEN" badge~~ → threaded through `addRoomUser` / `applyRoomUsers` / `user-joined` / resync
+- ~~Live banlist~~ → `room-ban` / `room-unban` events; auto-kick via existing `kicked`
+- ~~Banlist visibility toggle~~ → per-recipient `room-info` emit (`emitRoomInfoToMembers`)
+- ~~Forward-compat `paidInvitees: Map`~~ → join check has the v0.17 hook line as a no-op
+
+### v0.14.5 — Room Export / Import (`.v4room` files) (1 session)
+**Why:** v4call rooms are deliberately ephemeral (deleted when last person leaves). This loses chat history. Export/import lets users opt into persistence without changing the server's ephemeral default — backup before leaving, import on the same or a different v4call server to restore. Also enables room migration between federated servers.
+
+**Key insight:** v4call's encryption model makes this elegant — the server only ever has ciphertext, so the export is just "the ciphertext that's already in the DB, packaged for portability." No re-encryption, no plaintext anywhere. Anyone can hold the file but only original key-holders can decrypt anything in it.
+
+**Locked-in design:**
+- **Format:** JSON (not XML — native to Node, smaller, no parsing dep). Wrapped with `.v4room` extension for file-association.
+- **Filename convention:** `<roomname>@<source-domain>__<ISO-timestamp>.v4room` — e.g. `noobs-chat@hive-book.com__2026-04-28T14-30-00Z.v4room`. The `@` separates room from server (mailbox/Mastodon style), `__` before timestamp makes splitting trivial, ISO with hyphens instead of colons keeps it Windows-safe. Sorts alphabetically = sorts chronologically.
+- **File contents:** Room metadata (`name`, `creator`, `allowlist[]` with cached pubkeys, `source_server`, `exported_at`, `exported_by`, `format_version`) + every `room_messages` row (`from_user`, `to_user`, `ciphertext`, `signature`, `timestamp`, `created_at`, `is_broadcast`).
+- **Who can export:** Any current member of the room. They already see the ciphertext; the file just packages it. Outsiders who get the file see only encrypted blobs.
+- **Who can import:** Any logged-in user. Destination server creates the room **owned by the importer** (not the original creator), preserving the file's allowlist and adding the importer to it if not already present.
+- **Room-name collision:** Reject with error if the name already exists on the destination, with the import dialog offering an in-place rename. **Don't merge** (would pollute existing rooms with imported rows).
+- **Signature validation:** Server-side only sanity-checks structure (required fields, no SQL injection in usernames). Cryptographic signature verification stays client-side at decryption time — already implemented (`⚠ bad sig` badge catches forgeries on display).
+- **UI:** "📥 Export Room" button visible to room members (next to admin's allowlist panel? or in the leave-room confirm flow?). "📤 Import Room" button on the lobby screen — file picker + optional rename field if the room name collides.
+
+**Estimated scope:** ~150 lines server (export endpoint + import endpoint + structure validation + room create-on-import + bulk row insert), ~80 lines client (export download, import file picker, rename-on-collision dialog), small format-version doc. 1 session.
 
 ### v0.15 — Spotlight Room Layout + Admin Delegation + Screen Share (2–3 sessions)
 - Centre spotlight tile (active speaker), other participants tiled below

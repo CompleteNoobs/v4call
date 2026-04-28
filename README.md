@@ -7,7 +7,7 @@ Video, audio and text calling with Hive blockchain identity, HBD micropayments, 
 Callers pay to ring. Callees set their own rates. Unused credit is refunded. Everything is on-chain.
 
 **Current version**
-- Software **v0.13** — 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) on top of v0.12. DMs no longer mix into lobby chat. Server-driven lobby notice + requirements text. Anti-spam gate on lobby posting (HP and/or Hive-Engine token thresholds, configurable per server). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
+- Software **v0.14** — Token-Gated Rooms + Live Banlist (on top of v0.13). Optional Hive-Engine token-balance gate at room creation; non-allowlisted holders join with a "via TOKEN" badge. Live admin banlist with auto-kick + per-room visibility toggle (admin-only default; can be made public to all members). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
 - Federation protocol **v0.3** — unchanged from v0.11. verify.json domain proof, on-chain peer discovery, operator approval, paid cross-server calls + DMs
 
 **Key features**
@@ -211,6 +211,8 @@ Room joins (knock, accept invite, room creation) default to **text-only** — no
 ### Rooms
 
 - Private rooms with allowlist-based access
+- **Token-gated rooms (v0.14):** Optionally allow non-allowlisted users to join if they hold ≥ N of a Hive-Engine token. Set at room creation (off by default). Holders who join via the token gate get a `via SYMBOL` badge in the user list so admins can tell at a glance how each member got in.
+- **Live admin banlist (v0.14):** Room creator can ban any user (in-room or by name). Bans override allowlist + token gate, auto-kick if currently in the room, and persist for the room's lifetime. Per-room visibility toggle at creation: admin-only (default) or visible to all members.
 - Encrypted messaging and WebRTC video/voice
 - Room history replayed to new joiners (broadcasts in full, encrypted messages only if addressed to them)
 - Ephemeral — when the last person leaves, the room and all its stored messages are deleted
@@ -417,7 +419,8 @@ The active development plan, in order. Each version ships independently. Full de
 |---------|-------|
 | ~~**v0.12**~~ ✅ shipped | Polish: iOS zoom, mobile DM picker layout, room joins default to text-only with mid-room 🎤/🎥 enable + WebRTC renegotiation, DM dedup, paid-DM currency badge fix, discovery scanner repaired (Hive `limit` cap), `/admin/discovery-test` diagnostic |
 | ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated + server-driven lobby notice + anti-spam gate (HP / liquid HIVE / Hive-Engine token, configurable OR/AND) + mid-room mic/cam toggles (full release on disable) + 🖥️ Share Screen button placeholder for v0.15 |
-| **v0.14** | Token-gated rooms (allowlist OR balance) + live banlist with optional public visibility |
+| ~~**v0.14**~~ ✅ shipped | Token-gated rooms (allowlist OR Hive-Engine balance) + "via TOKEN" badges + live admin banlist (overrides everything; auto-kicks; per-room visibility toggle) + forward-compat `paidInvitees: Map` for v0.17 |
+| **v0.14.5** | Room export / import (`.v4room` JSON files) — backup ephemeral rooms, restore on same or different server. Encryption model means only original key-holders can decrypt the file's contents. Filename convention: `<roomname>@<source-domain>__<ISO-timestamp>.v4room` |
 | **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation + 🖥️ Share Screen wired up (the v0.13 placeholder) |
 | **v0.16 / fed v0.4** | Cross-server rooms — federated invites, multi-party cross-server WebRTC, token-gating across federation |
 | **v0.17 / fed v0.5** | **Paid Expert Invites** — admin pays an invited expert to join a room; reverses the v4call payment direction. Turns v4call into paid consulting infrastructure. The seed feature. |

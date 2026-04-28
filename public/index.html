@@ -454,6 +454,20 @@
     #al-add-input{flex:1;padding:4px 7px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;outline:none;}
     #al-add-input:focus{border-color:var(--accent);}
     .al-add-btn{padding:4px 8px;background:var(--accent);color:#0a0c0f;border:none;border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;}
+    .al-ban-btn{background:none;border:none;color:var(--danger);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.62rem;padding:0 4px;}
+    .al-ban-btn:hover{text-decoration:underline;}
+    #ban-row{display:flex;gap:5px;margin-top:6px;}
+    #ban-input{flex:1;padding:4px 7px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;outline:none;}
+    #ban-input:focus{border-color:var(--danger);}
+    .ban-add-btn{padding:4px 8px;background:transparent;color:var(--danger);border:1px solid rgba(248,113,113,0.4);border-radius:4px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;}
+    .ban-add-btn:hover{background:rgba(248,113,113,0.1);}
+    #banlist-section{margin-top:8px;border-top:1px solid var(--border);padding-top:6px;}
+    #banlist-section .banlist-header{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;color:var(--danger);letter-spacing:0.05em;margin-bottom:4px;}
+    .banned-chip{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--danger);background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);padding:2px 7px;border-radius:3px;display:inline-flex;align-items:center;gap:6px;margin:2px 4px 2px 0;}
+    .banned-chip button{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:0.6rem;padding:0;}
+    .banned-chip button:hover{color:var(--text);}
+    .via-token-badge{font-family:'IBM Plex Mono',monospace;font-size:0.55rem;color:var(--accent);background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.25);padding:1px 4px;border-radius:3px;margin-left:5px;}
+    .room-card-token-gate{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--accent);margin-top:3px;padding:0 4px;}
     #messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;scroll-behavior:smooth;}
     #messages::-webkit-scrollbar{width:3px;}
     #messages::-webkit-scrollbar-thumb{background:var(--border);}
@@ -640,6 +654,22 @@
       <div id="invitee-preview">Select users on the left first.</div>
       <input id="room-name-input" type="text" placeholder="room name…" maxlength="32" oninput="checkRoomName()" autocomplete="off" spellcheck="false"/>
       <div id="room-name-status"></div>
+      <div class="create-token-gate" style="margin:8px 0 4px;font-size:0.72rem;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--subtext);">
+          <input type="checkbox" id="enable-token-gate" onchange="toggleTokenGate()" style="accent-color:var(--accent);"/>
+          Allow non-allowlisted users to join with a token balance
+        </label>
+        <div id="token-gate-fields" style="display:none;margin-top:4px;padding-left:20px;gap:6px;align-items:center;">
+          <input id="token-gate-symbol" type="text" placeholder="SYMBOL" maxlength="20" style="width:120px;font-size:0.72rem;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;outline:none;"/>
+          <input id="token-gate-amount" type="number" step="any" min="0" placeholder="Min balance" style="width:90px;font-size:0.72rem;padding:4px 6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;outline:none;"/>
+        </div>
+      </div>
+      <div class="create-banlist-vis" style="margin:4px 0 8px;font-size:0.72rem;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--subtext);">
+          <input type="checkbox" id="banlist-public" style="accent-color:var(--accent);"/>
+          Show banlist to all room members (default: admin-only)
+        </label>
+      </div>
       <button class="primary" id="create-btn" onclick="createRoom()" disabled style="font-size:0.8rem;padding:8px;">Create &amp; Invite →</button>
     </div>
     <div id="knock-section">
@@ -788,6 +818,14 @@
         <input id="al-add-input" type="text" placeholder="@username" autocomplete="off" spellcheck="false"/>
         <button class="al-add-btn" onclick="allowlistAdd()">+</button>
       </div>
+      <div id="ban-row" style="display:none;">
+        <input id="ban-input" type="text" placeholder="ban @username" autocomplete="off" spellcheck="false"/>
+        <button class="ban-add-btn" onclick="banUser(document.getElementById('ban-input').value)">Ban</button>
+      </div>
+      <div id="banlist-section" style="display:none;">
+        <div class="banlist-header">BANNED</div>
+        <div id="banlist-members"></div>
+      </div>
     </div>
   </div>
   <!-- Mobile bottom-tab nav (hidden on desktop via CSS) -->
@@ -908,6 +946,7 @@ window._callStarted  = 0;
 
 // Room state
 let currentRoom = '', localStream;
+let currentRoomTokenGate = null; // v0.14 — { symbol, amount } | null, used by the via-TOKEN badge
 const peers = {}, roomUsers = {}, selectedRecipients = new Set();
 let amCreator = false;
 const lobbySelected = new Set();
@@ -1792,10 +1831,11 @@ socket.on('lobby-rooms', (roomsData) => {
     activeList.appendChild(noActive);
   } else {
     activeRooms.forEach(r => {
-      const canJoin = r.allowlist.some(u => u.username === myUsername);
+      const canJoin = r.allowlist.some(u => u.username === myUsername) || !!r.tokenGate;
       const card = document.createElement('div');
       card.className = 'room-card';
-      const chips = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
+      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
+      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${r.tokenGate.amount} ${r.tokenGate.symbol}</div>` : '';
       card.innerHTML = `
         <div class="room-card-header">
           <span class="room-card-name">#${r.name}</span>
@@ -1803,6 +1843,7 @@ socket.on('lobby-rooms', (roomsData) => {
           <span class="room-card-count">${r.memberCount} online</span>
         </div>
         <div class="room-card-allowlist">${chips}</div>
+        ${tokenLine}
         ${canJoin ? `<button class="room-join-btn" onclick="knockRoom('${r.name}')">Join →</button>` : ''}`;
       activeList.appendChild(card);
     });
@@ -1823,14 +1864,16 @@ socket.on('lobby-rooms', (roomsData) => {
     includedRooms.forEach(r => {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const chips = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
+      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
+      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${r.tokenGate.amount} ${r.tokenGate.symbol}</div>` : '';
       card.innerHTML = `
         <div class="room-card-header">
           <span class="room-card-name">#${r.name}</span>
           <span class="room-card-creator">by @${r.creator}</span>
-          <span class="room-card-count">0 online</span>
+          <span class="room-card-count">${r.memberCount} online</span>
         </div>
         <div class="room-card-allowlist">${chips}</div>
+        ${tokenLine}
         <button class="room-join-btn" onclick="knockRoom('${r.name}')">Knock →</button>`;
       incList.appendChild(card);
     });
@@ -1875,7 +1918,14 @@ function checkRoomName() {
 function createRoom() {
   const roomName = document.getElementById('room-name-input').value.trim();
   if (!roomName || !lobbySelected.size) return;
-  socket.emit('room-create', { roomName, invitees: [...lobbySelected] });
+  const tgEnabled = document.getElementById('enable-token-gate')?.checked;
+  socket.emit('room-create', {
+    roomName,
+    invitees: [...lobbySelected],
+    tokenGateSymbol:   tgEnabled ? document.getElementById('token-gate-symbol').value : '',
+    tokenGateAmount:   tgEnabled ? document.getElementById('token-gate-amount').value : 0,
+    banlistVisibility: document.getElementById('banlist-public')?.checked ? 'all' : 'admin'
+  });
 }
 socket.on('room-created', ({ roomName }) => {
   document.getElementById('room-name-input').value = '';
@@ -2621,15 +2671,19 @@ function showTopUpPrompt() {
 }
 
 // ── Room users ──────────────────────────────────────────
-function addRoomUser(sid, username, pubKey, isSelf) {
+function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
   if (roomUsers[sid]) return;
-  roomUsers[sid] = { username, pubKey };
+  roomUsers[sid] = { username, pubKey, joinedVia };
   if (pubKey) pubKeyCache[username] = pubKey;
   const list = document.getElementById('room-users-list');
   const el   = document.createElement('div');
   el.className = 'user-entry' + (isSelf ? ' self' : '');
   el.id        = 'ue-' + sid;
-  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span><div class="user-toggle"></div>`;
+  // "via TOKEN" badge for token-gate joiners (never on self).
+  const viaBadge = (joinedVia === 'token' && !isSelf && currentRoomTokenGate)
+    ? `<span class="via-token-badge">via ${currentRoomTokenGate.symbol}</span>`
+    : '';
+  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${viaBadge}<div class="user-toggle"></div>`;
   if (!isSelf) el.onclick = () => toggleRoomUser(sid);
   list.appendChild(el);
   updateInputState(); updatePeerCount();
@@ -2672,22 +2726,74 @@ function updatePeerCount() {
 }
 
 // ── Allowlist ───────────────────────────────────────────
-socket.on('room-info', ({ creator, allowlist }) => {
+socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibility }) => {
   if (!amCreator && creator === myUsername) amCreator = true;
-  if (amCreator) {
-    document.getElementById('allowlist-panel').style.display = 'flex';
-    document.getElementById('allowlist-members').innerHTML = allowlist.map(u =>
-      `<div class="al-member"><span>@${u}</span>${u!==myUsername?`<button class="al-remove" onclick="allowlistRemove('${u}')">✕</button>`:''}</div>`
-    ).join('');
+  currentRoomTokenGate = tokenGate || null;
+
+  // Banlist is non-null when this user is allowed to see it (creator always;
+  // other members only when banlistVisibility === 'all').
+  const canSeeBanlist = banlist !== null && banlist !== undefined;
+  const showPanel     = amCreator || canSeeBanlist;
+
+  const panel = document.getElementById('allowlist-panel');
+  if (!showPanel) { panel.style.display = 'none'; return; }
+  panel.style.display = 'flex';
+
+  // Members list — only the creator gets the per-row remove + ban controls.
+  document.getElementById('allowlist-members').innerHTML = allowlist.map(u => {
+    if (!amCreator) return `<div class="al-member"><span>@${u}</span></div>`;
+    const isCreator = (u === creator);
+    const removeBtn = isCreator ? '' : `<button class="al-remove" onclick="allowlistRemove('${u}')" title="Remove from allowlist">✕</button>`;
+    const banBtn    = isCreator ? '' : `<button class="al-ban-btn" onclick="banUser('${u}')" title="Ban from this room">ban</button>`;
+    return `<div class="al-member"><span>@${u}</span>${removeBtn}${banBtn}</div>`;
+  }).join('');
+
+  // Add-row + ban-row are creator-only; static al-add-row stays visible (it's
+  // already in the static HTML below #allowlist-members), we just toggle the
+  // ban-row.
+  document.getElementById('ban-row').style.display = amCreator ? 'flex' : 'none';
+  document.querySelector('.al-add-row').style.display = amCreator ? 'flex' : 'none';
+
+  // Banlist section — visible whenever the user can see the list.
+  const banSection = document.getElementById('banlist-section');
+  const banMembers = document.getElementById('banlist-members');
+  if (canSeeBanlist && banlist.length > 0) {
+    banSection.style.display = 'block';
+    banMembers.innerHTML = banlist.map(u => {
+      const unbanBtn = amCreator ? `<button onclick="unbanUser('${u}')" title="Unban">×</button>` : '';
+      return `<span class="banned-chip">@${u}${unbanBtn}</span>`;
+    }).join('');
+  } else {
+    banSection.style.display = 'none';
   }
 });
+
 function allowlistAdd() {
   const input = document.getElementById('al-add-input');
-  const user  = input.value.trim().toLowerCase().replace('@','');
+  const user  = input.value.trim().toLowerCase().replace(/^@/,'');
   if (!user) return;
-  rsock().emit('allowlist-add', { room: currentRoom, username: user }); input.value = '';
+  rsock().emit('allowlist-add', { room: currentRoom, username: user });
+  input.value = '';
 }
 function allowlistRemove(username) { rsock().emit('allowlist-remove', { room: currentRoom, username }); }
+
+function toggleTokenGate() {
+  const fields = document.getElementById('token-gate-fields');
+  if (fields) fields.style.display = document.getElementById('enable-token-gate').checked ? 'flex' : 'none';
+}
+
+function banUser(u) {
+  const target = (u || '').trim().toLowerCase().replace(/^@/,'');
+  if (!target || !currentRoom) return;
+  if (!confirm(`Ban @${target} from #${currentRoom}? They will be kicked if currently in the room and prevented from rejoining until you unban.`)) return;
+  rsock().emit('room-ban', { room: currentRoom, username: target });
+  const bi = document.getElementById('ban-input');
+  if (bi) bi.value = '';
+}
+function unbanUser(username) {
+  if (!currentRoom) return;
+  rsock().emit('room-unban', { room: currentRoom, username });
+}
 
 // ── Encryption ──────────────────────────────────────────
 function encryptMsg(plaintext, recipientPubStr) {
@@ -2807,13 +2913,13 @@ function applyRoomUsers(users) {
     if (u.socketId === socket.id) continue;
     if (document.getElementById('ue-'+u.socketId)) continue;
     if (Object.keys(roomUsers).find(s => roomUsers[s].username === u.username)) continue;
-    addRoomUser(u.socketId, u.username, u.pubKey, false);
+    addRoomUser(u.socketId, u.username, u.pubKey, false, u.joinedVia);
     createOffer(u.socketId);
   }
 }
 socket.on('room-users',        (users) => { applyRoomUsers(users); });
 socket.on('room-users-resync', (users) => { applyRoomUsers(users); });
-socket.on('user-joined', ({ socketId, username, pubKey }) => {
+socket.on('user-joined', ({ socketId, username, pubKey, joinedVia }) => {
   const existingSid = Object.keys(roomUsers).find(s => roomUsers[s].username === username);
   if (existingSid) {
     if (existingSid !== socketId) {
@@ -2823,8 +2929,8 @@ socket.on('user-joined', ({ socketId, username, pubKey }) => {
     }
     return;
   }
-  addRoomUser(socketId, username, pubKey, false);
-  addSystemMsg(`@${username} joined the room`);
+  addRoomUser(socketId, username, pubKey, false, joinedVia);
+  addSystemMsg(`@${username} joined the room${joinedVia === 'token' && currentRoomTokenGate ? ` (via ${currentRoomTokenGate.symbol})` : ''}`);
   const lbl = document.getElementById('video-label-'+socketId); if (lbl) lbl.textContent = '@'+username;
 });
 socket.on('user-left', (socketId) => {
