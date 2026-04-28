@@ -432,7 +432,7 @@
     #select-all-btn{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;color:var(--accent);background:none;border:1px solid rgba(245,166,35,0.3);border-radius:4px;padding:2px 5px;cursor:pointer;}
     #select-all-btn:hover{background:rgba(245,166,35,0.1);}
     #room-users-list{flex:1;overflow-y:auto;}
-    .user-entry{display:flex;align-items:center;gap:7px;padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--text);cursor:pointer;transition:background 0.15s;border-left:2px solid transparent;user-select:none;}
+    .user-entry{display:flex;align-items:center;flex-wrap:wrap;row-gap:2px;gap:7px;padding:7px 10px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--text);cursor:pointer;transition:background 0.15s;border-left:2px solid transparent;user-select:none;}
     .user-entry:hover:not(.self){background:var(--surface2);}
     .user-entry.selected{border-left-color:var(--accent);color:var(--accent);}
     .user-entry.self{color:var(--green);cursor:default;}
@@ -466,7 +466,10 @@
     .banned-chip{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--danger);background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.25);padding:2px 7px;border-radius:3px;display:inline-flex;align-items:center;gap:6px;margin:2px 4px 2px 0;}
     .banned-chip button{background:none;border:none;color:var(--subtext);cursor:pointer;font-size:0.6rem;padding:0;}
     .banned-chip button:hover{color:var(--text);}
-    .via-token-badge{font-family:'IBM Plex Mono',monospace;font-size:0.55rem;color:var(--accent);background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.25);padding:1px 4px;border-radius:3px;margin-left:5px;}
+    .via-token-badge{font-family:'IBM Plex Mono',monospace;font-size:0.55rem;color:var(--accent);background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.25);padding:1px 5px;border-radius:3px;}
+    /* Inside the room user list: badge wraps to its own row below the username
+       so the toggle stays accessible on row 1 (was getting pushed off-panel). */
+    .user-entry .via-token-badge{flex-basis:100%;margin-left:14px;align-self:flex-start;}
     .room-card-token-gate{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--accent);margin-top:3px;padding:0 4px;}
     #messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;scroll-behavior:smooth;}
     #messages::-webkit-scrollbar{width:3px;}
@@ -815,11 +818,11 @@
       <h4>ALLOWLIST</h4>
       <div id="allowlist-members"></div>
       <div class="al-add-row">
-        <input id="al-add-input" type="text" placeholder="@username" autocomplete="off" spellcheck="false"/>
+        <input id="al-add-input" type="text" placeholder="add @username to allowlist" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();allowlistAdd();}"/>
         <button class="al-add-btn" onclick="allowlistAdd()">+</button>
       </div>
       <div id="ban-row" style="display:none;">
-        <input id="ban-input" type="text" placeholder="ban @username" autocomplete="off" spellcheck="false"/>
+        <input id="ban-input" type="text" placeholder="ban @username from room" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();banUser(this.value);}"/>
         <button class="ban-add-btn" onclick="banUser(document.getElementById('ban-input').value)">Ban</button>
       </div>
       <div id="banlist-section" style="display:none;">
@@ -2430,6 +2433,13 @@ async function enterRoom(roomName) {
   }); // end Promise
 }
 function leaveRoom() {
+  // Tell the server we're leaving so it can update room membership and notify
+  // other room members immediately. Without this, the server only learned via
+  // socket disconnect (potentially much later) and other members would see
+  // stale user-list entries until then.
+  if (currentRoom) {
+    try { rsock().emit('leave-room'); } catch(_) {}
+  }
   stopCallTicker();
   currentCallId = null; pendingRates = null;
   pendingCallType = 'voice'; // reset for next call
