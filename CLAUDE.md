@@ -10,7 +10,7 @@ v4call is a decentralised paid video, voice, and text communication platform bui
 
 ## Current Version
 
-- **Software:** v0.14 — Token-Gated Rooms + Live Banlist (on top of v0.13). Optional Hive-Engine token-balance gate at room creation lets non-allowlisted holders join (with a "via TOKEN" badge). Live admin banlist overrides allowlist + tokenGate, auto-kicks if currently in-room, with a per-room visibility toggle (admin-only default; can be made public to all members). Forward-compat `paidInvitees: Map` initialised on every room (empty in v0.14, v0.17 populates). Production-deployed on call.completenoobs.com ↔ hive-book.com.
+- **Software:** v0.14.5 — Room Export / Import as `.v4room` JSON files, on top of v0.14. Any room member can export the room (metadata + every ciphertext message) as a downloadable `<roomname>@<source-domain>__<ISO-timestamp>.v4room` file. Any logged-in user can import it (same or different v4call server) — they become the new admin, allowlist + tokenGate + banlist + visibility are preserved, and recipients with the original keys can decrypt their addressed messages. Plus several long-standing CSS bugs in the room-exit UI fixed (room header buttons were never visible since v0.11 — End Call was bridging the gap). Production-deployed on call.completenoobs.com ↔ hive-book.com.
 - **Federation protocol:** v0.3 — unchanged from v0.11. verify.json domain proof, Hive-tag discovery directory, manual peer approval, paid cross-server calls + DMs.
 
 The version split is intentional: the application keeps evolving (UI/UX/features), the federation protocol bumps separately when wire-format changes.
@@ -88,7 +88,7 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 5. On the wire, federation messages: `hello` (with verify recheck), `presence`, `user-online`/`user-offline`, `dm`, `call-invite`/`call-response`/`call-declined`/`call-cancelled`/`call-missed`, `payment-verified`, `call-ended`, `call-receipt-fed`.
 6. For paid cross-server calls/DMs, the caller pays the *callee's escrow on Hive* directly. The caller's server verifies on-chain and forwards the payment notification to the callee's server. The callee's server independently re-verifies and disburses (callee-net, platform-fee) from its own escrow at call end. Refunds to the caller are cross-server Hive transfers from the callee's escrow.
 
-## Features (What's Built and Working in v0.14)
+## Features (What's Built and Working in v0.14.5)
 
 ### Core (single-server)
 - **Login:** Hive Keychain (recommended, no key paste) or manual posting key
@@ -102,7 +102,7 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **DM history:** Full conversation loaded on demand when opening DM panel
 - **Rooms:** Private, allowlist-based, ephemeral (deleted when last person leaves, including stored messages)
 - **Room history:** Replayed on join — broadcasts in full, encrypted messages only if addressed to the joiner
-- **Custom token payments:** Any Hive-Engine token via [TOKEN:SYMBOL] sections in rates post
+- **Custom token payments:** Any Hive-Engine token via [TOKEN:SYMBOL] sections in rates post. Token creation on Hive-Engine costs a flat 100 BEE (≈ 62 HIVE / ~£5–£6 at the time CNOOBS was minted) — cheap enough to be a real wedge for creator-economy use cases. Created tokens work as payment currency, lobby anti-spam gate, room token-gate, and blocked-list bypass without any further setup.
 - **Payment picker:** When multiple currencies qualify, caller sees all options with balances and chooses
 - **Token transfers:** Uses Keychain requestCustomJson for Hive-Engine sidechain operations
 - **Token verification:** Balance-check verification (not transferHistory — that API doesn't work reliably)
@@ -143,6 +143,17 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **Banlist visibility:** Per-room `banlistVisibility: 'admin' | 'all'` (admin default). Server's per-member `room-info` emit (`emitRoomInfoToMembers`) sends the banlist array to the creator unconditionally and to other members only when visibility is `'all'`; non-visible members get `banlist: null` and the client hides the section. Non-creators never see the unban buttons even when they can see the banlist.
 - **Forward-compat for v0.17:** Every room is created with `paidInvitees: new Map()`. The join check evaluates `r.paidInvitees.has(username)` between the allowlist and tokenGate checks — always falsy in v0.14 (Map stays empty). v0.17 populates this Map with `username → { connectFee, ratePerHour, currency, maxDuration, ... }` and the join flow needs zero refactor — just an additional `joinedVia: 'paid'` branch.
 - **`emitRoomInfoToMembers(r, roomName)` helper:** Replaces the existing `io.to(room).emit('room-info', ...)` calls in `allowlist-add` / `allowlist-remove` / `room-ban` / `room-unban` so the per-recipient banlist visibility logic runs on every state change.
+
+### v0.14.5 polish (added on top of v0.14)
+- **Room export — `📥 Export` button (purple, room header):** Visible to any current room member. Calls `socket.on('room-export', ...)` which assembles a `.v4room` JSON containing room metadata (name, creator, allowlist, tokenGate, banlist, banlistVisibility, created_at) + every row from `room_messages` (ciphertext only — server never sees plaintext). Browser saves it as `<roomname>@<source-domain>__<ISO-timestamp>.v4room`. Filename sorts alphabetically = sorts chronologically; `@` separates room from server (mailbox/Mastodon style); `__` before timestamp makes splitting trivial; ISO with hyphens not colons keeps it Windows-safe.
+- **Room import — `📤 Import .v4room file` button (lobby → JOIN BY NAME panel):** Any logged-in user can import. Reads file in-browser via FileReader, sends to `socket.on('room-import', ...)` which validates structure (file_type, format_version, required fields, room-name regex), creates a new room owned by the *importer* (not the original creator), preserves the file's allowlist (importer auto-added), tokenGate, banlist, banlistVisibility, then bulk-inserts all messages via `chatStoreRoomMsg`. Returns `{ collision: true }` if the room name exists; client prompts for a rename and retries. 20MB file size cap.
+- **Encryption preserved across export/import:** `.v4room` files contain ciphertext only — the server never had plaintext. Anyone can hold the file but only original key-holders can decrypt their addressed messages. Cryptographic signature verification stays client-side at decryption time (the existing `⚠ bad sig` badge still catches forgeries on display).
+- **`chatGetRoomMessagesAll(roomName)` helper:** New; returns every row from `room_messages` for a given room (no per-recipient filter). Used only by export. Existing `chatGetRoomHistory(roomName, username)` still does the per-recipient filter for normal in-room delivery.
+- **Format spec (`format_version: 1`):** Self-documenting top-level fields `file_type: "v4room"`, `format_version`, `source_server`, `exported_at`, `exported_by`, plus nested `room` and `messages` objects. Bumping the format version in future requires a parallel server-side import branch — current import rejects unknown versions with a clear error.
+- **Two long-standing CSS bugs in the room-exit UI fixed:**
+  - **Bug A** — `#call-cost-ticker` had a duplicate `display:` declaration (`display:none;...display:flex;`); last-wins meant the ticker was always visible regardless of the `.active` modifier, so End Call appeared in every room (including non-call rooms). Fixed by removing the second `display:flex` from the base rule. End Call now only appears via `.active` during real paid 1:1 calls.
+  - **Bug B** — `style.display = ''` doesn't override CSS `display:none` (the empty string just removes the inline override; cascade re-applies the `display:none` rule). The four header buttons (`#leave-room-btn`, `#popout-btn`, `#export-room-btn`, `#end-room-btn`) were therefore **never visible** since v0.11. Users had been clicking End Call as their de-facto leave button. Fixed by switching to the `.shown` class pattern that already worked for `#enable-mic-btn` etc. (`#id.class` specificity beats `#id` alone).
+  - **Why the bugs masked each other:** End Call was always visible (Bug A); Leave Room was never visible (Bug B); users clicked End Call thinking it was Leave Room; End Call's server handler emitted `peer-hung-up` to all members → cascaded `leaveRoom()` calls → "non-admin leaves kicks everyone" symptom (which was the v0.14 Bug 3 we patched at the server-side `call-end` handler). The patch was correct but the root cause was missing UI — both layers are now fixed.
 
 ### Federation (v0.3)
 - **Server-to-server WebSocket:** persistent connection on `/federation`, domain tiebreaker so only the lower-domain initiates outbound (avoids flapping)
@@ -202,6 +213,9 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
 - **`condenser_api.get_discussions_by_created` `limit` cap is 20:** Hive nodes enforce this with `Assert Exception` on values > 20. The discovery scanner's `limit` was 50 in v0.11 and silently failed on every node; fixed in v0.12. If you add another `get_discussions_by_*` query, keep `limit ≤ 20` and paginate via `start_author + start_permlink` if you need more.
 - **Browser cache hides client fixes:** After a `docker compose ... up -d` of new client code, mobile Safari/Brave can keep serving the cached `index.html` for hours. If a fix that should be visible isn't, clear browser history/site data on the device first.
 - **iPhone Hive Keychain doesn't inject `window.hive_keychain`:** iOS Safari and iOS Brave (also WebKit) don't allow extensions that inject scripts into pages. The Hive Keychain *mobile app* exists but can't talk to web pages the way the desktop extension does, so paid actions fall through the "Keychain required" error on iOS. **Not a v4call bug.** Future workaround options: HiveSigner web flow (`https://hivesigner.com/sign/transfer?...`) as a fallback when `window.hive_keychain` is undefined; or `@hiveio/keychain-sdk` for QR/deep-link handshake to the mobile app. See "Future Work" for the planned approach.
+- **`element.style.display = ''` does NOT override a CSS `display:none` rule.** Setting an empty string just *removes* the inline declaration; the cascade re-applies whatever the stylesheet says — which for v4call's hidden-by-default buttons is `none`. This bit us hard from v0.11 to v0.14.5: four header buttons (`#leave-room-btn`, `#popout-btn`, `#export-room-btn`, `#end-room-btn`) were never visible. The working pattern is the `.shown` class that `#enable-mic-btn` etc. use — `#id { display: none; }` + `#id.shown { display: inline-block; }` (the compound selector has higher specificity than the ID alone), with JS toggling via `classList.add('shown')` / `classList.remove('shown')` (or `classList.toggle('shown', cond)` for conditional cases). When adding a new hidden-by-default button, **use the `.shown` class pattern, never `style.display = ''`.**
+- **Avoid duplicate property declarations in the same CSS rule.** `#call-cost-ticker` had `{ display:none; ...; display:flex; ... }` from v0.11 onwards — last-wins meant it was always `flex` and the `.active` modifier was a no-op (End Call button always visible regardless of ticker state). When CSS rules grow long, scan for repeated property names before pasting more.
+- **`git fetch --all && git reset --hard origin/main` will clobber operator-specific files.** Specifically `nginx/v4call.conf` (where the operator's domain replaces the placeholder `v4call.com`) and `public/.well-known/v4call-server.json` (the operator's signed verify file from `/server-sign.html`). Both ship as templates/placeholders in git; a hard reset reverts them to the shipped versions, which breaks HTTPS (wrong domain in nginx config) and federation (verify.json reverts to placeholder). **Operators must back up these two files before updating** — see WalkThrough.wiki "Updating to a new version" for the recommended `cp ... bk....` flow. When proposing repo updates to the user, always remind them to back up these two files first.
 
 ## Coding Style
 
@@ -327,22 +341,16 @@ All items below landed in one focused session. See the "v0.14 polish" subsection
 - ~~Banlist visibility toggle~~ → per-recipient `room-info` emit (`emitRoomInfoToMembers`)
 - ~~Forward-compat `paidInvitees: Map`~~ → join check has the v0.17 hook line as a no-op
 
-### v0.14.5 — Room Export / Import (`.v4room` files) (1 session)
-**Why:** v4call rooms are deliberately ephemeral (deleted when last person leaves). This loses chat history. Export/import lets users opt into persistence without changing the server's ephemeral default — backup before leaving, import on the same or a different v4call server to restore. Also enables room migration between federated servers.
-
-**Key insight:** v4call's encryption model makes this elegant — the server only ever has ciphertext, so the export is just "the ciphertext that's already in the DB, packaged for portability." No re-encryption, no plaintext anywhere. Anyone can hold the file but only original key-holders can decrypt anything in it.
-
-**Locked-in design:**
-- **Format:** JSON (not XML — native to Node, smaller, no parsing dep). Wrapped with `.v4room` extension for file-association.
-- **Filename convention:** `<roomname>@<source-domain>__<ISO-timestamp>.v4room` — e.g. `noobs-chat@hive-book.com__2026-04-28T14-30-00Z.v4room`. The `@` separates room from server (mailbox/Mastodon style), `__` before timestamp makes splitting trivial, ISO with hyphens instead of colons keeps it Windows-safe. Sorts alphabetically = sorts chronologically.
-- **File contents:** Room metadata (`name`, `creator`, `allowlist[]` with cached pubkeys, `source_server`, `exported_at`, `exported_by`, `format_version`) + every `room_messages` row (`from_user`, `to_user`, `ciphertext`, `signature`, `timestamp`, `created_at`, `is_broadcast`).
-- **Who can export:** Any current member of the room. They already see the ciphertext; the file just packages it. Outsiders who get the file see only encrypted blobs.
-- **Who can import:** Any logged-in user. Destination server creates the room **owned by the importer** (not the original creator), preserving the file's allowlist and adding the importer to it if not already present.
-- **Room-name collision:** Reject with error if the name already exists on the destination, with the import dialog offering an in-place rename. **Don't merge** (would pollute existing rooms with imported rows).
-- **Signature validation:** Server-side only sanity-checks structure (required fields, no SQL injection in usernames). Cryptographic signature verification stays client-side at decryption time — already implemented (`⚠ bad sig` badge catches forgeries on display).
-- **UI:** "📥 Export Room" button visible to room members (next to admin's allowlist panel? or in the leave-room confirm flow?). "📤 Import Room" button on the lobby screen — file picker + optional rename field if the room name collides.
-
-**Estimated scope:** ~150 lines server (export endpoint + import endpoint + structure validation + room create-on-import + bulk row insert), ~80 lines client (export download, import file picker, rename-on-collision dialog), small format-version doc. 1 session.
+### v0.14.5 — Room Export / Import (`.v4room` files) ✅ shipped
+All items below landed. See "v0.14.5 polish" subsection above for what each piece does.
+- ~~JSON format with `.v4room` extension~~ — `format_version: 1`
+- ~~Filename convention `<roomname>@<source-domain>__<ISO-timestamp>.v4room`~~
+- ~~Any current member can export~~ — `📥 Export` button in room header
+- ~~Any logged-in user can import~~ — `📤 Import .v4room file` in lobby
+- ~~Room-name collision → prompt for rename~~
+- ~~Server-side structural validation only; signature verification stays client-side~~
+- ~~Importer becomes new admin; allowlist + tokenGate + banlist + visibility preserved~~
+- **Bonus during the same cycle:** fixed two long-standing CSS bugs (`#call-cost-ticker` duplicate `display:` + `style.display = ''` not overriding CSS) — End Call no longer always-visible, Leave Room / Pop out / End Room finally show up. Documented in the v0.14.5 polish section above and in Known Gotchas.
 
 ### v0.15 — Spotlight Room Layout + Admin Delegation + Screen Share (2–3 sessions)
 - Centre spotlight tile (active speaker), other participants tiled below

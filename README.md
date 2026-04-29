@@ -7,7 +7,7 @@ Video, audio and text calling with Hive blockchain identity, HBD micropayments, 
 Callers pay to ring. Callees set their own rates. Unused credit is refunded. Everything is on-chain.
 
 **Current version**
-- Software **v0.14** — Token-Gated Rooms + Live Banlist (on top of v0.13). Optional Hive-Engine token-balance gate at room creation; non-allowlisted holders join with a "via TOKEN" badge. Live admin banlist with auto-kick + per-room visibility toggle (admin-only default; can be made public to all members). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
+- Software **v0.14.5** — Room Export / Import as `.v4room` JSON files, on top of v0.14. Any room member can download a snapshot of the room (members + ciphertext history); any user can import it back on the same or a different v4call server. Encryption preserved — only original key-holders can decrypt their addressed messages. Plus long-standing room-exit UI bugs fixed (Leave Room / Pop out / End Room finally visible). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
 - Federation protocol **v0.3** — unchanged from v0.11. verify.json domain proof, on-chain peer discovery, operator approval, paid cross-server calls + DMs
 
 **Key features**
@@ -199,6 +199,14 @@ Room joins (knock, accept invite, room creation) default to **text-only** — no
 - Token transfers use Keychain `custom_json` (Hive-Engine sidechain)
 - Escrow account must hold the accepted tokens for payouts and refunds
 
+**Creating your own token is cheap and works everywhere v4call accepts a Hive-Engine token.** As of writing, Hive-Engine charges a flat **100 BEE** to create a new token (≈ 62 HIVE at the time of this note — check the current BEE/HIVE rate at [tribaldex.com](https://tribaldex.com/swap) or [hive-engine.com](https://hive-engine.com); recent real-world cost was about £5 / $6 USD when CNOOBS was minted). Once minted, the token works as:
+- a payment currency in your `v4call-rates` post (`[TOKEN:SYMBOL]` block)
+- the `LOBBY_POST_MIN_TOKEN` anti-spam gate (server operators)
+- the `tokenGate: { symbol, amount }` for token-gated rooms (room creators)
+- the `ALLOW-IF-TOKEN` bypass for blocked-list overrides
+
+This is a real wedge for creator economies: stake your token, distribute it to your community, then run a server (or use one) where holders get paid access / posting rights / room access via on-chain balance checks.
+
 ### Platform Fee System
 
 - Server sets `DEFAULT_PLATFORM_FEE` in `.env` — this is the **minimum** fee
@@ -213,6 +221,7 @@ Room joins (knock, accept invite, room creation) default to **text-only** — no
 - Private rooms with allowlist-based access
 - **Token-gated rooms (v0.14):** Optionally allow non-allowlisted users to join if they hold ≥ N of a Hive-Engine token. Set at room creation (off by default). Holders who join via the token gate get a `via SYMBOL` badge in the user list so admins can tell at a glance how each member got in.
 - **Live admin banlist (v0.14):** Room creator can ban any user (in-room or by name). Bans override allowlist + token gate, auto-kick if currently in the room, and persist for the room's lifetime. Per-room visibility toggle at creation: admin-only (default) or visible to all members.
+- **Room export / import as `.v4room` files (v0.14.5):** Any room member can click `📥 Export` to download a snapshot of the room — metadata + every ciphertext message — as `<roomname>@<source-domain>__<ISO-timestamp>.v4room`. Any user can `📤 Import` it back on the same or a different v4call server (lobby → JOIN BY NAME panel). Importer becomes the new admin; allowlist + token gate + banlist + visibility are preserved. Encryption is preserved — anyone can hold the file but only original key-holders can decrypt their addressed messages. Lets you opt into persistence without changing the server's ephemeral default.
 - Encrypted messaging and WebRTC video/voice
 - Room history replayed to new joiners (broadcasts in full, encrypted messages only if addressed to them)
 - Ephemeral — when the last person leaves, the room and all its stored messages are deleted
@@ -365,6 +374,8 @@ VIDEO:RING:0.200;CONNECT:1.000;RATE:5.000/hr;MIN-DEPOSIT:10min
    Federation peer servers (presence, DMs, calls, payment-verified, call-ended)
 ```
 
+**Compatibility note (untested):** v4call uses Hive blockchain APIs throughout (`@hiveio/dhive`, `condenser_api.*`, `hivecrypt`, Hive-Engine sidechain). Steem and Hive share a common ancestor and largely-compatible RPC schemas, so v4call *should* be portable to Steem (steemit.com) with API endpoint changes — `https://api.hive.blog` → a Steem RPC node, plus matching adjustments for any chain-specific calls. **Not tested on Steem** — the author doesn't have a Steem account to verify. Pull requests welcome from anyone interested in running v4call on the Steem chain.
+
 ---
 
 ## Viewing the Databases
@@ -420,7 +431,7 @@ The active development plan, in order. Each version ships independently. Full de
 | ~~**v0.12**~~ ✅ shipped | Polish: iOS zoom, mobile DM picker layout, room joins default to text-only with mid-room 🎤/🎥 enable + WebRTC renegotiation, DM dedup, paid-DM currency badge fix, discovery scanner repaired (Hive `limit` cap), `/admin/discovery-test` diagnostic |
 | ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated + server-driven lobby notice + anti-spam gate (HP / liquid HIVE / Hive-Engine token, configurable OR/AND) + mid-room mic/cam toggles (full release on disable) + 🖥️ Share Screen button placeholder for v0.15 |
 | ~~**v0.14**~~ ✅ shipped | Token-gated rooms (allowlist OR Hive-Engine balance) + "via TOKEN" badges + live admin banlist (overrides everything; auto-kicks; per-room visibility toggle) + forward-compat `paidInvitees: Map` for v0.17 |
-| **v0.14.5** | Room export / import (`.v4room` JSON files) — backup ephemeral rooms, restore on same or different server. Encryption model means only original key-holders can decrypt the file's contents. Filename convention: `<roomname>@<source-domain>__<ISO-timestamp>.v4room` |
+| ~~**v0.14.5**~~ ✅ shipped | Room export / import (`.v4room` JSON files) + fixed long-standing CSS bugs in room-exit UI (Leave Room / Pop out / End Room buttons now visible; End Call no longer always-on) |
 | **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation + 🖥️ Share Screen wired up (the v0.13 placeholder) |
 | **v0.16 / fed v0.4** | Cross-server rooms — federated invites, multi-party cross-server WebRTC, token-gating across federation |
 | **v0.17 / fed v0.5** | **Paid Expert Invites** — admin pays an invited expert to join a room; reverses the v4call payment direction. Turns v4call into paid consulting infrastructure. The seed feature. |

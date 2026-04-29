@@ -870,6 +870,29 @@ To pull updates from GitHub and deploy:
  docker compose build --no-cache
  docker compose up -d
 
+'''⚠ If you ever use <code>git fetch --all</code> + <code>git reset --hard origin/main</code>''' (the "throw away local changes and force-match the upstream" sequence), you '''must back up two operator-specific files first''' — both ship in git as templates that the reset will overwrite:
+
+* <code>nginx/v4call.conf</code> — your domain replaces the placeholder <code>v4call.com</code>. Reset = HTTPS broken.
+* <code>public/.well-known/v4call-server.json</code> — your signed verify file from <code>/server-sign.html</code>. Reset = federation broken (peers can't verify you).
+
+The safe update flow when using a hard reset:
+
+ cd /opt/v4call
+ cp nginx/v4call.conf nginx/bk.v4call.conf
+ cp public/.well-known/v4call-server.json public/.well-known/bk.v4call-server.json
+
+ git fetch --all
+ git reset --hard origin/main
+
+ cp nginx/bk.v4call.conf nginx/v4call.conf
+ cp public/.well-known/bk.v4call-server.json public/.well-known/v4call-server.json
+
+ docker compose down
+ docker compose build --no-cache
+ docker compose up -d
+
+Plain <code>git pull</code> usually preserves local edits via merge — only the hard-reset path needs the backup dance. But if pull ever errors with "Your local changes would be overwritten", use the backup flow above.
+
 To push your own customisations to GitHub:
 
  # On your local computer after making changes:
