@@ -983,6 +983,43 @@ socket.on('disconnect', () => {
   if (incomingCallData)         { hideIncomingOverlay(); incomingCallData = null; }
 });
 
+// HTML-attribute / text escaping for dynamic strings injected into innerHTML.
+// Inline `onclick="fn('${value}')"` is unsafe even with this — use data-*
+// attributes + delegated listeners for any onclick that takes server-driven
+// or federated input. This helper covers the remaining cases (text content
+// and data-* attribute values).
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    c === '&' ? '&amp;'
+    : c === '<' ? '&lt;'
+    : c === '>' ? '&gt;'
+    : c === '"' ? '&quot;'
+    : '&#39;');
+}
+
+// Single delegated click handler for any element rendered with [data-action]
+// + the relevant [data-user] / [data-room] attributes. Replaces the prior
+// inline onclick="fn('${dynamicValue}')" pattern, which was unsafe when
+// dynamicValue could contain quotes or scripts (room names from server, or
+// canonical user@server entries where the server portion comes from a
+// federation peer's signed verify.json).
+document.addEventListener('click', (ev) => {
+  const t = ev.target.closest('[data-action]');
+  if (!t) return;
+  const user = t.dataset.user || '';
+  const room = t.dataset.room || '';
+  switch (t.dataset.action) {
+    case 'knock':            return knockRoom(room);
+    case 'al-remove':        return allowlistRemove(user);
+    case 'al-ban':           return banUser(user);
+    case 'al-unban':         return unbanUser(user);
+    case 'lobby-toggle':     return toggleLobbyUser(user);
+    case 'lobby-call-voice': return initiateCall(user, 'voice');
+    case 'lobby-call-video': return initiateCall(user, 'video');
+    case 'lobby-dm':         return openDmPanel(user);
+  }
+});
+
 // Identity
 let myUsername = '', myPrivKey = null, myPrivKeyStr = '', myPubKey = '';
 let isInvisible = false;
@@ -1412,26 +1449,22 @@ socket.on('lobby-users', (users) => {
     const isMe       = u.username === myUsername;
     const isSel      = lobbySelected.has(u.username);
     const isFed      = !!u.server && u.server !== MY_SERVER_DOMAIN;
-    const serverLbl  = isFed ? `<div class="lu-server" title="User is on ${u.server}">${u.server}</div>` : '';
+    const safeUser   = escapeHtml(u.username);
+    const safeServer = escapeHtml(u.server || '');
+    const serverLbl  = isFed ? `<div class="lu-server" title="User is on ${safeServer}">${safeServer}</div>` : '';
     let el = document.getElementById('lu-' + u.username);
     if (!el) {
       el = document.createElement('div');
       el.id = 'lu-' + u.username;
-      // Each action is an explicit button — no whole-row click handler
-      // Toggle: selects user for room invites + encrypted lobby messages
-      // 📞 Voice call (green phone icon)
-      // 🎥 Video call (blue camera icon)
-      // 💬 DM (purple chat bubble icon)
-      el.innerHTML = `<div class="online-dot"></div><div class="lu-name"><span class="lu-handle">@${u.username}</span>${serverLbl}</div>`
-        + (isMe ? '<div class="lu-toggle"></div>' : `<div class="lu-toggle" title="Encrypt lobby messages to @${u.username}" onclick="toggleLobbyUser('${u.username}')"></div>`)
-        + (isMe ? '' : `<button class="call-btn" title="Voice call @${u.username}" onclick="initiateCall('${u.username}','voice')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.73 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.3a2 2 0 0 1 2.11-.45c.83.36 1.7.61 2.6.73A2 2 0 0 1 22 16.92z"/></svg></button>`)
-        + (isMe ? '' : `<button class="video-btn" title="Video call @${u.username}" onclick="initiateCall('${u.username}','video')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>`)
-        + (isMe ? '' : `<button class="dm-btn" title="Direct message @${u.username}" onclick="openDmPanel('${u.username}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>`);
+      el.innerHTML = `<div class="online-dot"></div><div class="lu-name"><span class="lu-handle">@${safeUser}</span>${serverLbl}</div>`
+        + (isMe ? '<div class="lu-toggle"></div>' : `<div class="lu-toggle" title="Encrypt lobby messages to @${safeUser}" data-action="lobby-toggle" data-user="${safeUser}"></div>`)
+        + (isMe ? '' : `<button class="call-btn" title="Voice call @${safeUser}" data-action="lobby-call-voice" data-user="${safeUser}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.37 1.77.73 2.6a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.48-1.3a2 2 0 0 1 2.11-.45c.83.36 1.7.61 2.6.73A2 2 0 0 1 22 16.92z"/></svg></button>`)
+        + (isMe ? '' : `<button class="video-btn" title="Video call @${safeUser}" data-action="lobby-call-video" data-user="${safeUser}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg></button>`)
+        + (isMe ? '' : `<button class="dm-btn" title="Direct message @${safeUser}" data-action="lobby-dm" data-user="${safeUser}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></button>`);
       list.appendChild(el);
     } else {
-      // Keep the server badge fresh when users move between states
       const nameEl = el.querySelector('.lu-name');
-      if (nameEl) nameEl.innerHTML = `<span class="lu-handle">@${u.username}</span>${serverLbl}`;
+      if (nameEl) nameEl.innerHTML = `<span class="lu-handle">@${safeUser}</span>${serverLbl}`;
     }
     el.className = 'lobby-user' + (isMe ? ' me' : '') + (isSel ? ' selected' : '') + (isFed ? ' federated' : '');
   });
@@ -1811,7 +1844,7 @@ socket.on('dm-unread-summary', ({ totalMessages, fromUsers }) => {
   fromUsers.forEach(u => {
     const row = document.createElement('div');
     row.className = 'dm-alert-user';
-    row.innerHTML = `<span class="name">@${u}</span>`;
+    row.innerHTML = `<span class="name">@${escapeHtml(u)}</span>`;
     row.style.cursor = 'pointer';
     row.addEventListener('click', () => { dismissDmAlert(); openDmPanel(u); });
     usersDiv.appendChild(row);
@@ -1903,17 +1936,18 @@ socket.on('lobby-rooms', (roomsData) => {
       const canJoin = r.allowlist.some(u => u.username === myUsername) || !!r.tokenGate;
       const card = document.createElement('div');
       card.className = 'room-card';
-      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
-      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${r.tokenGate.amount} ${r.tokenGate.symbol}</div>` : '';
+      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
+      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
+      const safeName = escapeHtml(r.name);
       card.innerHTML = `
         <div class="room-card-header">
-          <span class="room-card-name">#${r.name}</span>
-          <span class="room-card-creator">by @${r.creator}</span>
+          <span class="room-card-name">#${safeName}</span>
+          <span class="room-card-creator">by @${escapeHtml(r.creator)}</span>
           <span class="room-card-count">${r.memberCount} online</span>
         </div>
         <div class="room-card-allowlist">${chips}</div>
         ${tokenLine}
-        ${canJoin ? `<button class="room-join-btn" onclick="knockRoom('${r.name}')">Join →</button>` : ''}`;
+        ${canJoin ? `<button class="room-join-btn" data-action="knock" data-room="${safeName}">Join →</button>` : ''}`;
       activeList.appendChild(card);
     });
   }
@@ -1933,17 +1967,18 @@ socket.on('lobby-rooms', (roomsData) => {
     includedRooms.forEach(r => {
       const card = document.createElement('div');
       card.className = 'room-card';
-      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${u.username}</span>`).join('');
-      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${r.tokenGate.amount} ${r.tokenGate.symbol}</div>` : '';
+      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
+      const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
+      const safeName = escapeHtml(r.name);
       card.innerHTML = `
         <div class="room-card-header">
-          <span class="room-card-name">#${r.name}</span>
-          <span class="room-card-creator">by @${r.creator}</span>
+          <span class="room-card-name">#${safeName}</span>
+          <span class="room-card-creator">by @${escapeHtml(r.creator)}</span>
           <span class="room-card-count">${r.memberCount} online</span>
         </div>
         <div class="room-card-allowlist">${chips}</div>
         ${tokenLine}
-        <button class="room-join-btn" onclick="knockRoom('${r.name}')">Knock →</button>`;
+        <button class="room-join-btn" data-action="knock" data-room="${safeName}">Knock →</button>`;
       incList.appendChild(card);
     });
   }
@@ -2840,16 +2875,17 @@ function addRoomUser(sid, username, pubKey, isSelf, joinedVia, homeServer) {
   const viaBadge = (joinedVia === 'token' && !isSelf && currentRoomTokenGate)
     ? `<span class="via-token-badge">via ${currentRoomTokenGate.symbol}</span>`
     : '';
-  // v0.16 Part B — federated badge (mirrors the lobby + allowlist styles).
-  const fedBadge = (homeServer && !isSelf) ? `<span class="fed-badge">@${homeServer}</span>` : '';
-  // v0.15 admin buttons — present on every non-self row, but hidden via CSS
-  // unless the parent #room-users-list has the .am-creator class. data-user
-  // lets updateFollowAffordance flip the .active state on the spotlight btn.
+  const safeUser   = escapeHtml(username);
+  const safeServer = escapeHtml(homeServer || '');
+  const fedBadge = (homeServer && !isSelf) ? `<span class="fed-badge">@${safeServer}</span>` : '';
+  // Admin buttons — present on every non-self row, hidden via CSS unless the
+  // parent #room-users-list has .am-creator. data-user lets updateFollowAffordance
+  // flip the .active state on the spotlight btn.
   const adminBtns = isSelf ? '' : `<span class="ue-admin-btns">
-      <button class="ue-spotlight-btn" data-user="${username}" title="Spotlight @${username} for everyone in the room">📌</button>
-      <button class="ue-makeadmin-btn" data-user="${username}" title="Hand admin to @${username}">👑</button>
+      <button class="ue-spotlight-btn" data-user="${safeUser}" title="Spotlight @${safeUser} for everyone in the room">📌</button>
+      <button class="ue-makeadmin-btn" data-user="${safeUser}" title="Hand admin to @${safeUser}">👑</button>
     </span>`;
-  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${fedBadge}${viaBadge}${adminBtns}<div class="user-toggle"></div>`;
+  el.innerHTML = `<div class="user-dot"></div><span>@${safeUser}</span>${fedBadge}${viaBadge}${adminBtns}<div class="user-toggle"></div>`;
   if (!isSelf) {
     el.onclick = (ev) => {
       // Admin buttons must not also trigger the recipient-toggle behaviour.
@@ -2938,13 +2974,14 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   // @user + small server badge mirroring the lobby's federated-user style.
   document.getElementById('allowlist-members').innerHTML = allowlist.map(u => {
     const atIdx = u.indexOf('@');
+    const safeU = escapeHtml(u);
     const userLabel = (atIdx > 0)
-      ? `<span>@${u.slice(0, atIdx)}</span><span class="fed-badge">@${u.slice(atIdx + 1)}</span>`
-      : `<span>@${u}</span>`;
+      ? `<span>@${escapeHtml(u.slice(0, atIdx))}</span><span class="fed-badge">@${escapeHtml(u.slice(atIdx + 1))}</span>`
+      : `<span>@${safeU}</span>`;
     if (!amCreator) return `<div class="al-member">${userLabel}</div>`;
     const isCreator = (u === creator);
-    const removeBtn = isCreator ? '' : `<button class="al-remove" onclick="allowlistRemove('${u}')" title="Remove from allowlist">✕</button>`;
-    const banBtn    = isCreator ? '' : `<button class="al-ban-btn" onclick="banUser('${u}')" title="Ban from this room">ban</button>`;
+    const removeBtn = isCreator ? '' : `<button class="al-remove" data-action="al-remove" data-user="${safeU}" title="Remove from allowlist">✕</button>`;
+    const banBtn    = isCreator ? '' : `<button class="al-ban-btn" data-action="al-ban" data-user="${safeU}" title="Ban from this room">ban</button>`;
     return `<div class="al-member">${userLabel}${removeBtn}${banBtn}</div>`;
   }).join('');
 
@@ -2960,8 +2997,9 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   if (canSeeBanlist && banlist.length > 0) {
     banSection.style.display = 'block';
     banMembers.innerHTML = banlist.map(u => {
-      const unbanBtn = amCreator ? `<button onclick="unbanUser('${u}')" title="Unban">×</button>` : '';
-      return `<span class="banned-chip">@${u}${unbanBtn}</span>`;
+      const safeU = escapeHtml(u);
+      const unbanBtn = amCreator ? `<button data-action="al-unban" data-user="${safeU}" title="Unban">×</button>` : '';
+      return `<span class="banned-chip">@${safeU}${unbanBtn}</span>`;
     }).join('');
   } else {
     banSection.style.display = 'none';
