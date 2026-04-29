@@ -3205,6 +3205,15 @@ function createPC(peerId) {
   const pc = new RTCPeerConnection(ICE_CFG);
   peers[peerId] = pc;
   if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  // Ensure both audio + video m-lines exist in the offer regardless of what
+  // we're sending. Without this, a text-only joiner's offer has no media
+  // sections, the answer mirrors that, and the joiner never receives
+  // existing peers' cam/mic tracks. Chrome's addTrack reuses these recvonly
+  // transceivers later if the user enables their own mic/cam (no duplicate m-lines).
+  const haveAudio = localStream && localStream.getAudioTracks().length > 0;
+  const haveVideo = localStream && localStream.getVideoTracks().length > 0;
+  if (!haveAudio) pc.addTransceiver('audio', { direction: 'recvonly' });
+  if (!haveVideo) pc.addTransceiver('video', { direction: 'recvonly' });
   pc.onicecandidate = ({ candidate }) => { if (candidate) rsock().emit('ice-candidate', { to: peerId, candidate }); };
   pc.ontrack = ({ streams }) => {
     if (!document.getElementById('wrapper-'+peerId)) {
