@@ -941,12 +941,16 @@ function openFederatedRoomSocket(serverDomain, onReady) {
     console.error('[federation] connect_error to', serverDomain, err.message);
     addLobbyMsg && addLobbyMsg({ type: 'system', text: `⚠ Could not connect to ${serverDomain} — ${err.message}` });
   });
-  // v0.16 Part B — if the temp socket dies while we're in the federated room
-  // (host crashed, federation drop, network glitch), surface a clear message
-  // and clean up local room state. leaveRoom() clears currentRoom, so the
-  // user-initiated case (click Leave Room → closeFederatedRoomSocket() → this
-  // disconnect fires) is a no-op here.
+  // v0.16 Part B — if the temp socket dies non-recoverably (host explicitly
+  // closed us, e.g. via fed-drop eviction or End Room), tear down the local
+  // room state. For TRANSIENT disconnects (transport close / ping timeout),
+  // Socket.io's built-in auto-reconnect handles it — we must NOT proactively
+  // leaveRoom or we'll yank the user out of an active room mid-call when the
+  // network blips. A separate `kicked` event from the host already triggers
+  // leaveRoom for explicit kicks; this handler only catches server-initiated
+  // disconnects we won't auto-recover from.
   activeRoomSocket.on('disconnect', (reason) => {
+    if (reason !== 'io server disconnect') return; // transient — let Socket.io reconnect
     if (currentRoom) {
       const where = activeRoomServer || serverDomain;
       const text  = `⚠ Lost connection to ${where} — you were removed from #${currentRoom}.`;
