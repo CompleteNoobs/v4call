@@ -314,7 +314,14 @@
 
     /* Room */
     #room-screen{flex-direction:row;}
-    #video-panel{display:flex;flex-direction:column;background:#080a0d;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;width:280px;}
+    #video-panel{display:flex;flex-direction:column;background:#080a0d;border-right:1px solid var(--border);overflow:hidden;flex-shrink:0;width:280px;}
+    #spotlight-slot{flex:0 0 auto;display:block;background:#000;}
+    #spotlight-slot .video-wrapper{width:100%;cursor:default;}
+    #peer-strip{flex:0 0 auto;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:2px;padding:2px;background:#050709;border-top:1px solid var(--border);}
+    #peer-strip:empty{display:none;}
+    #peer-strip .video-wrapper{flex:0 0 90px;width:90px;cursor:pointer;border:2px solid transparent;border-radius:4px;transition:border-color 0.15s;}
+    #peer-strip .video-wrapper:hover{border-color:var(--accent);}
+    #peer-strip .video-wrapper .video-label{font-size:0.55rem;padding:1px 4px;bottom:3px;left:3px;}
     /* ── Mobile bottom-tab nav (hidden on desktop) ─────────────── */
     .mob-nav{display:none;}
 
@@ -373,13 +380,17 @@
         width:100%!important;height:auto;flex:1;min-height:0;max-height:none!important;
         border:none!important;overflow-y:auto;display:none!important;
       }
-      #room-screen.mob-tab-video #video-panel{display:flex!important;flex-direction:column;overflow-y:auto;overflow-x:hidden;}
+      #room-screen.mob-tab-video #video-panel{display:flex!important;flex-direction:column;overflow:hidden;}
       #room-screen.mob-tab-chat  #chat-panel {display:flex!important;}
       #room-screen.mob-tab-users #users-panel{display:flex!important;}
 
-      /* Stretch local + remote video tiles to fill the column on mobile */
-      #room-screen.mob-tab-video .video-wrapper{width:100%;}
-      #room-screen.mob-tab-video .video-wrapper video{aspect-ratio:16/9;}
+      /* Spotlight fills viewport, strip scrolls horizontally below it */
+      #room-screen.mob-tab-video #spotlight-slot{flex:1 1 auto;display:flex;align-items:center;justify-content:center;min-height:0;overflow:hidden;}
+      #room-screen.mob-tab-video #spotlight-slot .video-wrapper{width:100%;}
+      #room-screen.mob-tab-video #spotlight-slot .video-wrapper video{aspect-ratio:16/9;}
+      #room-screen.mob-tab-video #peer-strip{flex:0 0 auto;}
+      #room-screen.mob-tab-video #peer-strip .video-wrapper{flex:0 0 110px;width:110px;}
+      #room-screen.mob-tab-video #peer-strip .video-wrapper video{aspect-ratio:4/3;}
 
       /* Ticker takes too much space on phones — let it wrap */
       #call-cost-ticker{flex-wrap:wrap;gap:6px;}
@@ -786,10 +797,13 @@
 <!-- SCREEN 3: ROOM -->
 <div class="screen" id="room-screen">
   <div id="video-panel">
-    <div class="video-wrapper">
-      <video id="local-video" autoplay muted playsinline></video>
-      <div class="video-label" id="local-label">you</div>
+    <div id="spotlight-slot">
+      <div class="video-wrapper spotlight" onclick="setSpotlight(this)">
+        <video id="local-video" autoplay muted playsinline></video>
+        <div class="video-label" id="local-label">you</div>
+      </div>
     </div>
+    <div id="peer-strip"></div>
   </div>
   <div id="chat-panel">
     <div id="chat-header">
@@ -2465,7 +2479,10 @@ function leaveRoom() {
   for (const k in peers) delete peers[k];
   for (const k in roomUsers) delete roomUsers[k];
   selectedRecipients.clear();
-  document.querySelectorAll('#video-panel .video-wrapper:not(:first-child)').forEach(w => w.remove());
+  document.querySelectorAll('#video-panel .video-wrapper[id^="wrapper-"]').forEach(w => w.remove());
+  // Restore local tile to the spotlight slot for the next room entry
+  const localWrapper = document.getElementById('local-video')?.parentElement;
+  if (localWrapper) setSpotlight(localWrapper);
   document.getElementById('video-panel').style.display = ''; // restore for next call
   document.getElementById('local-video').srcObject = null;
   document.getElementById('enable-mic-btn').classList.remove('shown');
@@ -3036,7 +3053,16 @@ socket.on('user-left', (socketId) => {
   addSystemMsg(`@${u.username} left the room`);
   removeRoomUser(socketId);
   if (peers[socketId]) { peers[socketId].close(); delete peers[socketId]; }
-  document.getElementById('wrapper-'+socketId)?.remove();
+  const wrapper = document.getElementById('wrapper-'+socketId);
+  if (wrapper) {
+    const slot = document.getElementById('spotlight-slot');
+    const wasSpotlit = slot && slot.firstElementChild === wrapper;
+    wrapper.remove();
+    if (wasSpotlit) {
+      const localWrapper = document.getElementById('local-video')?.parentElement;
+      if (localWrapper) setSpotlight(localWrapper);
+    }
+  }
   refreshVideoPanelVisibility();
 });
 
@@ -3184,13 +3210,14 @@ function createPC(peerId) {
     if (!document.getElementById('wrapper-'+peerId)) {
       const wrapper = document.createElement('div');
       wrapper.className = 'video-wrapper'; wrapper.id = 'wrapper-'+peerId;
+      wrapper.onclick = () => setSpotlight(wrapper);
       const vid = document.createElement('video');
       vid.id = 'video-'+peerId; vid.autoplay = true; vid.playsInline = true;
       const lbl = document.createElement('div');
       lbl.className = 'video-label'; lbl.id = 'video-label-'+peerId;
       lbl.textContent = roomUsers[peerId] ? '@'+roomUsers[peerId].username : '…';
       wrapper.appendChild(vid); wrapper.appendChild(lbl);
-      document.getElementById('video-panel').appendChild(wrapper);
+      document.getElementById('peer-strip').appendChild(wrapper);
     }
     document.getElementById('video-'+peerId).srcObject = streams[0];
     // Reveal the panel even if WE have no local media — otherwise the
@@ -3201,6 +3228,27 @@ function createPC(peerId) {
   return pc;
 }
 
+// v0.15 spotlight — local pin only. Clicking a tile moves it into the
+// spotlight slot; whatever was there moves to the strip. Click is local-only,
+// the rest of the room is unaffected. Admin-broadcast spotlight lands in v0.15 Part B.
+function setSpotlight(wrapperEl) {
+  if (!wrapperEl) return;
+  const slot  = document.getElementById('spotlight-slot');
+  const strip = document.getElementById('peer-strip');
+  if (!slot || !strip) return;
+  if (slot.firstElementChild === wrapperEl) {
+    wrapperEl.classList.add('spotlight');
+    return;
+  }
+  const current = slot.firstElementChild;
+  if (current) {
+    current.classList.remove('spotlight');
+    strip.appendChild(current);
+  }
+  wrapperEl.classList.add('spotlight');
+  slot.appendChild(wrapperEl);
+}
+
 // Show the video panel whenever there's anything to render — local stream
 // has video, OR any peer has sent us a track (their wrapper exists). Hides
 // only when the room is purely text and no peer is sharing media.
@@ -3208,7 +3256,7 @@ function refreshVideoPanelVisibility() {
   const panel       = document.getElementById('video-panel');
   if (!panel) return;
   const hasLocal    = !!(localStream && localStream.getVideoTracks().length > 0);
-  const peerCount   = document.querySelectorAll('#video-panel .video-wrapper:not(:first-child)').length;
+  const peerCount   = document.querySelectorAll('#video-panel .video-wrapper[id^="wrapper-"]').length;
   panel.style.display = (hasLocal || peerCount > 0) ? '' : 'none';
 }
 async function createOffer(peerId) {
