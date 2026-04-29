@@ -7,8 +7,8 @@ Video, audio and text calling with Hive blockchain identity, HBD micropayments, 
 Callers pay to ring. Callees set their own rates. Unused credit is refunded. Everything is on-chain.
 
 **Current version**
-- Software **v0.14.5** — Room Export / Import as `.v4room` JSON files, on top of v0.14. Any room member can download a snapshot of the room (members + ciphertext history); any user can import it back on the same or a different v4call server. Encryption preserved — only original key-holders can decrypt their addressed messages. Plus long-standing room-exit UI bugs fixed (Leave Room / Pop out / End Room finally visible). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
-- Federation protocol **v0.3** — unchanged from v0.11. verify.json domain proof, on-chain peer discovery, operator approval, paid cross-server calls + DMs
+- Software **v0.16 (Part A)** — Cross-server room invites. Type `@user@peer.com` into a room's allowlist; server validates the target server is approved + connected + on protocol_version ≥ 0.4 and sends the invite over federation. Receiving server delivers a popup with a source-server badge; accept/decline flows back as `room-response`. (Cross-server *join* lands in v0.16 Part B — for now, accept just confirms receipt with a "Cross-server join arrives in Part B" system message.) Builds on v0.15 (spotlight room layout + local pin + admin spotlight broadcast + admin role transfer + Share Screen + WebRTC SDP m-line fix). Production-deployed on [call.completenoobs.com](https://call.completenoobs.com) ↔ [hive-book.com](https://hive-book.com).
+- Federation protocol **v0.4 (Part A)** — first wire-format bump since v0.11. New `room-invite` / `room-response` envelopes (generic `payload: {}` for forward-compat with v0.17 paid expert invites) plus an explicit `protocol_version: '0.4'` field in the hello, so older v0.3 peers continue to federate fully for everything they could do at v0.3.
 
 **Key features**
 - Voice-only and video calls with separate rate tiers
@@ -177,9 +177,9 @@ Separate rates can be set for voice and video in the rates post. Federated users
 
 - 🎤 **Enable Mic / Disable Mic** — full release on disable, so the browser's microphone indicator actually goes away (not a soft mute). Re-enable re-acquires the device.
 - 🎥 **Enable Cam / Disable Cam** — same pattern; the camera light turns off when disabled.
-- 🖥️ **Share Screen** — placeholder in v0.13 (visible button so the layout is stable); the real `getDisplayMedia()` flow lands in v0.15 with the spotlight room layout.
+- 🖥️ **Share Screen / Stop Sharing** (v0.15) — `getDisplayMedia()` flow. Mutually exclusive with cam (cam stops automatically when sharing starts; cam button greys out until you stop). Click `🖥️ Stop Sharing` or use the browser's own "Stop sharing" floating bar — both reset the toolbar correctly. Auto-pins your tile to your local spotlight so you see your share clearly. iOS Safari/Brave doesn't support `getDisplayMedia` — clicking the button on iOS posts a clear "not supported" message instead of crashing.
 
-Room joins (knock, accept invite, room creation) default to **text-only** — no camera/mic prompt until you click one of the toggle buttons.
+Room joins (knock, accept invite, room creation) default to **text-only** — no camera/mic prompt until you click one of the toggle buttons. **Text-only and voice-only joiners now correctly receive existing peers' video and audio** (a long-standing WebRTC SDP bug fixed in v0.15).
 
 ### Direct Messages
 
@@ -222,6 +222,9 @@ This is a real wedge for creator economies: stake your token, distribute it to y
 - **Token-gated rooms (v0.14):** Optionally allow non-allowlisted users to join if they hold ≥ N of a Hive-Engine token. Set at room creation (off by default). Holders who join via the token gate get a `via SYMBOL` badge in the user list so admins can tell at a glance how each member got in.
 - **Live admin banlist (v0.14):** Room creator can ban any user (in-room or by name). Bans override allowlist + token gate, auto-kick if currently in the room, and persist for the room's lifetime. Per-room visibility toggle at creation: admin-only (default) or visible to all members.
 - **Room export / import as `.v4room` files (v0.14.5):** Any room member can click `📥 Export` to download a snapshot of the room — metadata + every ciphertext message — as `<roomname>@<source-domain>__<ISO-timestamp>.v4room`. Any user can `📤 Import` it back on the same or a different v4call server (lobby → JOIN BY NAME panel). Importer becomes the new admin; allowlist + token gate + banlist + visibility are preserved. Encryption is preserved — anyone can hold the file but only original key-holders can decrypt their addressed messages. Lets you opt into persistence without changing the server's ephemeral default.
+- **Spotlight room layout (v0.15):** One large spotlight tile + horizontal strip of peer thumbs (replaces the equal-size vertical column). Click any tile to **pin it locally** to your own view — your pin is private and survives reconnects. Strip is hidden in solo rooms.
+- **Admin spotlight broadcast (v0.15):** Room admin sees a `📌` button next to every member in the room user-list. Click → that member is broadcast as the room-wide spotlight target. **Soft override:** users who have manually pinned someone else keep their pin and see a `↺ Follow room spotlight` button — admin influences, never overrides. New joiners get the current spotlight automatically. Spotlight clears if the spotlit user leaves.
+- **Admin role transfer (v0.15):** Admin sees a `👑` button next to every other current member. Click → confirm dialog → that member becomes admin (gets End Room, ban controls, allowlist edits, spotlight broadcast). Previous admin demoted instantly across all clients.
 - Encrypted messaging and WebRTC video/voice
 - Room history replayed to new joiners (broadcasts in full, encrypted messages only if addressed to them)
 - Ephemeral — when the last person leaves, the room and all its stored messages are deleted
@@ -234,6 +237,7 @@ This is a real wedge for creator economies: stake your token, distribute it to y
 - Discovery scanner finds peers; operator approves via `/admin-peers.html`
 - Cross-server calls: caller's server hosts the room, callee's browser opens a temporary cross-server connection for WebRTC signalling. Media stays peer-to-peer.
 - Cross-server payments: caller pays callee's escrow on Hive directly. Callee's server (which holds the escrow key) handles all disbursement — including refunds back to the cross-server caller.
+- **Cross-server room invites (v0.4 Part A, v0.16):** type `@user@peer.com` into a room's allowlist; server validates the peer is approved + on protocol_version ≥ 0.4 and sends `room-invite` over federation. Receiving server delivers a popup with a source-server badge; accept/decline flows back as `room-response`. Cross-server *join* (multi-party WebRTC + federated token-gating) lands in v0.16 Part B.
 
 ### Mobile
 
@@ -432,8 +436,8 @@ The active development plan, in order. Each version ships independently. Full de
 | ~~**v0.13**~~ ✅ shipped | 4-tab lobby (DM / Local Lobby / Active Rooms / Included Rooms) + DM panel relocated + server-driven lobby notice + anti-spam gate (HP / liquid HIVE / Hive-Engine token, configurable OR/AND) + mid-room mic/cam toggles (full release on disable) + 🖥️ Share Screen button placeholder for v0.15 |
 | ~~**v0.14**~~ ✅ shipped | Token-gated rooms (allowlist OR Hive-Engine balance) + "via TOKEN" badges + live admin banlist (overrides everything; auto-kicks; per-room visibility toggle) + forward-compat `paidInvitees: Map` for v0.17 |
 | ~~**v0.14.5**~~ ✅ shipped | Room export / import (`.v4room` JSON files) + fixed long-standing CSS bugs in room-exit UI (Leave Room / Pop out / End Room buttons now visible; End Call no longer always-on) |
-| **v0.15** | Spotlight room layout + admin click-to-promote + admin role delegation + 🖥️ Share Screen wired up (the v0.13 placeholder) |
-| **v0.16 / fed v0.4** | Cross-server rooms — federated invites, multi-party cross-server WebRTC, token-gating across federation |
+| ~~**v0.15**~~ ✅ shipped | Spotlight room layout (large spotlight + horizontal peer strip) + local pin (any user) + admin spotlight broadcast (📌, soft override with `↺ Follow room spotlight` for users with a local pin) + admin role transfer (👑) + 🖥️ Share Screen wired up (replaceTrack for in-place swap, addTrack + renegotiate fallback, browser "Stop sharing" sync via `track.onended`, iOS gracefully shows "not supported") + WebRTC SDP m-line fix so text-only / voice-only joiners actually receive existing peers' video and audio |
+| **v0.16 / fed v0.4** | Cross-server rooms. **Part A** ✅ shipped — `room-invite` / `room-response` envelopes + `protocol_version: '0.4'` gate field + federated allowlist input (`@user@peer.com`) with v0.4-peer guard + accept/decline handshake. **Part B** ⏳ — actual cross-server room join via temp Socket.io (mirrors 1:1 federated calls), `room-ended` cleanup envelope, federated token-gating |
 | **v0.17 / fed v0.5** | **Paid Expert Invites** — admin pays an invited expert to join a room; reverses the v4call payment direction. Turns v4call into paid consulting infrastructure. The seed feature. |
 
 Deferred (interesting but not blocking): paid lobby posting, paid room creation, split-payer expert invites.

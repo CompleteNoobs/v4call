@@ -95,6 +95,7 @@
     .lobby-user .lu-handle{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .lobby-user .lu-server{font-size:0.58rem;color:var(--muted);font-style:italic;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
     .lobby-user.federated .online-dot{background:var(--purple);}
+    .fed-badge{font-size:0.58rem;color:var(--muted);font-style:italic;margin-left:3px;}
     .online-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0;}
     .lobby-user.me .online-dot{background:var(--accent);}
     .lu-toggle{width:24px;height:13px;border-radius:999px;background:var(--muted);position:relative;transition:background 0.2s;flex-shrink:0;cursor:pointer;}
@@ -859,7 +860,7 @@
       <h4>ALLOWLIST</h4>
       <div id="allowlist-members"></div>
       <div class="al-add-row">
-        <input id="al-add-input" type="text" placeholder="add @username to allowlist" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();allowlistAdd();}"/>
+        <input id="al-add-input" type="text" placeholder="add @user or @user@server.com" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();allowlistAdd();}"/>
         <button class="al-add-btn" onclick="allowlistAdd()">+</button>
       </div>
       <div id="ban-row" style="display:none;">
@@ -1948,6 +1949,22 @@ socket.on('lobby-post-rejected', ({ reason }) => {
   addLobbyMsg({ type: 'system', text: `⚠ ${reason}` });
 });
 
+// v0.16 / fed v0.4 — generic info channel for federated invite confirmations
+// (accept ✓, offline auto-decline ⚠ etc.). Server emits to specific user sockets.
+socket.on('lobby-info', ({ text }) => {
+  if (text) addLobbyMsg({ type: 'system', text });
+});
+
+// Federated allowlist-add feedback (peer not approved, peer offline, peer
+// on older protocol, malformed input). Local allowlist-add stays silent on
+// success; only the federated path emits these explicitly.
+socket.on('allowlist-error', ({ room, reason }) => {
+  addLobbyMsg({ type: 'system', text: `⚠ Allowlist (#${room || '?'}): ${reason}` });
+});
+socket.on('allowlist-info', ({ room, message }) => {
+  addLobbyMsg({ type: 'system', text: `${message}${room ? ` (#${room})` : ''}` });
+});
+
 // ── Room creation ───────────────────────────────────────
 let nameCheckTimer = null;
 function checkRoomName() {
@@ -1990,24 +2007,41 @@ socket.on('room-create-error', (msg) => {
 });
 
 // ── Invites ─────────────────────────────────────────────
-socket.on('room-invite', ({ roomName, from, invitees }) => {
-  pendingInvite = { roomName, from };
-  const others  = invitees.filter(u => u !== from && u !== myUsername);
+socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id }) => {
+  pendingInvite = { roomName, from, from_server: from_server || null, invite_id: invite_id || null };
+  const others  = (invitees || []).filter(u => u !== from && u !== myUsername);
+  const fromLabel = from_server
+    ? `<strong>@${from}</strong> <span style="color:var(--accent);font-size:0.7rem;">@${from_server}</span>`
+    : `<strong>@${from}</strong>`;
+  const fedNote = from_server
+    ? `<br><span style="color:var(--subtext);font-size:0.7rem;">Cross-server invite from ${from_server}.</span>`
+    : '';
   document.getElementById('invite-popup-text').innerHTML =
-    `<strong>@${from}</strong> invites you to <strong>#${roomName}</strong>` +
-    (others.length ? `<br>Others: ${others.map(u=>'@'+u).join(', ')}` : '');
+    `${fromLabel} invites you to <strong>#${roomName}</strong>` +
+    (others.length ? `<br>Others: ${others.map(u=>'@'+u).join(', ')}` : '') +
+    fedNote;
   document.getElementById('invite-popup').style.display = 'block';
-  addLobbyMsg({type:'system',text:`📞 @${from} invited you to #${roomName}`});
+  const sysFrom = from_server ? `@${from}@${from_server}` : `@${from}`;
+  addLobbyMsg({type:'system',text:`📞 ${sysFrom} invited you to #${roomName}`});
 });
 let pendingInvite = null;
 function acceptInvite() {
   if (!pendingInvite) return;
   document.getElementById('invite-popup').style.display = 'none';
-  // Room invites enter in text-only mode; user can Enable Mic / Cam in-room.
-  amCreator = false; pendingCallType = 'text'; enterRoom(pendingInvite.roomName); pendingInvite = null;
+  if (pendingInvite.from_server && pendingInvite.invite_id) {
+    socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'accepted' });
+    addLobbyMsg({type:'system',text:`✓ Accepted invite to #${pendingInvite.roomName} on ${pendingInvite.from_server}. (Cross-server room join arrives in v0.16 Part B.)`});
+  } else {
+    // Local invite — enter the room directly. Text-only mode; user can Enable Mic / Cam in-room.
+    amCreator = false; pendingCallType = 'text'; enterRoom(pendingInvite.roomName);
+  }
+  pendingInvite = null;
 }
 function declineInvite() {
   document.getElementById('invite-popup').style.display = 'none';
+  if (pendingInvite?.from_server && pendingInvite?.invite_id) {
+    socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'declined' });
+  }
   addLobbyMsg({type:'system',text:`You declined the invite to #${pendingInvite?.roomName}`});
   pendingInvite = null;
 }
@@ -2848,12 +2882,18 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   panel.style.display = 'flex';
 
   // Members list — only the creator gets the per-row remove + ban controls.
+  // Federated entries are stored as 'user@server'; we render them as
+  // @user + small server badge mirroring the lobby's federated-user style.
   document.getElementById('allowlist-members').innerHTML = allowlist.map(u => {
-    if (!amCreator) return `<div class="al-member"><span>@${u}</span></div>`;
+    const atIdx = u.indexOf('@');
+    const userLabel = (atIdx > 0)
+      ? `<span>@${u.slice(0, atIdx)}</span><span class="fed-badge">@${u.slice(atIdx + 1)}</span>`
+      : `<span>@${u}</span>`;
+    if (!amCreator) return `<div class="al-member">${userLabel}</div>`;
     const isCreator = (u === creator);
     const removeBtn = isCreator ? '' : `<button class="al-remove" onclick="allowlistRemove('${u}')" title="Remove from allowlist">✕</button>`;
     const banBtn    = isCreator ? '' : `<button class="al-ban-btn" onclick="banUser('${u}')" title="Ban from this room">ban</button>`;
-    return `<div class="al-member"><span>@${u}</span>${removeBtn}${banBtn}</div>`;
+    return `<div class="al-member">${userLabel}${removeBtn}${banBtn}</div>`;
   }).join('');
 
   // Add-row + ban-row are creator-only; static al-add-row stays visible (it's
