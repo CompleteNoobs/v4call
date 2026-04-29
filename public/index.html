@@ -1951,18 +1951,20 @@ socket.on('lobby-post-rejected', ({ reason }) => {
 
 // v0.16 / fed v0.4 — generic info channel for federated invite confirmations
 // (accept ✓, offline auto-decline ⚠ etc.). Server emits to specific user sockets.
+// Routed through showInviteMsg so the admin sees these in their current room
+// (where they were when they sent the invite), not stuck in the lobby chat.
 socket.on('lobby-info', ({ text }) => {
-  if (text) addLobbyMsg({ type: 'system', text });
+  if (text) showInviteMsg(text);
 });
 
 // Federated allowlist-add feedback (peer not approved, peer offline, peer
 // on older protocol, malformed input). Local allowlist-add stays silent on
 // success; only the federated path emits these explicitly.
 socket.on('allowlist-error', ({ room, reason }) => {
-  addLobbyMsg({ type: 'system', text: `⚠ Allowlist (#${room || '?'}): ${reason}` });
+  showInviteMsg(`⚠ Allowlist (#${room || '?'}): ${reason}`);
 });
 socket.on('allowlist-info', ({ room, message }) => {
-  addLobbyMsg({ type: 'system', text: `${message}${room ? ` (#${room})` : ''}` });
+  showInviteMsg(`${message}${room ? ` (#${room})` : ''}`);
 });
 
 // ── Room creation ───────────────────────────────────────
@@ -2007,6 +2009,14 @@ socket.on('room-create-error', (msg) => {
 });
 
 // ── Invites ─────────────────────────────────────────────
+// Route invite-flow system messages to whichever surface the user is currently
+// looking at. When in a room, the lobby chat is hidden and the user has zero
+// chance of seeing important federated-invite feedback; when in lobby, the
+// room chat doesn't exist. Always prefer room when available.
+function showInviteMsg(text) {
+  if (currentRoom) addSystemMsg(text);
+  else             addLobbyMsg({ type: 'system', text });
+}
 socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id }) => {
   pendingInvite = { roomName, from, from_server: from_server || null, invite_id: invite_id || null };
   const others  = (invitees || []).filter(u => u !== from && u !== myUsername);
@@ -2022,7 +2032,7 @@ socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id }) 
     fedNote;
   document.getElementById('invite-popup').style.display = 'block';
   const sysFrom = from_server ? `@${from}@${from_server}` : `@${from}`;
-  addLobbyMsg({type:'system',text:`📞 ${sysFrom} invited you to #${roomName}`});
+  showInviteMsg(`📞 ${sysFrom} invited you to #${roomName}`);
 });
 let pendingInvite = null;
 function acceptInvite() {
@@ -2030,7 +2040,7 @@ function acceptInvite() {
   document.getElementById('invite-popup').style.display = 'none';
   if (pendingInvite.from_server && pendingInvite.invite_id) {
     socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'accepted' });
-    addLobbyMsg({type:'system',text:`✓ Accepted invite to #${pendingInvite.roomName} on ${pendingInvite.from_server}. (Cross-server room join arrives in v0.16 Part B.)`});
+    showInviteMsg(`✓ Accepted invite to #${pendingInvite.roomName} on ${pendingInvite.from_server}. (Cross-server room join arrives in v0.16 Part B.)`);
   } else {
     // Local invite — enter the room directly. Text-only mode; user can Enable Mic / Cam in-room.
     amCreator = false; pendingCallType = 'text'; enterRoom(pendingInvite.roomName);
@@ -2042,7 +2052,7 @@ function declineInvite() {
   if (pendingInvite?.from_server && pendingInvite?.invite_id) {
     socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'declined' });
   }
-  addLobbyMsg({type:'system',text:`You declined the invite to #${pendingInvite?.roomName}`});
+  showInviteMsg(`You declined the invite to #${pendingInvite?.roomName}`);
   pendingInvite = null;
 }
 function knockRoom(name) {
