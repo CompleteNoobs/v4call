@@ -991,6 +991,7 @@ window._callStarted  = 0;
 // Room state
 let currentRoom = '', localStream;
 let currentRoomTokenGate = null; // v0.14 — { symbol, amount } | null, used by the via-TOKEN badge
+let currentScreenStream = null;  // v0.15 — getDisplayMedia stream while sharing (null when not)
 const peers = {}, roomUsers = {}, selectedRecipients = new Set();
 let amCreator = false;
 // v0.15 — admin-broadcast spotlight target (username) and per-client local pin override.
@@ -2493,6 +2494,12 @@ function leaveRoom() {
   stopCallTicker();
   currentCallId = null; pendingRates = null;
   pendingCallType = 'voice'; // reset for next call
+  // v0.15 — stop screen share if active so the browser's "Sharing" indicator
+  // disappears even if the user leaves mid-share.
+  if (currentScreenStream) {
+    try { currentScreenStream.getTracks().forEach(t => { t.onended = null; t.stop(); }); } catch(_) {}
+    currentScreenStream = null;
+  }
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   Object.values(peers).forEach(pc => pc.close());
   for (const k in peers) delete peers[k];
@@ -2510,6 +2517,8 @@ function leaveRoom() {
   // Reset button labels for the next room
   document.getElementById('enable-mic-btn').textContent = '🎤 Enable Mic';
   document.getElementById('enable-cam-btn').textContent = '🎥 Enable Cam';
+  document.getElementById('enable-cam-btn').disabled = false;
+  document.getElementById('enable-cam-btn').style.opacity = '';
   document.getElementById('share-screen-btn').textContent = '🖥️ Share Screen';
   document.getElementById('room-users-list').innerHTML = '';
   document.getElementById('messages').innerHTML = '<div class="msg-system">Messages are signed and encrypted with Hive keys.</div>';
@@ -3153,10 +3162,102 @@ async function toggleCam() {
   if (localStream && localStream.getVideoTracks().length > 0) await disableCam();
   else                                                        await enableCam();
 }
-function toggleScreen() {
-  // v0.13 placeholder — real getDisplayMedia() flow lands in v0.15 alongside
-  // the spotlight room layout. Button visible now so the UI is stable.
-  addSystemMsg('🖥️ Screen sharing arrives in v0.15 — UI placeholder for now.');
+async function toggleScreen() {
+  if (currentScreenStream) await stopScreenShare();
+  else                     await startScreenShare();
+}
+
+// v0.15 — start sharing the screen. Mutually exclusive with cam (cam stops
+// first if it's on). Uses replaceTrack on the existing video sender when cam
+// was on (no renegotiation needed); falls back to addTrack + renegotiate when
+// cam was off (Chrome reuses the recvonly transceiver from createPC, so no
+// duplicate m-line). Browser-initiated "Stop sharing" is caught via onended.
+async function startScreenShare() {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+    addSystemMsg('🖥️ Screen sharing is not supported on this device (iOS Safari/Brave can\'t do it).');
+    return;
+  }
+  if (!currentRoom) return;
+  let screenStream;
+  try {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+  } catch(err) {
+    if (err && err.name !== 'NotAllowedError') addSystemMsg('🖥️ Screen share error: ' + err.message);
+    return;
+  }
+  const screenTrack = screenStream.getVideoTracks()[0];
+  if (!screenTrack) { try { screenStream.getTracks().forEach(t => t.stop()); } catch(_) {} return; }
+  // Browser shows its own "Stop sharing" floating bar — sync our button when
+  // the user clicks it there instead of our toolbar button.
+  screenTrack.onended = () => { stopScreenShare(); };
+
+  // Cam is mutually exclusive with screen. Stop the cam track so the camera
+  // light goes off; we'll swap the screen track into the same sender.
+  let camWasOn = false;
+  if (localStream && localStream.getVideoTracks().length > 0) {
+    const camTrack = localStream.getVideoTracks()[0];
+    camTrack.stop();
+    localStream.removeTrack(camTrack);
+    camWasOn = true;
+  }
+  if (!localStream) localStream = new MediaStream();
+  localStream.addTrack(screenTrack);
+  document.getElementById('local-video').srcObject  = localStream;
+  document.getElementById('local-label').textContent = '@' + myUsername + ' (sharing)';
+  document.getElementById('video-panel').style.display = '';
+
+  for (const peerId in peers) {
+    const pc = peers[peerId];
+    const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (videoSender) {
+      // cam-was-on path: in-place track swap, no renegotiation.
+      try { await videoSender.replaceTrack(screenTrack); } catch(_) {}
+    } else {
+      // cam-was-off path: addTrack reuses createPC's recvonly transceiver,
+      // direction flips to sendrecv → renegotiation needed.
+      pc.addTrack(screenTrack, localStream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      rsock().emit('offer', { to: peerId, offer });
+    }
+  }
+
+  currentScreenStream = screenStream;
+  updateMediaButtons();
+  // Auto-pin the sharer's own tile locally so they see what they're sharing
+  // clearly. Other users keep their current view; admin can broadcast a
+  // room-wide spotlight if they want everyone focused on the share.
+  const localWrapper = document.getElementById('local-video')?.parentElement;
+  if (localWrapper) setSpotlight(localWrapper, { user: true });
+  addSystemMsg('🖥️ Screen sharing started');
+}
+
+async function stopScreenShare() {
+  if (!currentScreenStream) return;
+  // Idempotent guard so the onended-driven re-entry from the browser's "Stop
+  // sharing" bar doesn't run the teardown twice.
+  const screenStream = currentScreenStream;
+  currentScreenStream = null;
+  const screenTrack  = screenStream.getVideoTracks()[0];
+  if (screenTrack) { screenTrack.onended = null; try { screenTrack.stop(); } catch(_) {} }
+
+  if (localStream) {
+    localStream.getVideoTracks().forEach(t => localStream.removeTrack(t));
+  }
+  for (const peerId in peers) {
+    const pc = peers[peerId];
+    const videoSender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
+    if (videoSender) {
+      try { pc.removeTrack(videoSender); } catch(_) {}
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      rsock().emit('offer', { to: peerId, offer });
+    }
+  }
+  document.getElementById('local-label').textContent = '@' + myUsername + (localStream && localStream.getAudioTracks().length > 0 ? ' (voice)' : ' (text)');
+  refreshVideoPanelVisibility();
+  updateMediaButtons();
+  addSystemMsg('🖥️ Screen sharing stopped');
 }
 
 async function enableMic() {
@@ -3233,6 +3334,9 @@ async function enableCam() {
 
 async function disableCam() {
   if (!localStream) return;
+  // Belt-and-braces: while sharing, the only video track is the screen.
+  // Refuse to tear it down here — Stop Sharing is the right path.
+  if (currentScreenStream) return;
   const videoTracks = localStream.getVideoTracks();
   if (videoTracks.length === 0) return;
   const videoTrack = videoTracks[0];
@@ -3254,12 +3358,22 @@ async function disableCam() {
 }
 
 function updateMediaButtons() {
-  const micBtn = document.getElementById('enable-mic-btn');
-  const camBtn = document.getElementById('enable-cam-btn');
+  const micBtn   = document.getElementById('enable-mic-btn');
+  const camBtn   = document.getElementById('enable-cam-btn');
+  const shareBtn = document.getElementById('share-screen-btn');
   const hasAudio = localStream && localStream.getAudioTracks().length > 0;
   const hasVideo = localStream && localStream.getVideoTracks().length > 0;
+  const isSharing = !!currentScreenStream;
   if (micBtn) micBtn.textContent = hasAudio ? '🎤 Disable Mic' : '🎤 Enable Mic';
-  if (camBtn) camBtn.textContent = hasVideo ? '🎥 Disable Cam' : '🎥 Enable Cam';
+  if (camBtn) {
+    // While sharing, the "video track" in localStream is the screen track —
+    // force the cam button to read Enable + disable it so a click doesn't
+    // accidentally tear down the screen share via disableCam().
+    camBtn.textContent = (hasVideo && !isSharing) ? '🎥 Disable Cam' : '🎥 Enable Cam';
+    camBtn.disabled    = isSharing;
+    camBtn.style.opacity = isSharing ? '0.5' : '';
+  }
+  if (shareBtn) shareBtn.textContent = isSharing ? '🖥️ Stop Sharing' : '🖥️ Share Screen';
 }
 socket.on('answer',        async ({ from, answer })    => { if (peers[from]) await peers[from].setRemoteDescription(new RTCSessionDescription(answer)); });
 socket.on('ice-candidate', async ({ from, candidate }) => { if (peers[from]&&candidate) try { await peers[from].addIceCandidate(new RTCIceCandidate(candidate)); } catch(e){} });
