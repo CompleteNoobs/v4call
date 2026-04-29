@@ -488,6 +488,19 @@
     /* Inside the room user list: badge wraps to its own row below the username
        so the toggle stays accessible on row 1 (was getting pushed off-panel). */
     .user-entry .via-token-badge{flex-basis:100%;margin-left:14px;align-self:flex-start;}
+    /* v0.15 admin row buttons — hidden by default, shown only when the
+       current user is the room admin (am-creator class on #room-users-list). */
+    .ue-admin-btns{display:none;gap:3px;flex-shrink:0;}
+    #room-users-list.am-creator .user-entry:not(.self) .ue-admin-btns{display:inline-flex;}
+    .ue-admin-btns button{background:none;border:1px solid var(--border);color:var(--subtext);padding:1px 5px;border-radius:3px;cursor:pointer;font-size:0.7rem;line-height:1;font-family:'IBM Plex Sans',sans-serif;}
+    .ue-admin-btns button:hover{color:var(--text);border-color:var(--accent);}
+    .ue-spotlight-btn.active{color:var(--accent);border-color:var(--accent);background:rgba(245,166,35,0.12);}
+    .ue-makeadmin-btn:hover{color:#ffd166;border-color:#ffd166;}
+    /* v0.15 Follow Spotlight button — shown only when local pin differs from
+       the admin-broadcast spotlight target. Pattern follows enable-mic-btn etc. */
+    #follow-spotlight-btn{display:none;padding:5px 11px;background:transparent;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;color:var(--accent);border:1px solid rgba(245,166,35,0.4);transition:background 0.15s;}
+    #follow-spotlight-btn.shown{display:inline-block;}
+    #follow-spotlight-btn:hover{background:rgba(245,166,35,0.1);}
     .room-card-token-gate{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--accent);margin-top:3px;padding:0 4px;}
     #messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;scroll-behavior:smooth;}
     #messages::-webkit-scrollbar{width:3px;}
@@ -798,7 +811,7 @@
 <div class="screen" id="room-screen">
   <div id="video-panel">
     <div id="spotlight-slot">
-      <div class="video-wrapper spotlight" onclick="setSpotlight(this)">
+      <div class="video-wrapper spotlight" onclick="setSpotlight(this, {user:true})">
         <video id="local-video" autoplay muted playsinline></video>
         <div class="video-label" id="local-label">you</div>
       </div>
@@ -809,9 +822,10 @@
     <div id="chat-header">
       <span id="chat-room-name">ROOM</span>
       <span id="peer-count">no others yet</span>
-      <button id="enable-mic-btn"   onclick="toggleMic()"    title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
-      <button id="enable-cam-btn"   onclick="toggleCam()"    title="Turn your camera on or off for this room">🎥 Enable Cam</button>
-      <button id="share-screen-btn" onclick="toggleScreen()" title="Share your screen with the room">🖥️ Share Screen</button>
+      <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
+      <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
+      <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
+      <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
       <div class="ticker-item"><div class="ticker-label">DURATION</div><div class="ticker-value" id="ticker-duration">00:00</div></div>
@@ -979,6 +993,11 @@ let currentRoom = '', localStream;
 let currentRoomTokenGate = null; // v0.14 — { symbol, amount } | null, used by the via-TOKEN badge
 const peers = {}, roomUsers = {}, selectedRecipients = new Set();
 let amCreator = false;
+// v0.15 — admin-broadcast spotlight target (username) and per-client local pin override.
+// localSpotlightOverride flips true when the user manually clicks a tile, so subsequent
+// admin broadcasts don't yank their view (soft override). Reset on Follow Spotlight.
+let roomSpotlightTarget   = null;
+let localSpotlightOverride = false;
 const lobbySelected = new Set();
 
 // Misc
@@ -2497,6 +2516,10 @@ function leaveRoom() {
   document.getElementById('allowlist-panel').style.display = 'none';
   document.getElementById('allowlist-members').innerHTML   = '';
   currentRoom = ''; amCreator = false; socket._room = null;
+  // v0.15 — reset spotlight state so the next room entry starts clean.
+  roomSpotlightTarget = null; localSpotlightOverride = false;
+  document.getElementById('room-users-list').classList.remove('am-creator');
+  document.getElementById('follow-spotlight-btn').classList.remove('shown');
   document.getElementById('leave-room-btn').classList.remove('shown');
   document.getElementById('end-room-btn').classList.remove('shown');
   document.getElementById('export-room-btn').classList.remove('shown');
@@ -2729,10 +2752,25 @@ function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
   const viaBadge = (joinedVia === 'token' && !isSelf && currentRoomTokenGate)
     ? `<span class="via-token-badge">via ${currentRoomTokenGate.symbol}</span>`
     : '';
-  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${viaBadge}<div class="user-toggle"></div>`;
-  if (!isSelf) el.onclick = () => toggleRoomUser(sid);
+  // v0.15 admin buttons — present on every non-self row, but hidden via CSS
+  // unless the parent #room-users-list has the .am-creator class. data-user
+  // lets updateFollowAffordance flip the .active state on the spotlight btn.
+  const adminBtns = isSelf ? '' : `<span class="ue-admin-btns">
+      <button class="ue-spotlight-btn" data-user="${username}" title="Spotlight @${username} for everyone in the room">📌</button>
+      <button class="ue-makeadmin-btn" data-user="${username}" title="Hand admin to @${username}">👑</button>
+    </span>`;
+  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${viaBadge}${adminBtns}<div class="user-toggle"></div>`;
+  if (!isSelf) {
+    el.onclick = (ev) => {
+      // Admin buttons must not also trigger the recipient-toggle behaviour.
+      if (ev.target.closest('.ue-admin-btns')) return;
+      toggleRoomUser(sid);
+    };
+    const sb = el.querySelector('.ue-spotlight-btn'); if (sb) sb.onclick = (e) => { e.stopPropagation(); setRoomSpotlight(username); };
+    const ab = el.querySelector('.ue-makeadmin-btn'); if (ab) ab.onclick = (e) => { e.stopPropagation(); transferAdmin(username); };
+  }
   list.appendChild(el);
-  updateInputState(); updatePeerCount();
+  updateInputState(); updatePeerCount(); updateFollowAffordance();
 }
 function removeRoomUser(sid) {
   document.getElementById('ue-'+sid)?.remove();
@@ -2772,12 +2810,24 @@ function updatePeerCount() {
 }
 
 // ── Allowlist ───────────────────────────────────────────
-socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibility }) => {
-  if (!amCreator && creator === myUsername) amCreator = true;
+socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibility, spotlight }) => {
+  // amCreator can both flip on (we just got promoted) AND flip off (admin
+  // was transferred away from us) so set it to the truth, don't only OR it.
+  amCreator = (creator === myUsername);
   // Reveal admin-only buttons whenever amCreator is true (covers the case
   // where it gets discovered after enterRoom — e.g. on auto-create-on-join).
   document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
+  // Toggle .am-creator on the user list so per-row admin buttons show/hide
+  // via CSS without re-rendering each entry.
+  document.getElementById('room-users-list').classList.toggle('am-creator', amCreator);
   currentRoomTokenGate = tokenGate || null;
+  // v0.15 spotlight broadcast — apply if it changed.
+  if (spotlight !== undefined && spotlight !== roomSpotlightTarget) {
+    roomSpotlightTarget = spotlight || null;
+    applyRoomSpotlight();
+  } else {
+    updateFollowAffordance();
+  }
 
   // Banlist is non-null when this user is allowed to see it (creator always;
   // other members only when banlistVisibility === 'all').
@@ -3066,6 +3116,18 @@ socket.on('user-left', (socketId) => {
   refreshVideoPanelVisibility();
 });
 
+// v0.15 — admin broadcast spotlight changed. Update local target + apply
+// (subject to soft-override). Refresh the per-row "active" pin indicator.
+socket.on('room-spotlight-changed', ({ target }) => {
+  roomSpotlightTarget = target || null;
+  applyRoomSpotlight();
+});
+
+// v0.15 — admin transfer rejected (target wasn't a current member, etc.).
+socket.on('room-admin-transfer-failed', ({ reason }) => {
+  addSystemMsg(`⚠ Admin transfer failed: ${reason}`);
+});
+
 // ── WebRTC ───────────────────────────────────────────────
 socket.on('offer', async ({ from, offer }) => {
   // Reuse the existing peer connection on renegotiation (e.g. when a
@@ -3219,7 +3281,7 @@ function createPC(peerId) {
     if (!document.getElementById('wrapper-'+peerId)) {
       const wrapper = document.createElement('div');
       wrapper.className = 'video-wrapper'; wrapper.id = 'wrapper-'+peerId;
-      wrapper.onclick = () => setSpotlight(wrapper);
+      wrapper.onclick = () => setSpotlight(wrapper, { user: true });
       const vid = document.createElement('video');
       vid.id = 'video-'+peerId; vid.autoplay = true; vid.playsInline = true;
       const lbl = document.createElement('div');
@@ -3233,29 +3295,115 @@ function createPC(peerId) {
     // incoming peer video plays into a hidden parent and the user has to
     // enable their own cam to see anyone else's.
     refreshVideoPanelVisibility();
+    // v0.15 — if the room broadcast spotlight is on this user and the local
+    // tile didn't exist yet at room-info time, apply it now.
+    if (roomSpotlightTarget && roomUsers[peerId] && roomUsers[peerId].username === roomSpotlightTarget) {
+      applyRoomSpotlight();
+    }
   };
   return pc;
 }
 
-// v0.15 spotlight — local pin only. Clicking a tile moves it into the
-// spotlight slot; whatever was there moves to the strip. Click is local-only,
-// the rest of the room is unaffected. Admin-broadcast spotlight lands in v0.15 Part B.
-function setSpotlight(wrapperEl) {
+// v0.15 spotlight — local pin + admin-broadcast (Part B).
+// setSpotlight(wrapper, opts): when opts.user is true the click was from the
+// user clicking a tile, which sets a soft override (subsequent admin
+// broadcasts won't yank their view, "↺ Follow room spotlight" appears).
+// Programmatic moves (apply broadcast, fall-back on leave) leave the override
+// flag alone so they don't accidentally promote themselves to "pinned".
+function setSpotlight(wrapperEl, opts) {
   if (!wrapperEl) return;
   const slot  = document.getElementById('spotlight-slot');
   const strip = document.getElementById('peer-strip');
   if (!slot || !strip) return;
-  if (slot.firstElementChild === wrapperEl) {
-    wrapperEl.classList.add('spotlight');
-    return;
-  }
-  const current = slot.firstElementChild;
-  if (current) {
-    current.classList.remove('spotlight');
-    strip.appendChild(current);
+  if (slot.firstElementChild !== wrapperEl) {
+    const current = slot.firstElementChild;
+    if (current) {
+      current.classList.remove('spotlight');
+      strip.appendChild(current);
+    }
+    slot.appendChild(wrapperEl);
   }
   wrapperEl.classList.add('spotlight');
-  slot.appendChild(wrapperEl);
+  if (opts && opts.user) {
+    // Did the user pin a tile that differs from the room broadcast?
+    const pinned = getCurrentSpotlightUsername();
+    localSpotlightOverride = (roomSpotlightTarget && pinned !== roomSpotlightTarget);
+  }
+  updateFollowAffordance();
+}
+
+// Returns the username of whoever's currently in the spotlight slot, or null
+// if empty. Used by the follow-affordance check and the admin button "active"
+// state.
+function getCurrentSpotlightUsername() {
+  const slot = document.getElementById('spotlight-slot');
+  const cur  = slot && slot.firstElementChild;
+  if (!cur) return null;
+  if (cur.querySelector('#local-video')) return myUsername;
+  const sid = (cur.id || '').replace('wrapper-', '');
+  return roomUsers[sid] ? roomUsers[sid].username : null;
+}
+
+// Resolve a room-spotlight username to its on-screen wrapper (if any).
+// Returns null when the target has no video tile yet (e.g. text-only member,
+// or peer's track hasn't arrived yet — pc.ontrack will retry then).
+function findWrapperByUsername(username) {
+  if (!username) return null;
+  if (username === myUsername) return document.getElementById('local-video')?.parentElement || null;
+  const sid = Object.keys(roomUsers).find(s => roomUsers[s].username === username);
+  return sid ? document.getElementById('wrapper-'+sid) : null;
+}
+
+// Apply the current room broadcast spotlight to the local DOM, unless the user
+// has manually pinned someone (soft override).
+function applyRoomSpotlight() {
+  if (localSpotlightOverride) { updateFollowAffordance(); return; }
+  if (roomSpotlightTarget) {
+    const wrapper = findWrapperByUsername(roomSpotlightTarget);
+    if (wrapper) setSpotlight(wrapper);
+  } else {
+    // Broadcast cleared — fall back to local tile.
+    const localWrapper = document.getElementById('local-video')?.parentElement;
+    if (localWrapper) setSpotlight(localWrapper);
+  }
+  updateFollowAffordance();
+}
+
+// Drop the local pin and snap to whatever the admin's broadcast says.
+function followRoomSpotlight() {
+  localSpotlightOverride = false;
+  applyRoomSpotlight();
+}
+
+// Show the "↺ Follow room spotlight" header button only when there IS a
+// broadcast and the local view differs from it. Also refresh the per-row
+// "active" state on the admin's spotlight buttons.
+function updateFollowAffordance() {
+  const btn = document.getElementById('follow-spotlight-btn');
+  if (btn) {
+    const cur = getCurrentSpotlightUsername();
+    const show = !!(roomSpotlightTarget && roomSpotlightTarget !== cur);
+    btn.classList.toggle('shown', show);
+    if (show) btn.title = `Local pin active — click to follow @${roomSpotlightTarget}`;
+  }
+  document.querySelectorAll('.ue-spotlight-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.user === roomSpotlightTarget);
+  });
+}
+
+// Admin actions emitted from the per-row buttons.
+function setRoomSpotlight(username) {
+  if (!amCreator || !currentRoom) return;
+  rsock().emit('room-spotlight-set', { room: currentRoom, target: username });
+}
+function clearRoomSpotlight() {
+  if (!amCreator || !currentRoom) return;
+  rsock().emit('room-spotlight-set', { room: currentRoom, target: null });
+}
+function transferAdmin(username) {
+  if (!amCreator || !currentRoom) return;
+  if (!confirm(`Hand admin to @${username}? You'll lose admin powers (End Room, ban, allowlist edits, spotlight broadcast) and they'll gain them.`)) return;
+  rsock().emit('room-transfer-admin', { room: currentRoom, username });
 }
 
 // Show the video panel whenever there's anything to render — local stream
