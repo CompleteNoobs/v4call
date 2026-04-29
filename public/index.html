@@ -941,6 +941,20 @@ function openFederatedRoomSocket(serverDomain, onReady) {
     console.error('[federation] connect_error to', serverDomain, err.message);
     addLobbyMsg && addLobbyMsg({ type: 'system', text: `⚠ Could not connect to ${serverDomain} — ${err.message}` });
   });
+  // v0.16 Part B — if the temp socket dies while we're in the federated room
+  // (host crashed, federation drop, network glitch), surface a clear message
+  // and clean up local room state. leaveRoom() clears currentRoom, so the
+  // user-initiated case (click Leave Room → closeFederatedRoomSocket() → this
+  // disconnect fires) is a no-op here.
+  activeRoomSocket.on('disconnect', (reason) => {
+    if (currentRoom) {
+      const where = activeRoomServer || serverDomain;
+      const text  = `⚠ Lost connection to ${where} — you were removed from #${currentRoom}.`;
+      if (typeof addSystemMsg === 'function') addSystemMsg(text);
+      else addLobbyMsg({ type: 'system', text });
+      try { leaveRoom(); } catch(_) {}
+    }
+  });
 }
 
 function closeFederatedRoomSocket() {
@@ -2039,8 +2053,20 @@ function acceptInvite() {
   if (!pendingInvite) return;
   document.getElementById('invite-popup').style.display = 'none';
   if (pendingInvite.from_server && pendingInvite.invite_id) {
+    // v0.16 Part B — federated invite. Acknowledge over federation, auto-leave
+    // any current local room (per design call 5(a) — no grace period for
+    // rooms), open a temp Socket.io to the host server, and enterRoom against
+    // the temp socket. enterRoom's join payload includes homeServer so the
+    // host server matches our canonical entry against its allowlist.
     socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'accepted' });
-    showInviteMsg(`✓ Accepted invite to #${pendingInvite.roomName} on ${pendingInvite.from_server}. (Cross-server room join arrives in v0.16 Part B.)`);
+    const targetRoom   = pendingInvite.roomName;
+    const targetServer = pendingInvite.from_server;
+    showInviteMsg(`🔗 Connecting to ${targetServer} to join #${targetRoom}…`);
+    if (currentRoom) leaveRoom(); // closes any existing temp socket too
+    amCreator = false; pendingCallType = 'text';
+    openFederatedRoomSocket(targetServer, () => {
+      enterRoom(targetRoom);
+    });
   } else {
     // Local invite — enter the room directly. Text-only mode; user can Enable Mic / Cam in-room.
     amCreator = false; pendingCallType = 'text'; enterRoom(pendingInvite.roomName);
@@ -2520,7 +2546,12 @@ async function enterRoom(roomName) {
   // we re-show it there too.
   document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
   if (amCreator) document.getElementById('allowlist-panel').style.display = 'flex';
-  rsock().emit('join', { room: roomName, username: myUsername, pubKey: myPubKey });
+  // v0.16 Part B — when joining via the temp socket (federated room hosted on
+  // another server), tell the host server our home domain so it can match the
+  // canonical 'user@server' form against the room's allowlist.
+  const joinPayload = { room: roomName, username: myUsername, pubKey: myPubKey };
+  if (activeRoomSocket) joinPayload.homeServer = MY_SERVER_DOMAIN;
+  rsock().emit('join', joinPayload);
   setTimeout(() => rsock().emit('resync'), 1500);
   addRoomUser(socket.id, myUsername, myPubKey, true);
   addSystemMsg(`You joined #${roomName} as @${myUsername}`);
@@ -2793,9 +2824,9 @@ function showTopUpPrompt() {
 }
 
 // ── Room users ──────────────────────────────────────────
-function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
+function addRoomUser(sid, username, pubKey, isSelf, joinedVia, homeServer) {
   if (roomUsers[sid]) return;
-  roomUsers[sid] = { username, pubKey, joinedVia };
+  roomUsers[sid] = { username, pubKey, joinedVia, homeServer: homeServer || null };
   if (pubKey) pubKeyCache[username] = pubKey;
   const list = document.getElementById('room-users-list');
   const el   = document.createElement('div');
@@ -2805,6 +2836,8 @@ function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
   const viaBadge = (joinedVia === 'token' && !isSelf && currentRoomTokenGate)
     ? `<span class="via-token-badge">via ${currentRoomTokenGate.symbol}</span>`
     : '';
+  // v0.16 Part B — federated badge (mirrors the lobby + allowlist styles).
+  const fedBadge = (homeServer && !isSelf) ? `<span class="fed-badge">@${homeServer}</span>` : '';
   // v0.15 admin buttons — present on every non-self row, but hidden via CSS
   // unless the parent #room-users-list has the .am-creator class. data-user
   // lets updateFollowAffordance flip the .active state on the spotlight btn.
@@ -2812,7 +2845,7 @@ function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
       <button class="ue-spotlight-btn" data-user="${username}" title="Spotlight @${username} for everyone in the room">📌</button>
       <button class="ue-makeadmin-btn" data-user="${username}" title="Hand admin to @${username}">👑</button>
     </span>`;
-  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${viaBadge}${adminBtns}<div class="user-toggle"></div>`;
+  el.innerHTML = `<div class="user-dot"></div><span>@${username}</span>${fedBadge}${viaBadge}${adminBtns}<div class="user-toggle"></div>`;
   if (!isSelf) {
     el.onclick = (ev) => {
       // Admin buttons must not also trigger the recipient-toggle behaviour.
@@ -2824,6 +2857,11 @@ function addRoomUser(sid, username, pubKey, isSelf, joinedVia) {
   }
   list.appendChild(el);
   updateInputState(); updatePeerCount(); updateFollowAffordance();
+  // If the tile already exists for this peer (e.g. ontrack arrived first and
+  // labelled the tile as '…'), refresh its label now that we have the full
+  // user record including homeServer.
+  const peerLbl = document.getElementById('video-label-' + sid);
+  if (peerLbl) peerLbl.textContent = '@' + username + (homeServer ? ' @' + homeServer : '');
 }
 function removeRoomUser(sid) {
   document.getElementById('ue-'+sid)?.remove();
@@ -3134,16 +3172,16 @@ document.getElementById('msg-input').addEventListener('input', function() {
 // ── Socket room events ──────────────────────────────────
 function applyRoomUsers(users) {
   for (const u of users) {
-    if (u.socketId === socket.id) continue;
+    if (u.username === myUsername) continue; // self — covers both main and federated temp-socket cases
     if (document.getElementById('ue-'+u.socketId)) continue;
     if (Object.keys(roomUsers).find(s => roomUsers[s].username === u.username)) continue;
-    addRoomUser(u.socketId, u.username, u.pubKey, false, u.joinedVia);
+    addRoomUser(u.socketId, u.username, u.pubKey, false, u.joinedVia, u.homeServer);
     createOffer(u.socketId);
   }
 }
 socket.on('room-users',        (users) => { applyRoomUsers(users); });
 socket.on('room-users-resync', (users) => { applyRoomUsers(users); });
-socket.on('user-joined', ({ socketId, username, pubKey, joinedVia }) => {
+socket.on('user-joined', ({ socketId, username, pubKey, joinedVia, homeServer }) => {
   const existingSid = Object.keys(roomUsers).find(s => roomUsers[s].username === username);
   if (existingSid) {
     if (existingSid !== socketId) {
@@ -3153,9 +3191,10 @@ socket.on('user-joined', ({ socketId, username, pubKey, joinedVia }) => {
     }
     return;
   }
-  addRoomUser(socketId, username, pubKey, false, joinedVia);
-  addSystemMsg(`@${username} joined the room${joinedVia === 'token' && currentRoomTokenGate ? ` (via ${currentRoomTokenGate.symbol})` : ''}`);
-  const lbl = document.getElementById('video-label-'+socketId); if (lbl) lbl.textContent = '@'+username;
+  addRoomUser(socketId, username, pubKey, false, joinedVia, homeServer);
+  const fedLabel = homeServer ? `@${username}@${homeServer}` : `@${username}`;
+  addSystemMsg(`${fedLabel} joined the room${joinedVia === 'token' && currentRoomTokenGate ? ` (via ${currentRoomTokenGate.symbol})` : ''}`);
+  const lbl = document.getElementById('video-label-'+socketId); if (lbl) lbl.textContent = '@'+username + (homeServer ? ' @' + homeServer : '');
 });
 socket.on('user-left', (socketId) => {
   const u = roomUsers[socketId]; if (!u) return;
@@ -3450,7 +3489,10 @@ function createPC(peerId) {
       vid.id = 'video-'+peerId; vid.autoplay = true; vid.playsInline = true;
       const lbl = document.createElement('div');
       lbl.className = 'video-label'; lbl.id = 'video-label-'+peerId;
-      lbl.textContent = roomUsers[peerId] ? '@'+roomUsers[peerId].username : '…';
+      const ru = roomUsers[peerId];
+      lbl.textContent = ru
+        ? '@' + ru.username + (ru.homeServer ? ' @' + ru.homeServer : '')
+        : '…';
       wrapper.appendChild(vid); wrapper.appendChild(lbl);
       document.getElementById('peer-strip').appendChild(wrapper);
     }

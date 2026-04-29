@@ -8,12 +8,12 @@
 |-----------|---------|--------|-------|
 | Hardcoded peers, presence, DM relay, 1:1 call relay | **v0.2** | ✅ Shipped | Original spec scope. Caller's-server-hosts-room model. |
 | Verify.json domain proof + Hive directory + manual peer approval | **v0.3** | ✅ Shipped | Replaces hardcoded-only with crypto-verified discovery + admin approval. |
-| Cross-server room invite + accept/decline handshake | **v0.4 Part A** (v4call v0.16) | ✅ Shipped | New `room-invite` / `room-response` envelopes + explicit `protocol_version` gate field in hello. No actual cross-server join yet. |
-| Cross-server room join (multi-party WebRTC) + token-gate + `room-ended` cleanup | **v0.4 Part B** (v4call v0.16) | ⏳ Planned | Reuses the 1:1 federated-call temp-Socket.io pattern. |
+| Cross-server room invite + accept/decline handshake | **v0.4 Part A** (v4call v0.16) | ✅ Shipped | New `room-invite` / `room-response` envelopes + explicit `protocol_version` gate field in hello. |
+| Cross-server room join (multi-party WebRTC) + federated token-gate + canonical-form banlist + fed-drop eviction | **v0.4 Part B** (v4call v0.16) | ✅ Shipped | Reuses the 1:1 federated-call temp-Socket.io pattern; `homeServer` field in `join` payload matches the canonical allowlist entry. No new federation envelope (the join is direct browser↔host-server). |
 
-OR-gated rooms + banlist (originally bundled with v0.4 in this doc) shipped earlier as part of single-server **v4call v0.14** — see CLAUDE.md "v0.14 polish". The federation-only pieces are split into Part A / Part B above.
+OR-gated rooms + banlist (originally bundled with v0.4 in this doc) shipped earlier as part of single-server **v4call v0.14** — see CLAUDE.md "v0.14 polish". The federation-only pieces are split into Part A / Part B above; both shipped in v4call v0.16.
 
-Both production servers (`call.completenoobs.com` ↔ `hive-book.com`) currently run v0.4 (Part A) and federate successfully. Cross-server presence, free DMs, paid DMs, voice calls, video calls, and now cross-server room *invites* (with accept/decline handshake) all work end-to-end. Cross-server room *joining* is Part B.
+Both production servers (`call.completenoobs.com` ↔ `hive-book.com`) currently run v0.4 and federate successfully. Cross-server presence, free DMs, paid DMs, voice calls, video calls, cross-server room *invites* (with accept/decline handshake), and cross-server room *joining* (multi-party WebRTC, federated token-gating, banlist by canonical form) all work end-to-end.
 
 ## What Was Actually Built (v0.2 + v0.3)
 
@@ -317,8 +317,8 @@ Existing admin (room creator) can transfer the admin role to another participant
 2. ✅ **Banlist (single-server)** — shipped in v4call v0.14 (`room-ban` / `room-unban`, auto-kick via `kicked`).
 3. ✅ **Banlist visibility toggle** — shipped in v4call v0.14 (`banlistVisibility: 'admin' | 'all'`, per-recipient `room-info` via `emitRoomInfoToMembers`).
 4. ✅ **Federation message types — invite handshake (Part A)** — shipped in v4call v0.16: `room-invite` + `room-response` envelopes, `protocol_version: '0.4'` gate field in hello, federated `allowlist-add` flow with v0.4-peer guard, pending-invite TTL sweep.
-5. ⏳ **Cross-server room join (Part B)** — planned. Reuse the federated-1:1-call temp-Socket.io pattern (`activeRoomSocket` in `public/index.html`). New `room-ended` envelope for cleanup when the room dies / a federated member is banned.
-6. ⏳ **Cross-server token gate (Part B)** — drops in for free once Part B's join machinery is in place: balance check is chain-side, peer-agnostic.
+5. ✅ **Cross-server room join (Part B)** — shipped in v4call v0.16. Reuses the federated-1:1-call temp-Socket.io pattern (`activeRoomSocket` in `public/index.html`). `homeServer` field added to the `join` socket payload so the host server can match the canonical `user@server` form against `r.allowlist`. No `room-ended` envelope shipped — the temp Socket.io is direct (independent of the federation socket), so existing `kicked` events propagate through it for end-room / ban / fed-drop cases; home server has no state to clean for federated rooms.
+6. ✅ **Cross-server token gate (Part B)** — drops in for free: `getHiveEngineTokenBalance(username, symbol)` uses bare username, peer-agnostic.
 
 ## v0.4 Part A — Shipped Scope (v4call v0.16)
 
@@ -326,10 +326,11 @@ Existing admin (room creator) can transfer the admin role to another participant
 - Client-side: ~50 lines (`from_server` badge in invite popup, accept/decline branches, `lobby-info` / `allowlist-error` / `allowlist-info` socket handlers, federated allowlist chip rendering with server badge, allowlist input placeholder hint).
 - No new dependencies, no schema changes.
 
-## v0.4 Part B — Planned Scope
+## v0.4 Part B — Shipped Scope (v4call v0.16)
 
-- Server-side: cross-server room-join routing (the temp-Socket.io connection from the invitee's browser to the host server's Socket.io, mirroring 1:1-call pattern), `room-ended` envelope for federation-side cleanup, allowlist-resolve compares both `user` and `user@server` forms, federated banlist propagation.
-- Client-side: when a federated invite is accepted, open the temp Socket.io and `enterRoom` against the host server (vs. accepting and posting "Part B not yet" today).
+- Server-side: ~80 lines. `socket.on('join')` accepts `homeServer`, matches canonical allowlist form, stores `homeServer` on the member record, threads it through `room-users` / `room-users-resync` / `user-joined` payloads. `room-ban` / `allowlist-remove` member-find now matches both canonical and bare forms. Member dedup uses canonical key so local + federated `@noblemage` can coexist. New `cleanupFederatedMembersForPeer(domain)` helper called from federation `ws.on('close')` for design-call (a) immediate-eviction.
+- Client-side: ~40 lines. `acceptInvite()` for federated path: emit `room-invite-respond` accept, auto-leave any current local room (design call 5(a)), `openFederatedRoomSocket(targetServer, ...)` (existing helper), `enterRoom(targetRoom)` on temp-socket connect. `enterRoom` join payload now includes `homeServer: MY_SERVER_DOMAIN` when `activeRoomSocket` is set. `addRoomUser` accepts `homeServer` → renders `.fed-badge` in room user-list and `@user @server` on video tile labels (mirrors lobby + allowlist styles). Temp Socket.io `disconnect` handler surfaces "Lost connection to host" + runs `leaveRoom()` for clean state.
+- No new dependencies, no schema changes, no new federation envelopes.
 
 ## v0.4 Testing Checklist
 
@@ -344,15 +345,17 @@ Existing admin (room creator) can transfer the admin role to another participant
 - [x] Pending invites prune after 15 minutes (TTL sweep)
 - [x] Backwards compat: a v0.3 peer can still federate, do DMs, do 1:1 calls — they just can't be invited to rooms
 
-### Part B (forward-looking)
+### Part B (v4call v0.16) — Shipped
 
-- [ ] Federated invitee can accept and join the host server's room
-- [ ] Federated invitee can leave cleanly without breaking either server's state
-- [ ] Token gate works for federated joiner (balance check independent of home server)
-- [ ] "via TOKEN" badge shows on federated token-gate joiners
-- [ ] Admin can ban federated user (kick crosses federation, `room-ended`-style cleanup runs on home server)
-- [ ] Multiple federated users from different servers can be in the same room
-- [ ] Spotlight broadcast (v0.15) propagates to federated members
+- [x] Federated invitee can accept and join the host server's room (temp Socket.io opens to host, `enterRoom` against it)
+- [x] Federated invitee can leave cleanly without breaking either server's state (`leaveRoom` → `closeFederatedRoomSocket` → home-server `federated-call-ended` cleanup)
+- [x] Token gate works for federated joiner (balance check uses bare username; chain-side, peer-agnostic)
+- [x] "via TOKEN" badge shows on federated token-gate joiners (existing v0.14 badge logic, unchanged)
+- [x] Admin can ban federated user — auto-kick honours canonical `user@server` form on the room's banlist
+- [x] Multiple federated users from different servers can be in the same room (member dedup uses canonical key, no displacement on reconnect)
+- [x] Spotlight broadcast (v0.15) propagates to federated members (existing room-spotlight machinery is socketId-driven, peer-agnostic)
+- [x] Federation peer drop while federated user mid-room → host immediately evicts (design call 5(a) — `cleanupFederatedMembersForPeer`)
+- [x] Temp Socket.io drop on joiner side → "Lost connection to host" message + clean leave-room
 
 ---
 
