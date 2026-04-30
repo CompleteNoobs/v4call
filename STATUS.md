@@ -6,25 +6,26 @@ Last updated: 2026-04-30
 
 ## Current state
 
-- **Software:** v0.16.5 (lobby DM bypass fix shipped)
-- **Federation protocol:** v0.4 (unchanged — v0.16.5 is a server-local fix, no protocol bump)
+- **Software:** v0.16.6 (recipient-side rate enforcement for federated paid flows shipped)
+- **Federation protocol:** v0.4 (unchanged — v0.16.5 + v0.16.6 are server-local fixes, no protocol bumps)
 - **Production servers (federated):** call.completenoobs.com, hive-book.com, v4call.com
 - **Stable:** yes — multi-party rooms, paid 1:1 calls, paid DMs, cross-server rooms all working
+- **Design rule (Key Design Decisions #15):** Recipients enforce their own rules — caller-side servers are couriers + payment witnesses; the recipient's home server is the only trusted policy enforcer.
 
 ## Right now
 
-**Just shipped:** v0.16.5 — awaiting user test + multi-server rollout
-**Next planned build:** v0.16.6 — recipient-side rate enforcement (the architectural class fix; closes caller-side bypass surfaces before v0.17 adds more paid flows)
+**Just shipped:** v0.16.6 — awaiting user test + multi-server rollout
+**Next planned build:** v0.17 Part A — Local paid-expert invite + settlement (inviter holds escrow funds)
 
 ## Next 3 builds (in order)
 
-1. **v0.16.6** — Recipient-side rate enforcement (re-validate rates on recipient's server for federated paid DMs + paid calls; closes the caller-side-trust class of bypasses)
-2. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds)
-3. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`)
-4. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build)
+1. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds per the "rug-pull protection" design rule)
+2. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`)
+3. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build)
 
 ## Recently shipped
 
+- **v0.16.6** — Recipient-side rate enforcement for federated paid flows. Federation `dm` and `payment-verified` handlers now re-fetch the recipient's rates and re-validate (block-list, fee minimum, paid amount ≥ required rate) before disbursing; auto-refund the caller from our escrow on reject. Ring-fee handler now uses OUR computed `ratePerHour` instead of the caller-server-supplied claim. New design rule #15 added to Key Design Decisions: "Recipients enforce their own rules."
 - **v0.16.5** — Lobby DM bypass fix. Removed `lobby-encrypted` socket event entirely (was bypassing paid-DM rates / blocked-list / platform fee minimum / currency rules across federation). Lobby chat broadcast-only; user-list toggle now single-purpose (pre-select for Create Room invite). No protocol bump.
 - **v0.16** — Cross-server rooms (federated invites + multi-party WebRTC across servers, federated badge, token-gating across federation, XSS hygiene pass)
 - **v0.15** — Spotlight room layout, screen share, admin role transfer, WebRTC SDP m-line fix
@@ -35,7 +36,7 @@ Last updated: 2026-04-30
 
 ## Known bugs
 
-*None currently tracked.* (v0.16.5 closed the lobby DM bypass; v0.16.6 will close the broader caller-side-trust class.)
+*None currently tracked.* (v0.16.5 closed the lobby DM bypass; v0.16.6 closed the broader caller-side-trust class for federated paid DMs and paid 1:1 calls.)
 
 ## Backlog (unordered)
 
@@ -57,7 +58,7 @@ Last updated: 2026-04-30
 ### Security hardening
 - Server-side signature verification on chat messages
 - Rate limiting middleware (Socket.io + Nginx)
-- Input validation hardening (usernames, room names, memos)
+- Input validation hardening (usernames, room names, memos) — also folds in: same-server `lobby-dm` and `call-invite` need explicit `paid >= rate` checks (federated case is fixed in v0.16.6; same-server case is a smaller surface but still allows a malicious browser client to underpay)
 - SQLCipher for at-rest encryption (production deployments)
 
 ### Platform / infra
