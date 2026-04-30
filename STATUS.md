@@ -6,24 +6,26 @@ Last updated: 2026-04-30
 
 ## Current state
 
-- **Software:** v0.16
-- **Federation protocol:** v0.4
+- **Software:** v0.16.5 (lobby DM bypass fix shipped)
+- **Federation protocol:** v0.4 (unchanged — v0.16.5 is a server-local fix, no protocol bump)
 - **Production servers (federated):** call.completenoobs.com, hive-book.com, v4call.com
 - **Stable:** yes — multi-party rooms, paid 1:1 calls, paid DMs, cross-server rooms all working
 
 ## Right now
 
-**Building:** v0.17 / federation v0.5 — Paid Expert Invites
-**Stage:** design locked-in (admin-only payer, invite-as-contract, inviter holds escrow funds upfront), awaiting Part A build
+**Just shipped:** v0.16.5 — awaiting user test + multi-server rollout
+**Next planned build:** v0.16.6 — recipient-side rate enforcement (the architectural class fix; closes caller-side bypass surfaces before v0.17 adds more paid flows)
 
 ## Next 3 builds (in order)
 
-1. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation)
-2. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`)
-3. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build)
+1. **v0.16.6** — Recipient-side rate enforcement (re-validate rates on recipient's server for federated paid DMs + paid calls; closes the caller-side-trust class of bypasses)
+2. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds)
+3. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`)
+4. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build)
 
 ## Recently shipped
 
+- **v0.16.5** — Lobby DM bypass fix. Removed `lobby-encrypted` socket event entirely (was bypassing paid-DM rates / blocked-list / platform fee minimum / currency rules across federation). Lobby chat broadcast-only; user-list toggle now single-purpose (pre-select for Create Room invite). No protocol bump.
 - **v0.16** — Cross-server rooms (federated invites + multi-party WebRTC across servers, federated badge, token-gating across federation, XSS hygiene pass)
 - **v0.15** — Spotlight room layout, screen share, admin role transfer, WebRTC SDP m-line fix
 - **v0.14.5** — Room export / import (`.v4room` files), CSS bugs fixed (End Call always-visible, Leave Room never-visible)
@@ -33,7 +35,7 @@ Last updated: 2026-04-30
 
 ## Known bugs
 
-- **Lobby user-list toggle bypasses paid-DM rates.** When users are toggle-selected in the lobby (the same toggle used to pre-select users for invite to a new room) and you type a message in the lobby chat input, the message sends as a **free DM** to those selected users instead of posting to the lobby. This bypasses any paid-DM rates the recipient has set. Fix: lobby chat send button should ALWAYS post to lobby (local-server only); user-list toggle-select should only affect the room-create flow. Discovered 2026-04-30 during 3-server federation testing. **Affects:** correctness + payment-flow security. **Build estimate:** small focused fix in `public/index.html` (and possibly server-side hardening to reject the bypass path).
+*None currently tracked.* (v0.16.5 closed the lobby DM bypass; v0.16.6 will close the broader caller-side-trust class.)
 
 ## Backlog (unordered)
 

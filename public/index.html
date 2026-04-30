@@ -673,7 +673,7 @@
         <div class="lmsg system"><div class="lmsg-text">v4call lobby — visible to all online users.</div></div>
       </div>
       <div id="lobby-input-bar">
-        <textarea id="lobby-msg-input" placeholder="Broadcast to everyone… (toggle a user to encrypt to them)" rows="1"></textarea>
+        <textarea id="lobby-msg-input" placeholder="Broadcast to everyone on this server (signed, public)" rows="1"></textarea>
         <button id="lobby-send-btn" onclick="sendLobbyMessage()">Send</button>
       </div>
     </div>
@@ -1518,20 +1518,14 @@ function renderDmUserList() {
 // ── Lobby chat ──────────────────────────────────────────
 
 function toggleLobbyUser(username) {
-  // Toggle selects user for: (1) room invites, (2) encrypted lobby messages
+  // Toggle pre-selects users for "Create Room" invite. Lobby messages are
+  // always public broadcasts — selection here does NOT affect lobby chat.
   if (lobbySelected.has(username)) {
     lobbySelected.delete(username);
     document.getElementById('lu-'+username)?.classList.remove('selected');
   } else {
     lobbySelected.add(username);
     document.getElementById('lu-'+username)?.classList.add('selected');
-  }
-  const encTargets = [...lobbySelected];
-  const input = document.getElementById('lobby-msg-input');
-  if (encTargets.length > 0) {
-    input.placeholder = `Encrypted to: ${encTargets.map(u=>'@'+u).join(', ')} — signed + encrypted`;
-  } else {
-    input.placeholder = 'Broadcast to everyone… (toggle a user to encrypt to them)';
   }
   updateCreatePanel();
 }
@@ -1791,20 +1785,8 @@ async function sendLobbyMessage() {
   const timestamp = Date.now().toString();
   const signature = await signMessage(text, timestamp);
 
-  if (lobbySelected.size > 0) {
-    for (const target of lobbySelected) {
-      const targetPub = pubKeyCache[target];
-      if (!targetPub) { addLobbyMsg({type:'system', text:`No key for @${target} — skipped`}); continue; }
-      const ciphertext = encryptMsg(text, targetPub);
-      const senderCiphertext = encryptMsg(text, myPubKey); // sender's copy for history
-      socket.emit('lobby-encrypted', { to: target, ciphertext, senderCiphertext, signature, timestamp });
-    }
-    const names = [...lobbySelected].map(u => '@'+u).join(', ');
-    addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:names, sigOk:true });
-  } else {
-    socket.emit('lobby-chat', { message: text, signature, timestamp });
-    addLobbyMsg({ type:'broadcast', from:myUsername, text, isSelf:true, sigOk:true });
-  }
+  socket.emit('lobby-chat', { message: text, signature, timestamp });
+  addLobbyMsg({ type:'broadcast', from:myUsername, text, isSelf:true, sigOk:true });
 
   input.value = ''; input.style.height = '38px';
 }
@@ -1812,11 +1794,6 @@ async function sendLobbyMessage() {
 socket.on('lobby-chat', async ({ from, message, signature, timestamp }) => {
   const sigOk = await verifySignature(message, timestamp, signature, from);
   addLobbyMsg({ type:'broadcast', from, text:message, isSelf:false, sigOk });
-});
-socket.on('lobby-encrypted', async ({ from, ciphertext, signature, timestamp }) => {
-  const plaintext = decryptMsg(ciphertext);
-  const sigOk     = await verifySignature(plaintext, timestamp, signature, from);
-  addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk, signature, timestamp });
 });
 socket.on('lobby-dm', async ({ from, ciphertext, signature, timestamp, textPaid, textCurrency }) => {
   const plaintext = decryptMsg(ciphertext);
