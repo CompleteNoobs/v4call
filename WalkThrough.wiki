@@ -473,7 +473,7 @@ server {
 
     # Federation WebSocket — server-to-server, NEVER auth-protected.
     # Peer v4call servers connect here to exchange presence/DMs/call invites.
-    # Trust validation happens inside the Node app (signed verify.json check
+    # Trust validation happens inside the Node app (signed v4call-server.json check
     # + operator approval via /admin-peers.html). Do not add basic auth here —
     # it would block all federation.
     location /federation {
@@ -666,6 +666,17 @@ Your server scans Hive for <code>v4call-server</code> posts on startup and every
 # Click '''✗ Revoke''' to remove an approved peer
 
 Approvals persist to <code>/app/logs/approved-peers.json</code> so they survive container restarts.
+
+==== Troubleshooting: peer stuck on '✗ unverified' ====
+
+If a discovered peer shows '''✗ unverified''' with a reason like <code>Cannot fetch v4call-server.json: The operation was aborted due to timeout</code> (or any other transient fetch error), the Approve button will be hidden by design — you can only approve verified peers.
+
+'''First click 🔄 Load / Refresh, NOT 🔍 Rescan Hive now.''' The two buttons do different things:
+
+* '''🔄 Load / Refresh''' — re-pulls the current peer state from your server (fast, no network calls to Hive). The server retries verification on its own schedule; this just shows you the latest result. Use this first when a peer was unverified due to a transient timeout.
+* '''🔍 Rescan Hive now''' — re-runs the full Hive discovery scan (slower; the same scan that runs every 2 hours). Use this only when a peer is genuinely missing from your candidate list, not when an existing candidate failed verification once.
+
+If '''Load / Refresh''' still shows '✗ unverified' after a minute or two, click '''view v4call-server.json''' to confirm the peer's file is actually reachable from your browser. If it loads in your browser but your server can't fetch it, look at your server's network or DNS setup.
 
 === Federation Health Check ===
 
@@ -980,12 +991,12 @@ You logged in with Hive Keychain. Keychain does not expose private keys, so encr
 === Federation peer verification fails with HTTP 404 ===
 
 Logs show:
- [federation] ✗ Peer verification failed for X: Cannot fetch verify.json: HTTP 404
+ [federation] ✗ Peer verification failed for X: Cannot fetch v4call-server.json: HTTP 404
 
 The peer's <code>/.well-known/v4call-server.json</code> file isn't being served. Common causes:
 
 * '''Wrong directory name''' — must be <code>.well-known</code> with a hyphen, not <code>.well_known</code> with an underscore (RFC 8615).
-* '''Wrong filename''' — must be <code>v4call-server.json</code>, not <code>verify.json</code> or anything else. The verifier code looks for this exact name.
+* '''Wrong filename''' — must be <code>v4call-server.json</code> exactly. The verifier code looks for this exact name; older docs sometimes referred to this file generically as the "verify file", but the actual filename is always <code>v4call-server.json</code>.
 * '''Not in the Docker image''' — file lives at <code>public/.well-known/v4call-server.json</code> in the repo and is copied into the image at build time. After placing the file, rebuild: <code>docker compose down && docker compose build --no-cache && docker compose up -d</code>.
 * '''Placeholder not replaced''' — the repo ships with a tiny placeholder. You must overwrite it with your own signed file from <code>/server-sign.html</code> before federation will work.
 
@@ -996,7 +1007,7 @@ Should return your signed JSON, not <code>404</code> or the placeholder.
 
 === Federation connection flapping (rapid disconnect/reconnect loop) ===
 
-If logs show repeated <code>Outbound connected</code> followed by <code>Disconnected — retry in 2s</code> with no successful handshake, check verify.json:
+If logs show repeated <code>Outbound connected</code> followed by <code>Disconnected — retry in 2s</code> with no successful handshake, check v4call-server.json:
 
 * Is the file present at the path above?
 * Does its <code>signature</code> match the Hive account's posting key? Test by pasting the JSON into the '''Verify''' panel on <code>/server-sign.html</code> — should say "✓ Signature valid".

@@ -144,7 +144,7 @@ function renderPeers(data) {
     if (!p.approved && p.verified) actions.push(`<button class="approve" onclick="approve('${esc(p.domain)}')">✓ Approve</button>`);
     if (p.approved)                actions.push(`<button class="revoke"  onclick="revoke('${esc(p.domain)}')">✗ Revoke</button>`);
     actions.push(`<a href="${esc(p.federation_ws)}" style="display:none;"></a>`);
-    actions.push(`<button class="secondary" onclick="openVerify('${esc(p.domain)}')">view verify.json</button>`);
+    actions.push(`<button class="secondary" onclick="openVerify('${esc(p.domain)}')">view v4call-server.json</button>`);
     actions.push(`<button class="secondary" onclick="openPost('${esc(p.post_author)}','${esc(p.post_permlink)}')">view post</button>`);
 
     const reason = p.verify_reason ? `<div class="peer-meta" style="margin-top:4px;"><span class="k" style="color:var(--danger);">reason</span><span class="v" style="color:var(--danger);">${esc(p.verify_reason)}</span></div>` : '';

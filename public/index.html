@@ -1002,7 +1002,7 @@ function escapeHtml(s) {
 // inline onclick="fn('${dynamicValue}')" pattern, which was unsafe when
 // dynamicValue could contain quotes or scripts (room names from server, or
 // canonical user@server entries where the server portion comes from a
-// federation peer's signed verify.json).
+// federation peer's signed v4call-server.json).
 document.addEventListener('click', (ev) => {
   const t = ev.target.closest('[data-action]');
   if (!t) return;
