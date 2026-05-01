@@ -165,6 +165,7 @@
     #lobby-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
     .lobby-tab{flex:1;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);text-align:center;cursor:pointer;border-bottom:2px solid transparent;transition:color 0.2s,border-color 0.2s;background:none;border-top:none;border-left:none;border-right:none;}
     .lobby-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+    .lobby-tab.has-unread:not(.active)::after{content:' •';color:var(--accent);font-size:1rem;line-height:0;vertical-align:middle;margin-left:3px;}
     .lobby-tab-content{display:none;flex:1;flex-direction:column;overflow:hidden;}
     .lobby-tab-content.active{display:flex;}
     #lobby-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
@@ -1488,10 +1489,11 @@ function switchLobbyTab(tab) {
   document.querySelectorAll('.lobby-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.lobby-tab-content').forEach(c => c.classList.remove('active'));
   const btns = document.querySelectorAll('.lobby-tab');
-  if (tab === 'dm') btns[0].classList.add('active');
-  else if (tab === 'lobby') btns[1].classList.add('active');
-  else if (tab === 'active') btns[2].classList.add('active');
-  else if (tab === 'included') btns[3].classList.add('active');
+  const tabIdx = { dm: 0, lobby: 1, active: 2, included: 3 }[tab];
+  if (tabIdx !== undefined) {
+    btns[tabIdx].classList.add('active');
+    btns[tabIdx].classList.remove('has-unread');
+  }
   const content = document.getElementById('tab-' + tab);
   if (content) content.classList.add('active');
   if (tab === 'dm') renderDmUserList();
@@ -1800,14 +1802,14 @@ socket.on('lobby-dm', async ({ from, ciphertext, signature, timestamp, textPaid,
   const sigOk     = await verifySignature(plaintext, timestamp, signature, from);
   addLobbyMsg({ type:'dm', from, text:plaintext, isSelf:false, sigOk, textPaid: textPaid || 0, currency: textCurrency, signature, timestamp });
 });
-socket.on('lobby-dm-error', (msg) => { addLobbyMsg({type:'system', text:`⚠ ${msg}`}); });
+socket.on('lobby-dm-error', (msg) => { addLobbyMsg({type:'system', text:`⚠ ${msg}`, context:'dm'}); });
 socket.on('lobby-dm-payment-required', ({ to, rate, currency }) => {
   const cur = currency || 'HBD';
-  addLobbyMsg({type:'system', text:`@${to} requires ${rate.toFixed(3)} ${cur} per message — use the DM button to open the DM panel.`});
+  addLobbyMsg({type:'system', text:`@${to} requires ${rate.toFixed(3)} ${cur} per message — use the DM button to open the DM panel.`, context:'dm'});
 });
 socket.on('text-payment-received', ({ from, amount, currency }) => {
   const cur = currency || 'HBD';
-  addLobbyMsg({type:'system', text:`💰 @${from} paid you ${amount.toFixed(3)} ${cur} for a message — payout on its way.`});
+  addLobbyMsg({type:'system', text:`💰 @${from} paid you ${amount.toFixed(3)} ${cur} for a message — payout on its way.`, context:'dm'});
 });
 
 // ── DM unread alert on login ─────────────────────────────────
@@ -1863,8 +1865,18 @@ socket.on('dm-previews', (previews) => {
 // keying by the per-message signature (already unique) is the simplest fix.
 const renderedDmKeys = new Set();
 
-function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid, currency, signature, timestamp }) {
-  const containerId = (type === 'dm') ? 'dm-messages' : 'lobby-messages';
+function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid, currency, signature, timestamp, context }) {
+  // DM-related system messages route to the DM tab when the DM panel is open
+  // (so users actively in a DM conversation see errors / receipts inline).
+  // All other system messages go to the lobby tab as before.
+  let containerId;
+  if (type === 'dm') {
+    containerId = 'dm-messages';
+  } else if (type === 'system' && context === 'dm' && document.getElementById('dm-panel')?.classList.contains('active')) {
+    containerId = 'dm-messages';
+  } else {
+    containerId = 'lobby-messages';
+  }
   const c = document.getElementById(containerId);
   if (!c) return;
   if (type === 'dm' && signature) {
@@ -1892,6 +1904,15 @@ function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid, currency, 
     el.innerHTML = `<div class="lmsg-meta"><span>@${isSelf?myUsername:from}</span>${typeBadge}${paidBadge}${sigBadge}<span>${stampText}</span></div><div class="lmsg-text">${linkify(text)}</div>`;
   }
   c.appendChild(el); c.scrollTop = c.scrollHeight;
+
+  // Tab unread indicator — if the message landed in a tab that isn't the
+  // currently-active one, mark its tab button so the user knows to look.
+  const targetTabId = (containerId === 'dm-messages') ? 'tab-dm' : 'tab-lobby';
+  const targetTabContent = document.getElementById(targetTabId);
+  if (targetTabContent && !targetTabContent.classList.contains('active')) {
+    const btnIdx = (containerId === 'dm-messages') ? 0 : 1;
+    document.querySelectorAll('.lobby-tab')[btnIdx]?.classList.add('has-unread');
+  }
 }
 
 document.getElementById('dm-panel-input').addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendDmMessage();} });
