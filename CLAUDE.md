@@ -205,6 +205,7 @@ FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed m
   - Same-server `lobby-dm` handler does an explicit `paid >= rate` check too — currently a malicious browser client can underpay. Listed in backlog under "Input validation hardening".
   - Same-server `call-invite` handler — same audit. Same backlog category.
   - These are smaller surfaces than the federation ones (one operator's machine vs. potentially many) and can be batched into a future input-validation hardening sweep.
+- **DM error routing + tab unread indicator (UX polish, end of v0.16.6 cycle).** When a federated paid DM was rejected by recipient-side rate enforcement, the resulting `lobby-dm-error` event was being routed via `addLobbyMsg({type:'system', text})` to the Lobby tab — but the user was on the DM tab where they sent the DM, so they saw a silent fail (the on-chain refund landed but no UI acknowledgement). Fix: `addLobbyMsg` now accepts a `context: 'dm'` parameter; DM-related system messages are routed to the DM tab's `#dm-messages` container when the DM panel is open. Three handlers updated to pass `context:'dm'`: `lobby-dm-error`, `lobby-dm-payment-required`, `text-payment-received`. Plus a small accent-coloured dot now appears on inactive tab buttons (DM tab and Lobby tab) when a new system message lands there — visible at a glance, clears when the user clicks the tab. CSS: `.lobby-tab.has-unread:not(.active)::after { content: ' •'; color: var(--accent); ... }`. `switchLobbyTab` clears the dot from the activated tab. **Net code: ~15 lines added, ~5 simplified.** All client-side; no server changes; no protocol changes. Tested across federated paid-DM flows with valid + invalid + blocked + wrong-currency scenarios — all tests pass.
 
 ### Federation (v0.4)
 - **Server-to-server WebSocket:** persistent connection on `/federation`, domain tiebreaker so only the lower-domain initiates outbound (avoids flapping)
@@ -445,7 +446,17 @@ All items below landed in three independently-shipped builds (Part A, Part B, Pa
 - ~~Auto-refund on reject~~ via existing `sendFromEscrow` pattern (mirrors call-end refunds).
 - ~~No federation protocol bump~~. No new envelopes — reuses `dm-failed` and `payment-rejected`.
 - ~~New design rule added to "Key Design Decisions"~~ #15: "Recipients enforce their own rules" — applies to all current and future paid flows.
+- ~~End-of-cycle UX polish~~: DM-related system messages route to DM tab when DM panel is open + small accent-coloured dot on inactive tabs when new system messages land there. No more silent fails after a federated paid-DM rejection.
 - See "v0.16.6 polish" subsection above for full detail.
+
+### v0.16.7 — UX polish (planned, small focused build)
+Three small UX gaps surfaced during v0.16.6 federated-DM testing. None are bugs — system is correct — but several are easy wins for legibility and consistency.
+
+- **Lobby system message background colour** — currently hard to read against the lobby panel background. Increase contrast / brighten so notices like "✓ 0.005 HBD submitted — sending to @noblemage…" and "⚠ DM to @noblemage failed: underpaid…" pop visually.
+- **DM-related system messages should also surface in rooms** — extension of v0.16.6 polish. Today the `context:'dm'` routing in `addLobbyMsg` checks if the DM panel is open. If the user is **in a room** and a DM event fires (error, payment-required, payment-received), the message still goes to the lobby tab — which the user can't see while in the room. Mirror what `showInviteMsg` does for room invites: when `currentRoom` is set, `addSystemMsg` to the room chat too. Keeps DM feedback visible regardless of which surface the user is currently viewing.
+- **DM tab close button** — DM panel doesn't have an `✕` close affordance on desktop or mobile. Currently a user opens a DM, sees their messages, but has no obvious way to close the panel and return to the user-picker chip-row. Small CSS + click-handler addition.
+
+**Estimated scope:** 1 short session.
 
 ### v0.17 / federation v0.5 — Paid Expert Invites (2–3 sessions)
 **The seed feature.** Reverse the v4call payment direction: instead of "caller pays callee for receiving", the room admin pays an invited expert for joining and contributing. Use case from the user's own framing: when working on a project you need short bursts of expert help on (a language, a tool, a domain you'll touch for days or weeks then drop), some experts only show up if there's payment or token reward. v4call already supports HBD + custom Hive-Engine tokens (e.g. CNOOBS), so this slots in naturally — invite the expert, agree on terms, pay in whichever currency you've negotiated. **Not a marketplace, not a paid-consultancy platform** — a payment primitive for inviting domain experts to a specific session. Requires v0.16 federated rooms to land first.
@@ -464,6 +475,62 @@ All items below landed in three independently-shipped builds (Part A, Part B, Pa
 **Estimated scope:** ~300 lines server (paid invite flow, per-expert escrow tracking, end-of-session settlement), ~150 lines client (offer-builder, accept modal, expert earnings ticker). 2–3 sessions.
 
 **Why this is the seed feature:** paid 1:1 calls (current v4call) cover "callers paying me for my time." Paid expert-invites flip the direction — "I can offer payment to bring an expert into a room I'm working in." Different category, different value per session. On-chain settlement is genuinely useful here — transparent, instant, no chargebacks, supports custom-token payments (e.g. paying an expert in a project's own Hive-Engine token). Marketplace / discovery / trust layers (reviews, expert directories) are explicitly out of scope for v0.17 — this build ships the payment primitive only. The rest is a possible future side-quest.
+
+### v0.19+ → v0.22+ (provisional, phased) — IPFS-backed file attachments
+**Big multi-version feature, captured here as a forward-looking plan. Origin: separate brainstorm thread on 2026-05-01. Not blocking v0.17 / v0.18; phased rollout starts after v0.18 spotlight UI overhaul.**
+
+#### The product gap
+v4call has no transport for async voice messages, video messages, images, or arbitrary file transfer between users. Current chat envelopes carry text only. Adding async media is a real product gap: live voice/video is already covered by paid calls, but "send me a 30-second voice clip when I'm offline" has no answer today. This plan adds it without compromising the encryption boundary or v4call's payment philosophy.
+
+#### Architecture — locked-in decisions
+- **Transport: IPFS** (content-addressed, decentralised, federation-friendly — see "federation natural fit" below). Operator runs their own Kubo node for the hot tier; cold-tier permanent storage delegated to a Filecoin partner (web3.storage / Lighthouse / Filebase / Storacha — DON'T run Filecoin yourself, the deal-making layer is real ops work).
+- **Encryption boundary: client-side, end-to-end.** Sender's browser encrypts the file with a fresh AES-GCM key, encrypts that key with each recipient's posting pubkey (same hivecrypt pattern v4call already uses for DMs), signs the ciphertext, uploads ciphertext to IPFS via the operator's pinning proxy. Server only ever sees ciphertext bytes + signature + pubkey + size. No plaintext, no metadata about content, no MIME enforcement.
+- **Tags for rendering, not for billing.** Sender includes `<voice>`, `<video>`, `<image>`, `<file>` hint in the envelope so the recipient's client picks the right player. Server cannot verify the tag (would require decryption); pricing must depend only on what the server can measure (size). Tag-based pricing creates an incentive to lie — don't do it.
+- **Server proxies all uploads** — `Browser → POST /upload → server.js → Pinata/web3.storage (with secret JWT) → returns CID`. JWT in `.env`, never in browser. Rate-limit the endpoint, validate file size + declared MIME, gate behind signature verification (only registered v4call/Hive accounts can upload).
+- **Identity from Hive.** No new auth, no signup flow, no email verification — Hive accounts ARE the identity. Pubkey-signed uploads. Hive `account_update` ops let the server detect key rotations on-chain. Existing v4call rate-post infrastructure extends naturally for accept-rates.
+- **Sender pays.** Storage cost (per-byte rate) bills the uploader. Recipient is never charged for receiving — same philosophy as caller-pays-for-receiving in current v4call. This makes the abuse math clean: a malicious user can never DoS another's storage quota.
+- **Per-byte pricing** with friendly UI display. Internal: `cost = size_in_bytes × rate_per_byte`. UI: format pro-rata in HBD/HIVE/token. Rate set as "per GB" (human-readable). Floor at 0.001 HIVE per attachment (Hive's smallest unit). Round to 1kb granularity to avoid sub-precision math.
+- **Free tier**: per-user storage cap (initially 100MB total, signed by sender's pubkey, server tracks via DB). 7-day TTL (more generous than the 3-day initially considered — some users won't check messages for a week). Server cron unpins after TTL, runs `ipfs repo gc`, decrements quota.
+- **Paid tier**: above-quota uploads bill per-byte from sender's escrow (HBD or token, whatever the recipient accepts). Permanent or extended TTL via Filecoin cold-tier partner.
+- **Federation natural fit**: when @foo on call.completenoobs.com sends a voice note to @bar on hive-book.com, foo's server pins the encrypted blob → forwards a federation `dm` envelope with `attachments: [{ cid, mime, size, encKey, sig }]` → bar's client fetches the CID from any IPFS gateway (foo's, bar's, ipfs.io, Cloudflare's). **No cross-server pin replication needed** — IPFS is content-addressed; any gateway resolves any CID. The encryption is end-to-end so no gateway can read the bytes. This is the cleanest fit for cross-server async media transfer; the alternative (S3-style server-to-server file exchange) would require API keys, signed URLs, and a lot more federation-protocol surface.
+- **Recipient size cap** (new rate-post field `ATTACHMENT-MAX-MB`). Server validates blob size against recipient's declared accept-limit before forwarding the federation envelope. Without this, a malicious sender could fund a 50GB attachment that the recipient doesn't want; with it, recipient declines-by-default for oversized files.
+
+#### Phased build path
+Each phase is independently shippable. Don't build phase N+1 until phase N is in production and people are using it.
+
+| Phase | Scope | Estimated sessions |
+|---|---|---|
+| **v0.19** | Voice messages in DMs only. Single pinning provider (Pinata or web3.storage). Free 100MB/user, 7-day TTL, fixed simple rate. No rooms, no Filecoin, no pool. "Press to record → encrypt → upload → CID in DM envelope → recipient plays inline." Validates the whole crypto + IPFS flow with minimal moving parts. | 2-3 |
+| **v0.20** | Video + image + arbitrary file in DMs. Same plumbing, more MIME types. Per-byte recipient rates via rate-post extension (`FILE-TRANSFER` field). Recipient `ATTACHMENT-MAX-MB` accept-limit enforcement. | 2 |
+| **v0.21** | Paid rooms unlock IPFS attachments (sender-pays from own quota). No room treasury yet — just "this room allows attachments, billed to sender per-byte same as DMs." | 2 |
+| **v0.22** | Pool accounts + time-based room billing. Virtual ledger. Server-as-escrow with admin-set fee % (fee on consumption, not gross deposits). Pro-rata refund on close (Model A first; Model B as room-creator option later). Buffer mechanic before shutdown (default 3 hours, creator-configurable, progressive notifications at 50%/75%/final). | 4-5 |
+| **v0.23+** | Filecoin cold tier for permanent storage. Partner integration (web3.storage / Lighthouse / etc.). Opt-in "keep forever" with explicit pricing. Cold-tier latency caveat surfaced in UI. | 2-3 |
+
+#### Spam control (stacked)
+1. **Sig check at upload** — only registered Hive accounts (verified pubkey) can upload. Stops random strangers entirely.
+2. **Per-user storage quota** — 100MB free tier cap. A compromised account is a 100MB problem, not unbounded.
+3. **Recipient-side gates** — existing v4call rate-card (per-byte rate, ATTACHMENT-MAX-MB cap, blocked-list, ALLOW-IF-TOKEN bypass). Stops the social spam problem.
+4. **Hive economic backstop** — paid attachments require on-chain payment, so spammers pay real money per spam. Already baked into v4call's rate model; extends for free.
+
+#### Server-as-escrow (when v0.22 lands)
+Single Hive escrow account holds all room treasuries in aggregate. Internal DB tracks virtual balances per room, per contributor. Server takes admin-set fee on consumption (NOT on gross deposits — refunds untouched on unused rooms builds trust). Active key on server, owner key offline. Daily transfer caps, reconciliation alerts, 10% reserve buffer. **Make a note for later: at growth scale this becomes a regulatory + key-security concern; might want multisig or per-user escrow accounts when scale demands.** Not a v0.22 issue.
+
+#### Operational hard parts to plan for
+- **iOS Safari MediaRecorder pain** — `audio/webm` doesn't work on iOS Safari/Brave (WebKit). Need `audio/mp4` recording fallback OR server-side transcode. Test on iPhone EARLY, before building features on top. Same trap that bit v0.16 mid-room-cam-toggle.
+- **Filecoin retrieval latency** — first-byte from cold tier can be 30 seconds to several minutes. Don't auto-promote to cold unless user pays for permanent. Surface latency caveat in UI when user requests "keep forever."
+- **Key rotation** — undelivered messages encrypted to old keys are stuck if recipient rotated owner key. Include `recipient_key_fingerprint` in the attachment envelope so client can flag "encrypted to a key you no longer hold" instead of silent decryption failure. v4call's existing chat already has this problem; piggyback on the existing handling.
+- **Don't underestimate policy/UX work** — pricing UX, quota visualisation, buffer notifications subsystem (don't have one yet), refund mechanics, transparent fee disclosure, ToS updates. Plan for as long as the code work — maybe longer.
+
+#### Forward-compat with current architecture
+- **Rate post extension is non-breaking**: new fields `FILE-TRANSFER: 1.0 HBD/GB` and `ATTACHMENT-MAX-MB: 100` slot into V2 / V3 rate post format. Existing parsers ignore unknown fields gracefully (V1/V2 backwards-compat is already how v4call handles rate-format evolution).
+- **`computePaymentOptions` helper extends naturally** — already returns multi-currency options. Add a `fileTransfer` field to each option (rate per GB, max attachment size). Same pattern as the v0.16.6 multi-currency fix.
+- **Federation `dm` envelope** — already carries arbitrary fields. Add `attachments: []` array. v0.4 peers without v0.5+ won't know to look for `attachments` and will deliver a normal DM (just without the file); v0.5+ peers fetch via IPFS gateway and render. **No federation protocol bump needed for v0.19 (DM-only attachments)**; the bump would be needed when paid rooms unlock attachments (v0.21+) since that introduces new payment flows that need cross-server validation.
+
+#### Why this fits v4call
+- v4call is decentralised; central server stores ciphertext but never plaintext. IPFS extends this to file content — naturally on-brand.
+- Hive payment rails already cover the economic flows (no Stripe, no card processor, no chargebacks).
+- Existing rate-post infrastructure already covers "what does this user accept and at what cost."
+- Existing `.v4room` export pattern (v0.14.5) is a good template — client-side-encrypted bundle, addressable by content. The CID is just a more decentralised version of "filename + bytes."
 
 ### Deferred / On Hold
 - **Paid lobby posting** (charge per message in lobby) — interesting but operational complexity > value at this stage

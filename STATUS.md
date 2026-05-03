@@ -14,18 +14,19 @@ Last updated: 2026-04-30
 
 ## Right now
 
-**Just shipped:** v0.16.6 — awaiting user test + multi-server rollout
-**Next planned build:** v0.17 Part A — Local paid-expert invite + settlement (inviter holds escrow funds)
+**Just shipped:** v0.16.6 — fully validated across federated paid DM flows (5 tests passing) + end-of-cycle UX polish (DM error routing to DM tab + tab unread indicator) shipped and tested.
+**Next planned build:** v0.16.7 — small UX polish pass (3 items, see below).
 
 ## Next 3 builds (in order)
 
-1. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds per the "rug-pull protection" design rule)
-2. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`)
-3. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build)
+1. **v0.16.7** — Small UX polish pass: brighter lobby system message background, DM-related system messages should also surface in rooms (not just DM tab), DM tab close button. Surfaced during v0.16.6 testing.
+2. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds per the "rug-pull protection" design rule).
+3. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`).
+4. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build).
 
 ## Recently shipped
 
-- **v0.16.6** — Recipient-side rate enforcement for federated paid flows. Federation `dm` and `payment-verified` handlers now re-fetch the recipient's rates and re-validate (block-list, fee minimum, paid amount ≥ required rate) before disbursing; auto-refund the caller from our escrow on reject. Ring-fee handler now uses OUR computed `ratePerHour` instead of the caller-server-supplied claim. New design rule #15 added to Key Design Decisions: "Recipients enforce their own rules."
+- **v0.16.6 (incl. end-of-cycle UX polish)** — Recipient-side rate enforcement for federated paid flows + DM-error-routing fix (DM-related system messages now surface in DM tab when DM panel open) + small accent-dot unread indicator on inactive tabs. All 5 federated paid DM tests pass (valid rate, deliberate underpayment via Console override, token currency, blocked sender, unaccepted currency). Federation `dm` and `payment-verified` handlers now re-fetch the recipient's rates and re-validate (block-list, fee minimum, paid amount ≥ required rate) before disbursing; auto-refund the caller from our escrow on reject. Ring-fee handler now uses OUR computed `ratePerHour` instead of the caller-server-supplied claim. New design rule #15 added to Key Design Decisions: "Recipients enforce their own rules."
 - **v0.16.5** — Lobby DM bypass fix. Removed `lobby-encrypted` socket event entirely (was bypassing paid-DM rates / blocked-list / platform fee minimum / currency rules across federation). Lobby chat broadcast-only; user-list toggle now single-purpose (pre-select for Create Room invite). No protocol bump.
 - **v0.16** — Cross-server rooms (federated invites + multi-party WebRTC across servers, federated badge, token-gating across federation, XSS hygiene pass)
 - **v0.15** — Spotlight room layout, screen share, admin role transfer, WebRTC SDP m-line fix
@@ -66,6 +67,9 @@ Last updated: 2026-04-30
 - STUN/TURN server config via .env
 - Nostr layer for real-time push (after federation otherwise stable)
 - Voice-to-video upgrade mid-call (1:1 calls — half-built, mid-room version already shipped)
+
+### Major future feature plans (captured, not next)
+- **v0.19+ IPFS-backed file attachments** (phased v0.19 → v0.23+) — async voice / video / image / file transfer via IPFS. Sender pays, server proxies uploads, end-to-end client-encrypted, federation natural fit (CID portability). Paid rooms get pool treasuries + time-based billing in v0.22. See CLAUDE.md "Planned Features → v0.19+ → v0.22+" for full plan and project memory entry `project_v019_plus_ipfs_attachments.md` for the load-bearing decisions. **Not next** — comes after v0.16.7 / v0.17 / v0.18.
 
 ### Doc / housekeeping
 - Cost of creating a custom Hive-Engine token (worked example using CNOOBS)
