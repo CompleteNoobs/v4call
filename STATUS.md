@@ -17,12 +17,20 @@ Last updated: 2026-04-30
 **Just shipped:** v0.16.6 — fully validated across federated paid DM flows (5 tests passing) + end-of-cycle UX polish (DM error routing to DM tab + tab unread indicator) shipped and tested.
 **Next planned build:** v0.16.7 — small UX polish pass (3 items, see below).
 
-## Next 3 builds (in order)
+## Next builds (in order)
 
 1. **v0.16.7** — Small UX polish pass: brighter lobby system message background, DM-related system messages should also surface in rooms (not just DM tab), DM tab close button. Surfaced during v0.16.6 testing.
-2. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds per the "rug-pull protection" design rule).
-3. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`).
-4. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build).
+2. **v0.16.8** — Token-aware precision floor. Replace hardcoded `>= 0.001` checks with per-currency floors derived from Hive-Engine token precision (SWAP.BTC = 0.00000001, HBD = 0.001, etc.). Fixes the picker/validator disagreement when small SWAP.BTC rates are set. **Important to land BEFORE v0.17 paid-expert-invites** so the new paid flow inherits the correct check.
+3. **v0.17 Part A** — Local paid-expert invite + settlement (single server, no federation; inviter holds escrow funds per the "rug-pull protection" design rule).
+4. **v0.17 Part B** — Cross-server paid-expert invite (federation v0.5 gate, populates `payload.paidExpert`).
+5. **v0.18 (provisional)** — Spotlight UI overhaul (bigger spotlight, restructured layout — design pass needed before build).
+6. **v0.18.5 Part A** — Nostr + Lightning rate-post fields (NOSTR-PUBKEY, NOSTR-RELAYS, LIGHTNING-ADDRESS) + display buttons on profiles (gated on field populated) + link nostr-gen.html + qr-gen.html from index/info. (1-2 sessions)
+7. **v0.18.5 Part B** — Dynamic `/.well-known/nostr.json` endpoint (NIP-05 verification). (1 session)
+8. **v0.18.5 Part C** — Optional rate-editor reachability validation for Lightning Address + NOSTR-PUBKEY. (1 session)
+9. **v0.19** — Nostr-based federation discovery (replace 2h Hive scan with relay subscription). (2-3 sessions)
+10. **v0.20+** — IPFS-backed file attachments, phased — see "Major future feature plans" below.
+
+Plus on the platform/infra side, **HiveSigner login + paid-action flow** (alt to Hive Keychain — covers iPhone limitation, also lower-friction onboarding) is high-value but not numbered into the version queue yet because it can land independently any time. Could fold into a v0.18.5 sub-part if convenient, or be its own focused build whenever a mobile testing session reveals it's blocking real users.
 
 ## Recently shipped
 
@@ -63,13 +71,14 @@ Last updated: 2026-04-30
 - SQLCipher for at-rest encryption (production deployments)
 
 ### Platform / infra
-- iPhone Keychain workaround (HiveSigner web fallback)
+- HiveSigner as alt login + paid-action method (covers iPhone Keychain limitation; also lower-friction onboarding for casual users; OAuth-style flow)
 - STUN/TURN server config via .env
 - Nostr layer for real-time push (after federation otherwise stable)
 - Voice-to-video upgrade mid-call (1:1 calls — half-built, mid-room version already shipped)
 
 ### Major future feature plans (captured, not next)
-- **v0.19+ IPFS-backed file attachments** (phased v0.19 → v0.23+) — async voice / video / image / file transfer via IPFS. Sender pays, server proxies uploads, end-to-end client-encrypted, federation natural fit (CID portability). Paid rooms get pool treasuries + time-based billing in v0.22. See CLAUDE.md "Planned Features → v0.19+ → v0.22+" for full plan and project memory entry `project_v019_plus_ipfs_attachments.md` for the load-bearing decisions. **Not next** — comes after v0.16.7 / v0.17 / v0.18.
+- **v0.18.5+ Nostr + Lightning Bitcoin integration** (phased) — display Nostr pubkey + Lightning Address on user profiles (gated on rate-post field populated), dynamic `/.well-known/nostr.json` endpoint, link `nostr-gen.html` + `qr-gen.html` from main pages, federation discovery via Nostr at v0.19 (2h Hive scan → 2s relay push). Hybrid Nostr-aware client (filter Nostr DMs by v4call user-list) deferred. See CLAUDE.md "Planned Features → v0.18.5+" for full plan and project memory entry `project_v018_5_plus_nostr_lightning.md` for load-bearing decisions. SWAP.* tokens (SWAP.BTC, SWAP.DOGE, SWAP.ETH, etc.) already work as v4call payment currencies out of the box (verified 2026-05-04 testing).
+- **v0.20+ IPFS-backed file attachments** (phased) — async voice / video / image / file transfer via IPFS. Sender pays, server proxies uploads, end-to-end client-encrypted, federation natural fit (CID portability). Paid rooms get pool treasuries + time-based billing in later phase. See CLAUDE.md "Planned Features → v0.19+ → v0.22+" for full plan and project memory entry `project_v019_plus_ipfs_attachments.md` for load-bearing decisions. **Not next** — comes after v0.16.7 / v0.17 / v0.18 / v0.18.5 / v0.19.
 
 ### Doc / housekeeping
 - Cost of creating a custom Hive-Engine token (worked example using CNOOBS)

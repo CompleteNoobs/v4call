@@ -274,6 +274,21 @@
   <p>Rooms support encrypted messaging, voice, and video. They are <strong>ephemeral</strong> — when the last person leaves, the room and all its messages are permanently deleted.</p>
 
   <!-- ─────────────────────────────────────────────────── -->
+  <h2>Independence Tools — Nostr backup, QR transfer</h2>
+
+  <p>v4call is built on Hive identity, but you can also create a <strong>Nostr</strong> identity as an independence backup. Nostr is a decentralised protocol — your identity is just a key pair, not tied to any server. If v4call is ever down or unreachable, anyone who has your Nostr public key can still reach you via any Nostr client.</p>
+
+  <p><strong>Coming soon (a future v4call update):</strong> users will be able to add their Nostr public key and Lightning Bitcoin address to their rate post. v4call will display them on user profiles so others can reach you off-platform if needed. The standalone tools to generate the keys are available now:</p>
+
+  <p>
+    <a href="/nostr-gen.html" target="_blank" rel="noopener" class="btn btn-accent">🔑 Nostr Key Generator</a>
+    &nbsp;
+    <a href="/qr-gen.html" target="_blank" rel="noopener" class="btn btn-blue">▦ QR Transfer Tool</a>
+  </p>
+
+  <p class="hint">The <strong>Nostr key generator</strong> creates a key pair entirely in your browser — your private key never leaves the device. The <strong>QR transfer tool</strong> lets you move secrets (Hive posting keys, Nostr private keys, etc.) between devices by displaying a QR code on one phone and scanning with another phone's camera — no network transfer, no leak risk.</p>
+
+  <!-- ─────────────────────────────────────────────────── -->
   <h2>Quick Tips</h2>
 
   <div class="card">
@@ -299,7 +314,9 @@
     <a href="https://hive.blog" target="_blank" rel="noopener">Hive.blog</a> — view your Hive wallet, keys, and blog<br>
     <a href="https://www.completenoobs.com/noobs/Hive_Blockchain_Create_Custom_Coins" target="_blank" rel="noopener">tribaldex</a> — create and trade custom tokens<br>
     <a href="https://completenoobs.com" target="_blank" rel="noopener">CompleteNoobs.com</a> — guides, wiki, and more info<br>
-    <a href="/rate-editor.html" target="_blank" rel="noopener">Rate Editor</a> — set your call and message rates
+    <a href="/rate-editor.html" target="_blank" rel="noopener">Rate Editor</a> — set your call and message rates<br>
+    <a href="/nostr-gen.html" target="_blank" rel="noopener">Nostr Key Generator</a> — create a Nostr identity for cross-platform reach<br>
+    <a href="/qr-gen.html" target="_blank" rel="noopener">QR Transfer Tool</a> — move secrets between devices safely (no network transfer)
   </p>
 
   <!-- ─────────────────────────────────────────────────── -->

@@ -14,6 +14,7 @@ Callers pay to ring. Callees set their own rates. Unused credit is refunded. Eve
 - Voice-only and video calls with separate rate tiers
 - Encrypted direct messages with persistent chat history (server only sees ciphertext)
 - Custom token payments (any Hive-Engine token — CNOOBS, PIZZA, etc.)
+- **Pay in BTC, DOGE, ETH, LTC, and more** via the SWAP.* family on tribaldex.com (SWAP.BTC, SWAP.DOGE, SWAP.ETH, SWAP.LTC, etc. — 1:1 wrapped tokens on Hive-Engine, work as v4call payment currencies out of the box; no v4call code change needed). Counterparty risk via the wrapper service is the trade-off; minimum withdrawal back to native chain is non-trivial (e.g. 0.01 SWAP.BTC). Verified working in v4call testing 2026-05-04.
 - Payment option picker — callers choose which currency to pay with
 - Free-market platform fees — servers set minimums, users shop around
 - Hive Keychain login — no key paste needed
