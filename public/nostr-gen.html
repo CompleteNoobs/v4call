@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>nostrgen — Nostr Key Pair Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0d0d0d;
+      --surface:  #141414;
+      --surface2: #1c1c1c;
+      --border:   #2a2a2a;
+      --purple:   #8b5cf6;
+      --purple2:  #a78bfa;
+      --cyan:     #22d3ee;
+      --green:    #4ade80;
+      --red:      #f87171;
+      --amber:    #fbbf24;
+      --text:     #f0f0f0;
+      --muted:    #666;
+      --mono:     'Share Tech Mono', monospace;
+      --sans:     'Outfit', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 80px;
+    }
+
+    /* Background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(139,92,246,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139,92,246,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page { position: relative; z-index: 1; width: 100%; max-width: 680px; }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 48px; }
+    .header .logo {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--purple);
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .header h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--purple2) 0%, var(--cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 12px;
+    }
+    .header p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 300;
+      line-height: 1.6;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--purple);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    /* Mode tabs */
+    .mode-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 4px;
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 10px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .mode-tab.active {
+      background: var(--purple);
+      color: #fff;
+    }
+    .mode-tab:hover:not(.active) { color: var(--text); }
+
+    /* Form */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .field input {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field input:focus { border-color: var(--purple); }
+    .field input::placeholder { color: var(--muted); }
+    .field-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    /* Strength bar */
+    .strength-bar {
+      height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    .strength-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.4s, background 0.4s;
+      width: 0%;
+    }
+    .strength-label {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      margin-top: 4px;
+    }
+
+    /* Generate button */
+    .gen-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, var(--purple) 0%, #6d28d9 100%);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-family: var(--sans);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s;
+      letter-spacing: 0.02em;
+      margin-top: 8px;
+    }
+    .gen-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .gen-btn:active { transform: translateY(0); }
+
+    /* Output */
+    .output-section { display: none; }
+    .output-section.visible { display: block; }
+
+    .key-box {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      position: relative;
+    }
+    .key-box.secret { border-color: rgba(248,113,113,0.3); }
+    .key-box.public { border-color: rgba(34,211,238,0.3); }
+
+    .key-label {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .key-box.secret .key-label { color: var(--red); }
+    .key-box.public .key-label { color: var(--cyan); }
+
+    .key-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .key-box.secret .key-dot { background: var(--red); }
+    .key-box.public .key-dot { background: var(--cyan); }
+
+    .key-value {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--text);
+      word-break: break-all;
+      line-height: 1.6;
+      padding-right: 44px;
+    }
+    .key-box.secret .key-value { color: var(--red); }
+    .key-box.public .key-value { color: var(--cyan); }
+
+    .copy-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: var(--border);
+      border: none;
+      border-radius: 6px;
+      color: var(--muted);
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+    }
+    .copy-btn:hover { background: var(--purple); color: #fff; }
+    .copy-btn.copied { background: var(--green); color: #fff; }
+
+    .also-hex { margin-top: 8px; }
+    .also-hex summary {
+      font-family: var(--mono);
+      font-size: 0.65rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      letter-spacing: 0.05em;
+    }
+    .also-hex summary:hover { color: var(--text); }
+    .hex-val {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      color: var(--muted);
+      word-break: break-all;
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    /* Warning */
+    .warning-box {
+      background: rgba(251,191,36,0.06);
+      border: 1px solid rgba(251,191,36,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-bottom: 16px;
+      font-size: 0.82rem;
+      color: var(--amber);
+      line-height: 1.6;
+    }
+    .warning-box strong { font-weight: 700; }
+
+    /* Info box */
+    .info-box {
+      background: rgba(139,92,246,0.06);
+      border: 1px solid rgba(139,92,246,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 0.82rem;
+      color: var(--purple2);
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+    .info-box a { color: var(--cyan); text-decoration: none; }
+    .info-box a:hover { text-decoration: underline; }
+
+    /* Test links */
+    .test-links {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .test-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 0.8rem;
+      font-weight: 600;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .test-link:hover { border-color: var(--purple); color: var(--text); }
+    .test-link .icon { font-size: 1rem; }
+
+    /* v4call box */
+    .v4call-box {
+      background: var(--surface2);
+      border: 1px solid rgba(34,211,238,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 0.8rem;
+      line-height: 1.7;
+      color: var(--muted);
+    }
+    .v4call-box strong { color: var(--cyan); }
+    .v4call-code {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 8px;
+      color: var(--cyan);
+      word-break: break-all;
+      line-height: 1.6;
+    }
+
+    /* What is Nostr section */
+    .explainer { margin-bottom: 16px; }
+    .explainer-row {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .explainer-row:last-child { border-bottom: none; }
+    .explainer-icon { font-size: 1.2rem; flex-shrink: 0; width: 28px; text-align: center; }
+    .explainer-text { color: var(--muted); }
+    .explainer-text strong { color: var(--text); }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      margin-top: 48px;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      line-height: 2;
+    }
+    .footer a { color: var(--purple); text-decoration: none; }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <div class="header">
+    <div class="logo">CompleteNoobs · Tools</div>
+    <h1>nostrgen</h1>
+    <p>Generate a Nostr keypair from a passphrase or at random.
+       All computation happens in your browser — nothing is sent to any server.</p>
+  </div>
+
+  <!-- What is Nostr -->
+  <div class="card">
+    <div class="card-title">What is Nostr?</div>
+    <div class="explainer">
+      <div class="explainer-row">
+        <div class="explainer-icon">🔑</div>
+        <div class="explainer-text"><strong>Your keypair is your identity.</strong> No username registration, no email, no phone number. Just a private key and the public key it generates.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">📡</div>
+        <div class="explainer-text"><strong>Relays are simple servers</strong> that store and forward your signed messages. You connect to multiple relays — if one goes down, your data is still on the others.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">✍️</div>
+        <div class="explainer-text"><strong>Everything you publish is signed</strong> by your private key. Anyone can verify it came from you. Nobody can fake your posts.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">🔓</div>
+        <div class="explainer-text"><strong>Your npub is your public address</strong> — share it freely. Your nsec is your private key — guard it like a password. Anyone with your nsec controls your identity.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generator -->
+  <div class="card">
+    <div class="card-title">Generate Keypair</div>
+
+    <div class="mode-tabs">
+      <button class="mode-tab active" onclick="setMode('passphrase')">From Passphrase</button>
+      <button class="mode-tab" onclick="setMode('random')">Random</button>
+    </div>
+
+    <div id="passphrase-mode">
+      <div class="info-box">
+        A passphrase generates the <em>same keypair every time</em> — useful if you want a reproducible key you can regenerate from memory. Use a long, unique passphrase. The same passphrase always gives the same keys.
+      </div>
+      <div class="field">
+        <label>Passphrase</label>
+        <input type="password" id="passphrase" placeholder="Enter a long, unique passphrase…" oninput="updateStrength()" autocomplete="off" spellcheck="false"/>
+        <div class="strength-bar"><div class="strength-fill" id="strength-fill"></div></div>
+        <div class="strength-label" id="strength-label" style="color:var(--muted)"></div>
+      </div>
+      <div class="field">
+        <label>Salt (optional but recommended)</label>
+        <input type="text" id="salt" placeholder="e.g. nostr-v4call-noblemage" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint">Adding a salt means even if someone knows your passphrase, they can't derive the key without the salt. Think of it as a second secret word.</div>
+      </div>
+    </div>
+
+    <div id="random-mode" style="display:none;">
+      <div class="info-box">
+        Generates a cryptographically random private key using your browser's <code>crypto.getRandomValues()</code>. Truly random — cannot be reproduced. <strong>Back up your nsec immediately after generating.</strong>
+      </div>
+    </div>
+
+    <button class="gen-btn" onclick="generate()">⚡ Generate Keypair</button>
+  </div>
+
+  <!-- Output -->
+  <div class="output-section" id="output">
+
+    <div class="warning-box">
+      ⚠ <strong>Keep your nsec private.</strong> Anyone who has it controls your Nostr identity permanently. There is no recovery if you lose it or share it. Write it down and store it safely offline.
+    </div>
+
+    <div class="card">
+      <div class="card-title">Your Keypair</div>
+
+      <div class="key-box secret">
+        <div class="key-label"><div class="key-dot"></div>Private Key (nsec) — KEEP SECRET</div>
+        <div class="key-value" id="out-nsec">—</div>
+        <button class="copy-btn" onclick="copyKey('out-nsec', this)" title="Copy">⧉</button>
+        <details class="also-hex">
+          <summary>Show hex format</summary>
+          <div class="hex-val" id="out-privhex">—</div>
+        </details>
+      </div>
+
+      <div class="key-box public">
+        <div class="key-label"><div class="key-dot"></div>Public Key (npub) — Share freely</div>
+        <div class="key-value" id="out-npub">—</div>
+        <button class="copy-btn" onclick="copyKey('out-npub', this)" title="Copy">⧉</button>
+        <details class="also-hex">
+          <summary>Show hex format</summary>
+          <div class="hex-val" id="out-pubhex">—</div>
+        </details>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Test Your Keys</div>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:16px;line-height:1.6;">
+        Log into any of these Nostr clients using your <strong style="color:var(--red)">nsec</strong> to verify your keypair works. Your profile will appear with your <strong style="color:var(--cyan)">npub</strong> as your address.
+      </p>
+      <div class="test-links">
+        <a class="test-link" href="https://primal.net" target="_blank" rel="noopener">
+          <span class="icon">⚡</span> Primal
+        </a>
+        <a class="test-link" href="https://snort.social" target="_blank" rel="noopener">
+          <span class="icon">⚡</span> Snort
+        </a>
+        <a class="test-link" href="https://nostrudel.ninja" target="_blank" rel="noopener">
+          <span class="icon">⚡</span> noStrudel
+        </a>
+        <a class="test-link" href="https://iris.to" target="_blank" rel="noopener">
+          <span class="icon">⚡</span> Iris
+        </a>
+      </div>
+      <p style="font-size:0.75rem;color:var(--muted);margin-top:12px;line-height:1.5;">
+        Mobile: <strong>Damus</strong> (iOS) · <strong>Amethyst</strong> (Android). Look for "Login with nsec" or "Import key" in each client.
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Use with v4call</div>
+      <div class="v4call-box">
+        <strong>Add your npub to your v4call rates post</strong> on Hive to link your Nostr identity to your v4call profile. This allows v4call servers to discover you via Nostr in the future.
+        <div class="v4call-code" id="v4call-snippet">
+          [V4CALL-RATES-V2]<br/>
+          ACCOUNT:yourusername<br/>
+          CHAIN:hive<br/>
+          NOSTR:<span id="snippet-npub" style="color:var(--cyan)">generate a key above to see your npub here</span><br/>
+          SERVER:v4call.com<br/>
+          ...
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Learn more -->
+  <div class="card">
+    <div class="card-title">Learn More</div>
+    <div class="info-box">
+      <strong>Nostr resources:</strong><br/>
+      <a href="https://nostr.com" target="_blank">nostr.com</a> — official intro and client list<br/>
+      <a href="https://github.com/nostr-protocol/nostr" target="_blank">github.com/nostr-protocol/nostr</a> — the protocol spec (NIPs)<br/>
+      <a href="https://nostr.how" target="_blank">nostr.how</a> — beginner guide<br/>
+      <br/>
+      <strong>v4call + Nostr:</strong><br/>
+      <a href="https://www.completenoobs.com" target="_blank">completenoobs.com</a> — v4call setup guides and wiki
+    </div>
+  </div>
+
+  <div class="footer">
+    nostrgen · CompleteNoobs Tools · All keys generated locally in your browser<br/>
+    <a href="https://github.com/CompleteNoobs/v4call">github.com/CompleteNoobs/v4call</a>
+  </div>
+
+</div>
+
+<script>
+// ── Bech32 encoding ───────────────────────────────────────────────────────────
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_GENERATOR = [0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3];
+
+function bech32Polymod(values) {
+  let chk = 1;
+  for (let p = 0; p < values.length; p++) {
+    const top = chk >> 25;
+    chk = (chk & 0x1ffffff) << 5 ^ values[p];
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= BECH32_GENERATOR[i];
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const ret = [];
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) >> 5);
+  ret.push(0);
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) & 31);
+  return ret;
+}
+function bech32CreateChecksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]);
+  const polymod = bech32Polymod(values) ^ 1;
+  const ret = [];
+  for (let i = 0; i < 6; i++) ret.push((polymod >> (5*(5-i))) & 31);
+  return ret;
+}
+function bech32Encode(hrp, data) {
+  const combined = data.concat(bech32CreateChecksum(hrp, data));
+  return hrp + '1' + combined.map(d => BECH32_CHARSET[d]).join('');
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0, bits = 0;
+  const ret = [], maxv = (1 << toBits) - 1;
+  for (let i = 0; i < data.length; i++) {
+    const value = data[i];
+    acc = (acc << fromBits) | value;
+    bits += fromBits;
+    while (bits >= toBits) { bits -= toBits; ret.push((acc >> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+  return ret;
+}
+function encodeBech32(hrp, hexStr) {
+  const bytes = hexStr.match(/.{1,2}/g).map(b => parseInt(b, 16));
+  const data  = convertBits(bytes, 8, 5, true);
+  return bech32Encode(hrp, data);
+}
+
+// ── secp256k1 public key derivation ──────────────────────────────────────────
+// Uses the browser's SubtleCrypto to derive the public key from a private key
+// secp256k1 via ECDSA — we extract the raw public key point
+async function privkeyToPublicKeyHex(privHex) {
+  // Import as raw private key for ECDH (secp256k1 = P-256 is NOT the same,
+  // but browser SubtleCrypto doesn't support secp256k1 natively.
+  // We use the noble-secp256k1 library loaded below instead.
+  return await nobleGetPublicKey(privHex);
+}
+
+// ── SHA-256 ───────────────────────────────────────────────────────────────────
+async function sha256(message) {
+  const encoder = new TextEncoder();
+  const data    = encoder.encode(message);
+  const hash    = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+async function sha256Bytes(bytes) {
+  const hash = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+// ── noble-secp256k1 (inlined minimal implementation) ─────────────────────────
+// Minimal secp256k1 for public key derivation only
+// Based on the tiny-secp256k1 approach using BigInt arithmetic
+const SECP256K1 = {
+  p: 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2Fn,
+  n: 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n,
+  Gx: 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798n,
+  Gy: 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8n,
+};
+
+function modP(n) { return ((n % SECP256K1.p) + SECP256K1.p) % SECP256K1.p; }
+function modInverse(a, m) {
+  let [old_r, r] = [a, m], [old_s, s] = [1n, 0n];
+  while (r !== 0n) {
+    const q = old_r / r;
+    [old_r, r] = [r, old_r - q * r];
+    [old_s, s] = [s, old_s - q * s];
+  }
+  return ((old_s % m) + m) % m;
+}
+function pointAdd(P, Q) {
+  if (!P) return Q;
+  if (!Q) return P;
+  if (P.x === Q.x && P.y === Q.y) return pointDouble(P);
+  const lam = modP((Q.y - P.y) * modInverse(Q.x - P.x, SECP256K1.p));
+  const x   = modP(lam * lam - P.x - Q.x);
+  const y   = modP(lam * (P.x - x) - P.y);
+  return { x, y };
+}
+function pointDouble(P) {
+  const lam = modP(3n * P.x * P.x * modInverse(2n * P.y, SECP256K1.p));
+  const x   = modP(lam * lam - 2n * P.x);
+  const y   = modP(lam * (P.x - x) - P.y);
+  return { x, y };
+}
+function pointMul(k, P) {
+  let R = null, Q = P;
+  while (k > 0n) {
+    if (k & 1n) R = pointAdd(R, Q);
+    Q = pointDouble(Q);
+    k >>= 1n;
+  }
+  return R;
+}
+function nobleGetPublicKey(privHex) {
+  const k   = BigInt('0x' + privHex);
+  const G   = { x: SECP256K1.Gx, y: SECP256K1.Gy };
+  const pub = pointMul(k, G);
+  // Return x-coordinate only (32 bytes) — this is the Nostr public key format
+  return pub.x.toString(16).padStart(64, '0');
+}
+
+// ── UI ────────────────────────────────────────────────────────────────────────
+let currentMode = 'passphrase';
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-tab').forEach((t, i) => {
+    t.classList.toggle('active', (mode === 'passphrase' && i === 0) || (mode === 'random' && i === 1));
+  });
+  document.getElementById('passphrase-mode').style.display = mode === 'passphrase' ? 'block' : 'none';
+  document.getElementById('random-mode').style.display     = mode === 'random'     ? 'block' : 'none';
+}
+
+function updateStrength() {
+  const pass  = document.getElementById('passphrase').value;
+  const fill  = document.getElementById('strength-fill');
+  const label = document.getElementById('strength-label');
+  if (!pass) { fill.style.width = '0%'; label.textContent = ''; return; }
+  let score = 0;
+  if (pass.length >= 12) score++;
+  if (pass.length >= 20) score++;
+  if (pass.length >= 32) score++;
+  if (/[A-Z]/.test(pass)) score++;
+  if (/[0-9]/.test(pass)) score++;
+  if (/[^A-Za-z0-9]/.test(pass)) score++;
+  const pct    = Math.min(100, (score / 6) * 100);
+  const colors = ['#f87171','#fb923c','#fbbf24','#4ade80','#22d3ee'];
+  const labels = ['Very weak','Weak','Fair','Strong','Very strong'];
+  const idx    = Math.min(4, Math.floor(score / 1.2));
+  fill.style.width      = pct + '%';
+  fill.style.background = colors[idx];
+  label.style.color     = colors[idx];
+  label.textContent     = labels[idx] + ' passphrase';
+}
+
+async function generate() {
+  let privHex;
+
+  if (currentMode === 'passphrase') {
+    const pass = document.getElementById('passphrase').value;
+    const salt = document.getElementById('salt').value;
+    if (!pass) { alert('Please enter a passphrase.'); return; }
+    // Derive private key: SHA-256(passphrase + ":" + salt)
+    const combined = pass + ':' + salt + ':nostr-v4call';
+    privHex = await sha256(combined);
+  } else {
+    // Truly random 32 bytes
+    const rand = new Uint8Array(32);
+    crypto.getRandomValues(rand);
+    privHex = Array.from(rand).map(b => b.toString(16).padStart(2,'0')).join('');
+  }
+
+  // Ensure private key is within secp256k1 order
+  const privBig = BigInt('0x' + privHex);
+  if (privBig === 0n || privBig >= SECP256K1.n) {
+    alert('Generated key is invalid (astronomically rare) — please try again.');
+    return;
+  }
+
+  // Derive public key
+  const pubHex = nobleGetPublicKey(privHex);
+
+  // Encode as bech32
+  const nsec = encodeBech32('nsec', privHex);
+  const npub = encodeBech32('npub', pubHex);
+
+  // Show output
+  document.getElementById('out-nsec').textContent    = nsec;
+  document.getElementById('out-npub').textContent    = npub;
+  document.getElementById('out-privhex').textContent = privHex;
+  document.getElementById('out-pubhex').textContent  = pubHex;
+  document.getElementById('snippet-npub').textContent = npub;
+
+  document.getElementById('output').classList.add('visible');
+  document.getElementById('output').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function copyKey(id, btn) {
+  const text = document.getElementById(id).textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '⧉'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+</script>
+</body>
+</html>

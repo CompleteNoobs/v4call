@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>qrgen — QR Code Generator + Scanner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #0d0d0d;
+      --surface:  #141414;
+      --surface2: #1c1c1c;
+      --border:   #2a2a2a;
+      --purple:   #8b5cf6;
+      --purple2:  #a78bfa;
+      --cyan:     #22d3ee;
+      --green:    #4ade80;
+      --red:      #f87171;
+      --amber:    #fbbf24;
+      --text:     #f0f0f0;
+      --muted:    #666;
+      --mono:     'Share Tech Mono', monospace;
+      --sans:     'Outfit', sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 20px 80px;
+    }
+
+    /* Background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(139,92,246,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(139,92,246,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .page { position: relative; z-index: 1; width: 100%; max-width: 680px; }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 48px; }
+    .header .logo {
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--purple);
+      letter-spacing: 0.3em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+    }
+    .header h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--purple2) 0%, var(--cyan) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: 12px;
+    }
+    .header p {
+      color: var(--muted);
+      font-size: 0.95rem;
+      font-weight: 300;
+      line-height: 1.6;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--purple);
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      margin-bottom: 20px;
+    }
+
+    /* Mode tabs */
+    .mode-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 4px;
+    }
+    .mode-tab {
+      flex: 1;
+      padding: 10px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      border-radius: 7px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .mode-tab.active {
+      background: var(--purple);
+      color: #fff;
+    }
+    .mode-tab:hover:not(.active) { color: var(--text); }
+
+    /* Form */
+    .field { margin-bottom: 16px; }
+    .field label {
+      display: block;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .field textarea {
+      resize: vertical;
+      min-height: 100px;
+      line-height: 1.5;
+    }
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus { border-color: var(--purple); }
+    .field input::placeholder,
+    .field textarea::placeholder { color: var(--muted); }
+    .field-hint {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+
+    .field-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 480px) {
+      .field-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Generate / primary button */
+    .gen-btn {
+      width: 100%;
+      padding: 15px;
+      background: linear-gradient(135deg, var(--purple) 0%, #6d28d9 100%);
+      border: none;
+      border-radius: 10px;
+      color: #fff;
+      font-family: var(--sans);
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.15s;
+      letter-spacing: 0.02em;
+      margin-top: 8px;
+    }
+    .gen-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    .gen-btn:active { transform: translateY(0); }
+
+    /* Secondary action buttons */
+    .action-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .action-btn {
+      flex: 1;
+      min-width: 140px;
+      padding: 11px 14px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, background 0.2s;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+    .action-btn:hover { border-color: var(--purple); }
+    .action-btn.primary {
+      background: linear-gradient(135deg, var(--purple) 0%, #6d28d9 100%);
+      border-color: transparent;
+      color: #fff;
+    }
+    .action-btn.primary:hover { opacity: 0.9; }
+    .action-btn.copied { background: var(--green); color: #fff; border-color: transparent; }
+
+    /* QR display */
+    .qr-display {
+      margin-top: 20px;
+      padding: 20px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .qr-display canvas {
+      max-width: 100%;
+      height: auto;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      border-radius: 6px;
+    }
+
+    /* Camera */
+    .cam-wrap {
+      margin-top: 16px;
+      position: relative;
+      background: #000;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      aspect-ratio: 4/3;
+    }
+    .cam-wrap video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .scan-frame {
+      position: absolute;
+      top: 50%; left: 50%;
+      width: 60%; aspect-ratio: 1/1;
+      transform: translate(-50%, -50%);
+      border: 2px solid var(--cyan);
+      border-radius: 12px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
+      pointer-events: none;
+    }
+    .scan-hint {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      color: var(--cyan);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: rgba(0,0,0,0.6);
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+
+    /* Result box */
+    .key-box {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      position: relative;
+    }
+    .key-box.public { border-color: rgba(34,211,238,0.3); }
+
+    .key-label {
+      font-family: var(--mono);
+      font-size: 0.62rem;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--cyan);
+    }
+    .key-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--cyan);
+    }
+    .key-value {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      color: var(--cyan);
+      word-break: break-all;
+      line-height: 1.6;
+      padding-right: 44px;
+      white-space: pre-wrap;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: var(--border);
+      border: none;
+      border-radius: 6px;
+      color: var(--muted);
+      width: 32px;
+      height: 32px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s, color 0.2s;
+    }
+    .copy-btn:hover { background: var(--purple); color: #fff; }
+    .copy-btn.copied { background: var(--green); color: #fff; }
+
+    /* Info / warning */
+    .info-box {
+      background: rgba(139,92,246,0.06);
+      border: 1px solid rgba(139,92,246,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      font-size: 0.82rem;
+      color: var(--purple2);
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+    .warning-box {
+      background: rgba(251,191,36,0.06);
+      border: 1px solid rgba(251,191,36,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      font-size: 0.82rem;
+      color: var(--amber);
+      line-height: 1.6;
+    }
+    .error-box {
+      background: rgba(248,113,113,0.06);
+      border: 1px solid rgba(248,113,113,0.2);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 16px;
+      font-size: 0.82rem;
+      color: var(--red);
+      line-height: 1.6;
+      display: none;
+    }
+    .error-box.shown { display: block; }
+
+    /* Output sections */
+    .output-section { display: none; }
+    .output-section.visible { display: block; margin-top: 20px; }
+
+    /* Explainer */
+    .explainer-row {
+      display: flex;
+      gap: 12px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+    .explainer-row:last-child { border-bottom: none; }
+    .explainer-icon { font-size: 1.2rem; flex-shrink: 0; width: 28px; text-align: center; }
+    .explainer-text { color: var(--muted); }
+    .explainer-text strong { color: var(--text); }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      margin-top: 48px;
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.05em;
+      line-height: 2;
+    }
+    .footer a { color: var(--purple); text-decoration: none; }
+  </style>
+</head>
+<body>
+<!NOTE:
+Text → QR tab — textarea, error-correction picker (L/M/Q/H), module-size input, generates onto a canvas with a quiet zone, plus Download PNG and Copy Image buttons.
+QR → Text tab — Start Camera (uses facingMode: 'environment' for rear cam on phones), live frame-by-frame scan with a cyan scan-frame overlay, plus an Upload Image fallback for desktops/iOS where the camera flow is awkward.
+All client-side. Two tiny CDN libraries: qrcode-generator (encoder, ~10KB) and jsQR (decoder, ~40KB) — both run entirely in the browser, no server calls. Same approach as the Google Fonts CDN already in nostr-gen.html.
+Camera access requires HTTPS or localhost (browser policy). On call.completenoobs.com it'll work; on http://-only servers it won't and the page surfaces a clear error.
+"Copy Image" needs ClipboardItem support — works in Chrome/Edge/Firefox/Safari recent versions; older browsers see a friendly fallback message pointing them at Download PNG.
+iOS Safari/Brave camera access works as long as the page is HTTPS.
+-->
+<div class="page">
+
+  <div class="header">
+    <div class="logo">CompleteNoobs · Tools</div>
+    <h1>qrgen</h1>
+    <p>Generate QR codes from text or scan QR codes with your camera.
+       All processing happens in your browser — nothing is sent to any server.</p>
+  </div>
+
+  <!-- Tool -->
+  <div class="card">
+    <div class="card-title">QR Tool</div>
+
+    <div class="mode-tabs">
+      <button class="mode-tab active" onclick="setMode('encode')">Text → QR</button>
+      <button class="mode-tab" onclick="setMode('decode')">QR → Text</button>
+    </div>
+
+    <!-- ENCODE -->
+    <div id="encode-mode">
+      <div class="field">
+        <label>Text or URL</label>
+        <textarea id="encode-text" placeholder="Paste any text, URL, npub, Hive username…" autocomplete="off" spellcheck="false"></textarea>
+        <div class="field-hint">Plain text only. The QR code is not encrypted — anyone who scans it can read its contents.</div>
+      </div>
+
+      <div class="field-grid">
+        <div class="field">
+          <label>Error Correction</label>
+          <select id="ec-level">
+            <option value="L">L — Low (~7%)</option>
+            <option value="M" selected>M — Medium (~15%)</option>
+            <option value="Q">Q — Quartile (~25%)</option>
+            <option value="H">H — High (~30%)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Module Size (px)</label>
+          <input type="number" id="cell-size" value="8" min="2" max="20"/>
+        </div>
+      </div>
+
+      <button class="gen-btn" onclick="generateQR()">⚡ Generate QR Code</button>
+
+      <div class="error-box" id="encode-error"></div>
+
+      <div class="output-section" id="encode-output">
+        <div class="qr-display">
+          <canvas id="qr-canvas"></canvas>
+        </div>
+        <div class="action-row">
+          <button class="action-btn" onclick="downloadQR()">📥 Download PNG</button>
+          <button class="action-btn" onclick="copyQRImage(this)" id="copy-image-btn">⧉ Copy Image</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- DECODE -->
+    <div id="decode-mode" style="display:none;">
+      <div class="info-box">
+        Use your device camera to scan a QR code, or upload an image containing one. Camera access requires HTTPS or localhost (browser security policy).
+      </div>
+
+      <div class="action-row">
+        <button class="action-btn primary" onclick="startCamera()" id="cam-start-btn">📷 Start Camera</button>
+        <button class="action-btn" onclick="stopCamera()" id="cam-stop-btn" style="display:none;">⏹ Stop Camera</button>
+        <label class="action-btn" for="file-input">📁 Upload Image</label>
+        <input type="file" id="file-input" accept="image/*" onchange="decodeImageFile(event)" style="display:none;"/>
+      </div>
+
+      <div class="cam-wrap" id="cam-wrap" style="display:none;">
+        <video id="cam-video" autoplay muted playsinline></video>
+        <div class="scan-frame"></div>
+        <div class="scan-hint">Aim at QR code</div>
+      </div>
+      <canvas id="cam-canvas" style="display:none;"></canvas>
+
+      <div class="error-box" id="decode-error"></div>
+
+      <div class="output-section" id="decode-output">
+        <div class="key-box public">
+          <div class="key-label"><div class="key-dot"></div>Decoded Text</div>
+          <div class="key-value" id="decoded-text">—</div>
+          <button class="copy-btn" onclick="copyDecoded(this)" title="Copy">⧉</button>
+        </div>
+        <div class="action-row" id="open-link-row" style="display:none;">
+          <a id="open-link" target="_blank" rel="noopener" class="action-btn">🔗 Open as Link</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- About -->
+  <div class="card">
+    <div class="card-title">About QR Codes</div>
+    <div class="explainer">
+      <div class="explainer-row">
+        <div class="explainer-icon">📦</div>
+        <div class="explainer-text"><strong>Encoded, not encrypted.</strong> Anyone with a scanner can read the contents. Don't put secrets in a QR code unless the data itself is encrypted first.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">🛡</div>
+        <div class="explainer-text"><strong>Higher error correction</strong> = more redundancy. A code with H (~30%) can still be read with up to ~30% of it damaged or obscured. Use H for printed codes; M is fine for screens.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">📷</div>
+        <div class="explainer-text"><strong>Camera scanning is local.</strong> The camera feed is processed frame-by-frame in your browser — it never leaves your device.</div>
+      </div>
+      <div class="explainer-row">
+        <div class="explainer-icon">⚡</div>
+        <div class="explainer-text"><strong>Common uses:</strong> sharing URLs, Wi-Fi credentials, contact cards, Bitcoin/Lightning addresses, Hive usernames, Nostr npubs, v4call links.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    qrgen · CompleteNoobs Tools · All processing local in your browser<br/>
+    <a href="https://github.com/CompleteNoobs/v4call">github.com/CompleteNoobs/v4call</a>
+  </div>
+
+</div>
+
+<!-- QR encoder (Kazuhiko Arase) — exposes window.qrcode -->
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+<!-- QR decoder — exposes window.jsQR -->
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+<script>
+let currentMode = 'encode';
+let camStream   = null;
+let scanRAF     = null;
+
+// ── Mode switching ────────────────────────────────────────────────────────────
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('.mode-tab').forEach((t, i) => {
+    t.classList.toggle('active', (mode === 'encode' && i === 0) || (mode === 'decode' && i === 1));
+  });
+  document.getElementById('encode-mode').style.display = mode === 'encode' ? 'block' : 'none';
+  document.getElementById('decode-mode').style.display = mode === 'decode' ? 'block' : 'none';
+  if (mode !== 'decode') stopCamera();
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = '⚠ ' + msg;
+  el.classList.add('shown');
+}
+function clearError(id) {
+  const el = document.getElementById(id);
+  el.textContent = '';
+  el.classList.remove('shown');
+}
+
+// ── ENCODE: text → QR ─────────────────────────────────────────────────────────
+function generateQR() {
+  clearError('encode-error');
+  const text     = document.getElementById('encode-text').value;
+  const ec       = document.getElementById('ec-level').value;
+  const cellSize = Math.max(2, Math.min(20, parseInt(document.getElementById('cell-size').value, 10) || 8));
+
+  if (!text) {
+    showError('encode-error', 'Enter some text or a URL to encode.');
+    return;
+  }
+
+  let qr;
+  try {
+    // 0 = auto type-number (smallest version that fits the data)
+    qr = qrcode(0, ec);
+    qr.addData(text);
+    qr.make();
+  } catch (e) {
+    showError('encode-error', 'Could not generate QR: ' + (e.message || e) + '. Try a higher error-correction level OR shorter text.');
+    return;
+  }
+
+  const count  = qr.getModuleCount();
+  const margin = 4; // standard quiet zone in modules
+  const size   = (count + margin * 2) * cellSize;
+
+  const canvas = document.getElementById('qr-canvas');
+  canvas.width  = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < count; r++) {
+    for (let c = 0; c < count; c++) {
+      if (qr.isDark(r, c)) {
+        ctx.fillRect((c + margin) * cellSize, (r + margin) * cellSize, cellSize, cellSize);
+      }
+    }
+  }
+
+  document.getElementById('encode-output').classList.add('visible');
+}
+
+function downloadQR() {
+  const canvas = document.getElementById('qr-canvas');
+  if (!canvas.width) return;
+  const link = document.createElement('a');
+  link.download = 'qrcode.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+async function copyQRImage(btn) {
+  const canvas = document.getElementById('qr-canvas');
+  if (!canvas.width) return;
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    showError('encode-error', 'Image clipboard not supported in this browser. Use "Download PNG" instead.');
+    return;
+  }
+  try {
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+    btn.textContent = '✓ Copied';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '⧉ Copy Image'; btn.classList.remove('copied'); }, 2000);
+  } catch (e) {
+    showError('encode-error', 'Could not copy image: ' + (e.message || e));
+  }
+}
+
+// ── DECODE: camera → text ─────────────────────────────────────────────────────
+async function startCamera() {
+  clearError('decode-error');
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+    showError('decode-error', 'Camera API not available in this browser. Try uploading an image instead.');
+    return;
+  }
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+    const video = document.getElementById('cam-video');
+    video.srcObject = camStream;
+    document.getElementById('cam-wrap').style.display      = 'block';
+    document.getElementById('cam-start-btn').style.display = 'none';
+    document.getElementById('cam-stop-btn').style.display  = 'inline-flex';
+    requestAnimationFrame(scanLoop);
+  } catch (e) {
+    showError('decode-error', 'Could not access camera: ' + (e.message || e) + '. On iOS Safari/Brave, camera access needs HTTPS.');
+  }
+}
+
+function scanLoop() {
+  const video = document.getElementById('cam-video');
+  if (!camStream) return;
+  if (video.readyState === video.HAVE_ENOUGH_DATA && video.videoWidth > 0) {
+    const canvas = document.getElementById('cam-canvas');
+    // Downscale large frames for faster scanning (jsQR is CPU-heavy on huge images)
+    const maxDim = 640;
+    const scale  = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width  = Math.floor(video.videoWidth  * scale);
+    canvas.height = Math.floor(video.videoHeight * scale);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+    if (code && code.data) {
+      showDecoded(code.data);
+      stopCamera();
+      return;
+    }
+  }
+  scanRAF = requestAnimationFrame(scanLoop);
+}
+
+function stopCamera() {
+  if (scanRAF) { cancelAnimationFrame(scanRAF); scanRAF = null; }
+  if (camStream) {
+    camStream.getTracks().forEach(t => t.stop());
+    camStream = null;
+  }
+  const video = document.getElementById('cam-video');
+  if (video) video.srcObject = null;
+  document.getElementById('cam-wrap').style.display      = 'none';
+  document.getElementById('cam-start-btn').style.display = 'inline-flex';
+  document.getElementById('cam-stop-btn').style.display  = 'none';
+}
+
+function decodeImageFile(ev) {
+  clearError('decode-error');
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = ''; // allow re-uploading the same file
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    const canvas = document.createElement('canvas');
+    // Cap size for speed
+    const maxDim = 1600;
+    const scale  = Math.min(1, maxDim / Math.max(img.width, img.height));
+    canvas.width  = Math.floor(img.width  * scale);
+    canvas.height = Math.floor(img.height * scale);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: 'attemptBoth' });
+    if (code && code.data) {
+      showDecoded(code.data);
+    } else {
+      showError('decode-error', 'No QR code found in that image. Try a clearer shot or one with the QR centred.');
+    }
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    showError('decode-error', 'Could not load that image file.');
+  };
+  img.src = url;
+}
+
+function showDecoded(text) {
+  document.getElementById('decoded-text').textContent = text;
+  document.getElementById('decode-output').classList.add('visible');
+  const linkRow = document.getElementById('open-link-row');
+  if (/^https?:\/\//i.test(text)) {
+    document.getElementById('open-link').href = text;
+    linkRow.style.display = 'flex';
+  } else {
+    linkRow.style.display = 'none';
+  }
+}
+
+function copyDecoded(btn) {
+  const text = document.getElementById('decoded-text').textContent;
+  if (!text || text === '—') return;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = '✓';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = '⧉'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+
+window.addEventListener('beforeunload', stopCamera);
+</script>
+</body>
+</html>
