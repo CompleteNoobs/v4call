@@ -459,6 +459,7 @@ MIT — see [LICENSE](LICENSE) for full text.
 - **In-repo deploy guide:** [WalkThrough.wiki](WalkThrough.wiki)
 - **Project context:** [CLAUDE.md](CLAUDE.md)
 - **Federation protocol spec:** [FEDERATION-BUILD-SPEC.md](FEDERATION-BUILD-SPEC.md)
+- **Nostr integration design notes:** [NOSTR-DESIGN-NOTES.md](NOSTR-DESIGN-NOTES.md) — design captured ahead of build; not yet implemented (post-v0.17 / post-HiveSigner candidate)
 - **GitHub:** https://github.com/CompleteNoobs/v4call
 - **Hive signup:** https://signup.hive.io
 - **Hive Keychain:** https://hive-keychain.com
