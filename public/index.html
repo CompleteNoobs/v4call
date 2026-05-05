@@ -285,6 +285,25 @@
     .dm-alert-user .name{color:var(--purple);}
     .dm-alert-user .count{color:var(--subtext);}
 
+    /* v0.16.9 — Missed-call popup with refund button */
+    #missed-calls-modal{display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;}
+    #missed-calls-modal.active{display:flex;}
+    .missed-calls-box{background:var(--surface);border:1px solid var(--green);border-radius:12px;padding:24px;width:380px;max-width:92vw;display:flex;flex-direction:column;gap:12px;font-family:'IBM Plex Mono',monospace;}
+    .missed-calls-box h3{font-size:0.9rem;color:var(--green);}
+    .missed-calls-box p{font-size:0.74rem;color:var(--subtext);line-height:1.6;}
+    #missed-calls-list{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow-y:auto;}
+    .missed-call-row{display:flex;flex-direction:column;gap:4px;padding:8px 10px;background:rgba(74,222,128,0.06);border:1px solid rgba(74,222,128,0.2);border-radius:6px;font-size:0.72rem;}
+    .missed-call-row .mc-line1{display:flex;justify-content:space-between;align-items:center;gap:8px;}
+    .missed-call-row .mc-caller{color:var(--green);font-weight:600;}
+    .missed-call-row .mc-status{font-size:0.62rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;}
+    .missed-call-row .mc-line2{display:flex;justify-content:space-between;align-items:center;gap:8px;color:var(--subtext);}
+    .missed-call-row .mc-amount{color:var(--accent);}
+    .missed-call-row button{padding:5px 11px;background:var(--green);color:#0a0c0f;border:none;border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.66rem;transition:opacity 0.2s;}
+    .missed-call-row button:hover{opacity:0.85;}
+    .missed-call-row button:disabled{opacity:0.4;cursor:not-allowed;}
+    .missed-call-row .mc-refunded{color:var(--green);font-size:0.66rem;font-weight:600;padding:5px 11px;}
+    .missed-call-row .mc-failed{color:var(--danger);font-size:0.62rem;}
+
     /* Ephemeral room warning */
     #room-ephemeral-warning{padding:6px 14px;background:rgba(245,166,35,0.06);border-bottom:1px solid rgba(245,166,35,0.15);font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--accent);line-height:1.5;flex-shrink:0;}
 
@@ -770,6 +789,16 @@
     <p id="dm-alert-text">You have new messages.</p>
     <div id="dm-alert-users"></div>
     <button class="primary" onclick="dismissDmAlert()" style="font-size:0.82rem;padding:9px;">OK</button>
+  </div>
+</div>
+
+<!-- v0.16.9 — MISSED CALLS POPUP -->
+<div id="missed-calls-modal">
+  <div class="missed-calls-box">
+    <h3>📞 Missed Calls — Ring Fees Pending</h3>
+    <p>Each caller paid a ring fee that's still in escrow. Click <strong>Refund</strong> to send it back, or <strong>Close</strong> to keep the fee.</p>
+    <div id="missed-calls-list"></div>
+    <button class="primary" onclick="dismissMissedCallsAlert()" style="font-size:0.82rem;padding:9px;">Close</button>
   </div>
 </div>
 
@@ -1841,6 +1870,96 @@ function dismissDmAlert() {
   document.getElementById('dm-alert-modal').classList.remove('active');
   socket.emit('dm-mark-read');
 }
+
+// ── v0.16.9 — Missed-call popup with refund button ─────────────────────────
+socket.on('missed-calls-summary', ({ calls }) => {
+  if (!Array.isArray(calls) || calls.length === 0) return;
+  const modal   = document.getElementById('missed-calls-modal');
+  const listEl  = document.getElementById('missed-calls-list');
+  listEl.innerHTML = '';
+  calls.forEach(c => listEl.appendChild(renderMissedCallRow(c)));
+  modal.classList.add('active');
+});
+
+function renderMissedCallRow(c) {
+  const row = document.createElement('div');
+  row.className = 'missed-call-row';
+  row.dataset.callId = c.call_id;
+
+  const when = c.started_at ? formatMissedCallTime(c.started_at) : '';
+  const cur  = c.ring_currency || 'HBD';
+  const amt  = parseFloat(c.ring_paid).toFixed(3);
+
+  row.innerHTML = `
+    <div class="mc-line1">
+      <span class="mc-caller">📞 @${escapeHtml(c.caller)}</span>
+      <span class="mc-status">${escapeHtml(c.status)}</span>
+    </div>
+    <div class="mc-line2">
+      <span>${escapeHtml(when)} · paid <span class="mc-amount">${amt} ${escapeHtml(cur)}</span></span>
+      <button class="mc-refund-btn">Refund</button>
+    </div>
+  `;
+  row.querySelector('.mc-refund-btn').addEventListener('click', () => refundMissedCall(c.call_id, row));
+  return row;
+}
+
+function formatMissedCallTime(iso) {
+  try {
+    const d = new Date(iso.replace(' ', 'T') + 'Z');
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString([], { month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+  } catch(e) { return iso; }
+}
+
+function refundMissedCall(callId, rowEl) {
+  const btn = rowEl.querySelector('.mc-refund-btn');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Refunding…';
+  socket.emit('refund-ring-fee', { callId }, (resp) => {
+    if (resp && resp.success) {
+      const cur = resp.currency || 'HBD';
+      const amt = parseFloat(resp.amount).toFixed(3);
+      const line2 = rowEl.querySelector('.mc-line2');
+      if (line2) {
+        const replacement = document.createElement('span');
+        replacement.className = 'mc-refunded';
+        replacement.textContent = `✓ Refunded ${amt} ${cur}`;
+        btn.replaceWith(replacement);
+      }
+      // Auto-collapse the row after a moment to keep the popup tidy.
+      setTimeout(() => {
+        rowEl.style.transition = 'opacity 0.4s';
+        rowEl.style.opacity = '0.4';
+      }, 1500);
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Refund';
+      const line2 = rowEl.querySelector('.mc-line2');
+      if (line2) {
+        let err = line2.querySelector('.mc-failed');
+        if (!err) {
+          err = document.createElement('span');
+          err.className = 'mc-failed';
+          line2.appendChild(err);
+        }
+        err.textContent = `⚠ ${(resp && resp.reason) || 'Refund failed'}`;
+      }
+    }
+  });
+}
+
+function dismissMissedCallsAlert() {
+  document.getElementById('missed-calls-modal').classList.remove('active');
+}
+
+// Caller-side notification when the callee refunds the ring fee.
+socket.on('ring-fee-refunded', ({ callId, by, amount, currency }) => {
+  const cur = currency || 'HBD';
+  const amt = parseFloat(amount).toFixed(3);
+  addLobbyMsg({ type: 'system', text: `↩️ @${by} refunded your ring fee of ${amt} ${cur} (call ${callId}).` });
+});
 
 // ── DM previews on login ─────────────────────────────────────
 socket.on('dm-previews', (previews) => {
