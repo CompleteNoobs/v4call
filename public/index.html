@@ -1638,8 +1638,15 @@ async function openDmPanel(username) {
   if (!rateResp.found || rateResp.free || options.length === 0) {
     dmPanelRate     = 0;
     dmPanelCurrency = 'HBD';
-    rateEl.textContent  = 'Free';
-    rateEl.className    = 'free';
+    if (rateResp.belowFloor) {
+      rateEl.textContent  = `⚠ rates below ${(0.001).toFixed(3)} min — sending free`;
+      rateEl.className    = 'free';
+      rateEl.title        = `@${username}'s rate post sets a rate below this server's processable minimum (0.001). The message will be sent free until they raise the rate.`;
+    } else {
+      rateEl.textContent  = 'Free';
+      rateEl.className    = 'free';
+      rateEl.title        = '';
+    }
     sendBtn.textContent = 'Send →';
   } else {
     // Default to recommended (first) option
@@ -2167,7 +2174,9 @@ async function initiateCall(callee, callType = 'voice') {
     if (!response.found || response.free) {
       const msg = !response.found
         ? `@${callee} has no call rates set — calling for free…`
-        : `@${callee}'s rates show free for this time window — calling…`;
+        : response.belowFloor
+          ? `⚠ @${callee}'s call rates are below this server's processable minimum (0.001) — calling for free.`
+          : `@${callee}'s rates show free for this time window — calling…`;
       addLobbyMsg({type:'system',text:msg});
       proceedWithCall(callee, callType, null);
       return;
