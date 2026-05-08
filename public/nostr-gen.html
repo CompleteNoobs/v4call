@@ -266,20 +266,65 @@
     .also-hex { margin-top: 8px; }
     .also-hex summary {
       font-family: var(--mono);
-      font-size: 0.65rem;
+      font-size: 0.7rem;
       color: var(--muted);
       cursor: pointer;
       user-select: none;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.03em;
     }
     .also-hex summary:hover { color: var(--text); }
+    .also-hex summary code {
+      background: var(--border);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--cyan);
+      font-size: 0.95em;
+    }
+    .hex-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 6px;
+    }
     .hex-val {
       font-family: var(--mono);
-      font-size: 0.72rem;
-      color: var(--muted);
+      font-size: 0.78rem;
+      color: var(--text);
       word-break: break-all;
+      line-height: 1.5;
+      flex: 1;
+      background: rgba(255,255,255,0.02);
+      padding: 6px 8px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+    .key-box.public .hex-val { color: var(--cyan); }
+    .key-box.secret .hex-val { color: var(--red); }
+    .hex-copy {
+      background: var(--border);
+      border: none;
+      border-radius: 5px;
+      color: var(--muted);
+      width: 28px;
+      height: 28px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      flex-shrink: 0;
+      transition: background 0.2s, color 0.2s;
+    }
+    .hex-copy:hover { background: var(--purple); color: #fff; }
+    .hex-copy.copied { background: var(--green); color: #fff; }
+    .hex-hint {
+      font-size: 0.7rem;
+      color: var(--muted);
       margin-top: 6px;
       line-height: 1.5;
+    }
+    .hex-hint code {
+      background: var(--border);
+      padding: 1px 5px;
+      border-radius: 3px;
+      color: var(--text);
     }
 
     /* Warning */
@@ -466,20 +511,28 @@
       <div class="key-box secret">
         <div class="key-label"><div class="key-dot"></div>Private Key (nsec) — KEEP SECRET</div>
         <div class="key-value" id="out-nsec">—</div>
-        <button class="copy-btn" onclick="copyKey('out-nsec', this)" title="Copy">⧉</button>
+        <button class="copy-btn" onclick="copyKey('out-nsec', this)" title="Copy nsec">⧉</button>
         <details class="also-hex">
-          <summary>Show hex format</summary>
-          <div class="hex-val" id="out-privhex">—</div>
+          <summary>Hex format (privkey)</summary>
+          <div class="hex-row">
+            <div class="hex-val" id="out-privhex">—</div>
+            <button class="hex-copy" onclick="copyKey('out-privhex', this)" title="Copy hex">⧉</button>
+          </div>
+          <div class="hex-hint">⚠ Same secret as the nsec, different encoding. Treat with the same care.</div>
         </details>
       </div>
 
       <div class="key-box public">
         <div class="key-label"><div class="key-dot"></div>Public Key (npub) — Share freely</div>
         <div class="key-value" id="out-npub">—</div>
-        <button class="copy-btn" onclick="copyKey('out-npub', this)" title="Copy">⧉</button>
-        <details class="also-hex">
-          <summary>Show hex format</summary>
-          <div class="hex-val" id="out-pubhex">—</div>
+        <button class="copy-btn" onclick="copyKey('out-npub', this)" title="Copy npub">⧉</button>
+        <details class="also-hex" open>
+          <summary>Hex pubkey — needed for relay whitelists (e.g. <code>pubkey_whitelist</code>)</summary>
+          <div class="hex-row">
+            <div class="hex-val" id="out-pubhex">—</div>
+            <button class="hex-copy" onclick="copyKey('out-pubhex', this)" title="Copy hex">⧉</button>
+          </div>
+          <div class="hex-hint">Most relays use bech32 (<code>npub1...</code>) for display, but their config files (e.g. <code>nostr-rs-relay</code>'s <code>config.toml</code>) need the 64-char lowercase hex form. Same key, different encoding.</div>
         </details>
       </div>
     </div>

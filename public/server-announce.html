@@ -135,6 +135,45 @@
     </div>
 
     <div class="card">
+      <div class="card-title">NOSTR <span style="font-size:0.65rem;color:var(--muted);font-weight:normal;letter-spacing:0;">— optional, for v0.18.5+ federation discovery layer</span></div>
+      <div class="info-box" style="font-size:0.72rem;">
+        Cross-reference your server's Nostr identity here so other v4call servers can find you over Nostr too. Skip this card entirely if you don't have a Nostr keypair for your server yet — the announce post is fully valid without it.
+        <br>Need a keypair? Use <a href="/nostr-gen.html" style="color:var(--blue);">nostr-gen.html</a> (browser-only, keys never leave your machine).
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (npub)</label>
+        <input id="nostr-npub" type="text" placeholder="npub1..." autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The bech32 form. Hex auto-fills below if you paste a valid npub.</div>
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (hex)</label>
+        <input id="nostr-hex" type="text" placeholder="64-char lowercase hex (auto-fills from npub)" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">Same key, different encoding. Many relays' config files (e.g. <code>nostr-rs-relay</code>'s <code>pubkey_whitelist</code>) need the hex form.</div>
+      </div>
+      <div class="slabel">RELAYS — up to 5 (any blank rows are skipped)</div>
+      <div class="field">
+        <label>NOSTR RELAY 1</label>
+        <input id="nostr-relay-1" type="text" value="wss://nostr.v4call.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 2</label>
+        <input id="nostr-relay-2" type="text" value="wss://nostr.hive-book.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 3</label>
+        <input id="nostr-relay-3" type="text" placeholder="wss://your-third-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 4</label>
+        <input id="nostr-relay-4" type="text" placeholder="wss://your-fourth-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 5</label>
+        <input id="nostr-relay-5" type="text" placeholder="wss://your-fifth-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">POST OPTIONS</div>
       <div class="field">
         <label>POST TAGS (comma separated)</label>
@@ -198,6 +237,69 @@
 const FIXED_TITLE = 'v4call-server';
 const APP_NAME    = 'v4call-announce/0.3';
 
+// ── Bech32 (npub <-> hex) — same primitives as nostr-gen.html ─────────
+const BECH32_CHARSET   = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_GENERATOR = [0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3];
+function bech32Polymod(values) {
+  let chk = 1;
+  for (let p = 0; p < values.length; p++) {
+    const top = chk >> 25;
+    chk = (chk & 0x1ffffff) << 5 ^ values[p];
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= BECH32_GENERATOR[i];
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const ret = [];
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) >> 5);
+  ret.push(0);
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) & 31);
+  return ret;
+}
+function bech32CreateChecksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]);
+  const polymod = bech32Polymod(values) ^ 1;
+  const ret = [];
+  for (let i = 0; i < 6; i++) ret.push((polymod >> (5*(5-i))) & 31);
+  return ret;
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0, bits = 0;
+  const ret = [], maxv = (1 << toBits) - 1;
+  for (let i = 0; i < data.length; i++) {
+    acc = (acc << fromBits) | data[i];
+    bits += fromBits;
+    while (bits >= toBits) { bits -= toBits; ret.push((acc >> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+  else if (!pad && (bits >= fromBits || ((acc << (toBits - bits)) & maxv))) return null;
+  return ret;
+}
+function hexToNpub(hexStr) {
+  const bytes = hexStr.match(/.{1,2}/g).map(b => parseInt(b, 16));
+  const data  = convertBits(bytes, 8, 5, true);
+  const combined = data.concat(bech32CreateChecksum('npub', data));
+  return 'npub1' + combined.map(d => BECH32_CHARSET[d]).join('');
+}
+function npubToHex(s) {
+  s = s.toLowerCase().trim();
+  if (!s.startsWith('npub1')) throw new Error('not an npub');
+  const sep = s.lastIndexOf('1');
+  if (sep < 1 || sep + 7 > s.length) throw new Error('bad bech32 format');
+  const hrp  = s.slice(0, sep);
+  if (hrp !== 'npub') throw new Error('hrp mismatch');
+  const data = [];
+  for (let i = sep + 1; i < s.length; i++) {
+    const idx = BECH32_CHARSET.indexOf(s[i]);
+    if (idx < 0) throw new Error('invalid char in npub');
+    data.push(idx);
+  }
+  if (bech32Polymod(bech32HrpExpand(hrp).concat(data)) !== 1) throw new Error('bad checksum');
+  const bytes = convertBits(data.slice(0, -6), 5, 8, false);
+  if (!bytes || bytes.length !== 32) throw new Error('decoded length not 32 bytes');
+  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // ── Utilities ─────────────────────────────────────────────
 function nowIsoUtc() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -213,6 +315,9 @@ function showOk(msg)  { const b=document.getElementById('ok-box');  b.textConten
 // ── Collect + validate ───────────────────────────────────
 function collect() {
   const domain = document.getElementById('domain').value.trim().toLowerCase();
+  const relays = [1,2,3,4,5]
+    .map(i => document.getElementById('nostr-relay-' + i).value.trim())
+    .filter(Boolean);
   return {
     account:       document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, ''),
     domain:        domain,
@@ -223,7 +328,10 @@ function collect() {
     software:      document.getElementById('software').value.trim() || 'v4call',
     protocol:      document.getElementById('protocol').value.trim() || '0.3',
     intro:         document.getElementById('intro').value.trim(),
-    tags:          document.getElementById('tags').value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+    tags:          document.getElementById('tags').value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
+    nostr_npub:    document.getElementById('nostr-npub').value.trim(),
+    nostr_hex:     document.getElementById('nostr-hex').value.trim().toLowerCase(),
+    nostr_relays:  relays
   };
 }
 
@@ -239,6 +347,12 @@ function validate(f) {
   if (!/^[a-z0-9.-]+$/.test(f.domain)) return 'Domain must be lowercase, no scheme or path.';
   if (!f.fed_ws.startsWith('ws://') && !f.fed_ws.startsWith('wss://')) return 'Federation WS URL must start with ws:// or wss://';
   if (f.tags[0] !== 'v4call-server') return 'First tag must be "v4call-server" — that\'s what discovery searches for.';
+  // Nostr fields are optional. Only validate format if something was provided.
+  if (f.nostr_npub && !f.nostr_npub.startsWith('npub1')) return 'NOSTR npub must start with "npub1".';
+  if (f.nostr_hex  && !/^[0-9a-f]{64}$/.test(f.nostr_hex)) return 'NOSTR hex pubkey must be exactly 64 lowercase hex characters.';
+  for (const r of f.nostr_relays) {
+    if (!r.startsWith('ws://') && !r.startsWith('wss://')) return `NOSTR relay "${r}" must start with ws:// or wss://`;
+  }
   return null;
 }
 
@@ -246,7 +360,7 @@ function validate(f) {
 function buildBody(f, issued) {
   const intro = f.intro || `This post announces a v4call federation server operated by @${f.account} at **${f.domain}**. v4call is a decentralised paid video/voice/text communication platform built on the Hive blockchain. Users set their own rates, callers pay with HBD or custom Hive-Engine tokens, and unused credit is refunded automatically.`;
 
-  const block = [
+  const lines = [
     '[V4CALL-SERVER-V1]',
     `DOMAIN: ${f.domain}`,
     `HIVE-ACCOUNT: ${f.account}`,
@@ -255,10 +369,14 @@ function buildBody(f, issued) {
     `FEDERATION-WS: ${f.fed_ws}`,
     `VERIFY-URL: ${f.verify_url}`,
     `SOFTWARE: ${f.software}`,
-    `PROTOCOL: ${f.protocol}`,
-    `DECLARED: ${issued}`,
-    '[/V4CALL-SERVER-V1]'
-  ].join('\n');
+    `PROTOCOL: ${f.protocol}`
+  ];
+  if (f.nostr_npub)         lines.push(`NOSTR-PUBKEY: ${f.nostr_npub}`);
+  if (f.nostr_hex)          lines.push(`NOSTR-PUBKEY-HEX: ${f.nostr_hex}`);
+  if (f.nostr_relays.length) lines.push(`NOSTR-RELAYS: ${f.nostr_relays.join(', ')}`);
+  lines.push(`DECLARED: ${issued}`);
+  lines.push('[/V4CALL-SERVER-V1]');
+  const block = lines.join('\n');
 
   // Four-space-indented = markdown code block, safe inside a JS template.
   const blockIndented = block.split('\n').map(l => '    ' + l).join('\n');
@@ -314,20 +432,27 @@ function postToHive() {
   const permlink  = permlinkFor(Date.now());
   const parentTag = f.tags[0]; // "v4call-server"
 
+  const v4callMeta = {
+    protocol:      f.protocol,
+    software:      f.software,
+    domain:        f.domain,
+    verify_url:    f.verify_url,
+    federation_ws: f.fed_ws,
+    escrow:        f.escrow,
+    fee_account:   f.fee_account,
+    declared:      issued
+  };
+  if (f.nostr_npub || f.nostr_hex || f.nostr_relays.length) {
+    v4callMeta.nostr = {};
+    if (f.nostr_npub)          v4callMeta.nostr.pubkey     = f.nostr_npub;
+    if (f.nostr_hex)           v4callMeta.nostr.pubkey_hex = f.nostr_hex;
+    if (f.nostr_relays.length) v4callMeta.nostr.relays     = f.nostr_relays;
+  }
   const jsonMeta = {
     tags:   f.tags,
     app:    APP_NAME,
     format: 'markdown',
-    v4call: {
-      protocol:      f.protocol,
-      software:      f.software,
-      domain:        f.domain,
-      verify_url:    f.verify_url,
-      federation_ws: f.fed_ws,
-      escrow:        f.escrow,
-      fee_account:   f.fee_account,
-      declared:      issued
-    }
+    v4call: v4callMeta
   };
 
   const btn = document.getElementById('post-btn');
@@ -386,12 +511,48 @@ function downloadBody() {
   set('fed-ws',       'ws');
   set('software',     'software');
   set('protocol',     'protocol');
+  set('nostr-npub',   'nostr_npub');
+  set('nostr-hex',    'nostr_hex');
+  // Optional: ?nostr_relays=wss://a,wss://b — distributes across relay-1..5
+  const rs = p.get('nostr_relays');
+  if (rs) rs.split(',').slice(0,5).forEach((r, i) => {
+    const el = document.getElementById('nostr-relay-' + (i+1));
+    if (el && r.trim()) el.value = r.trim();
+  });
 })();
 
 // ── Live preview as the user types ────────────────────────
-['hive-account','domain','escrow','fee-account','fed-ws','software','protocol','intro','tags'].forEach(id => {
+[
+  'hive-account','domain','escrow','fee-account','fed-ws','software','protocol','intro','tags',
+  'nostr-npub','nostr-hex',
+  'nostr-relay-1','nostr-relay-2','nostr-relay-3','nostr-relay-4','nostr-relay-5'
+].forEach(id => {
   document.getElementById(id).addEventListener('input', updatePreview);
 });
+
+// ── Auto-sync npub <-> hex (only updates the OTHER field; user-typed
+//    field is left alone so we never fight the cursor)
+document.getElementById('nostr-npub').addEventListener('input', (e) => {
+  const v = e.target.value.trim();
+  if (v.startsWith('npub1') && v.length >= 60) {
+    try {
+      const hex = npubToHex(v);
+      const hexField = document.getElementById('nostr-hex');
+      if (hexField.value.trim().toLowerCase() !== hex) hexField.value = hex;
+    } catch {}
+  }
+});
+document.getElementById('nostr-hex').addEventListener('input', (e) => {
+  const v = e.target.value.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(v)) {
+    try {
+      const npub = hexToNpub(v);
+      const npubField = document.getElementById('nostr-npub');
+      if (npubField.value.trim() !== npub) npubField.value = npub;
+    } catch {}
+  }
+});
+
 updatePreview();
 
 // ── Keychain presence indicator ───────────────────────────
