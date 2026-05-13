@@ -215,9 +215,26 @@
 
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
 
-      <div class="slabel">FALLBACK · MANUAL POST</div>
+      <div class="slabel">FALLBACK · POSTING KEY PASTE (signs + broadcasts via dhive)</div>
       <div class="field-hint" style="margin-bottom:10px;">
-        If Keychain isn't available, copy or download the body below and paste it into peakd.com / hive.blog with the title <code>v4call-server</code> and the tags shown above.
+        Use this if Keychain isn't installed or is misbehaving. The page constructs
+        the post operation locally, signs it with your pasted posting key, and
+        broadcasts it directly to a Hive node. The key never leaves your browser.
+      </div>
+      <div class="field">
+        <label>HIVE POSTING PRIVATE KEY (starts with <code>5J</code>)</label>
+        <input id="posting-key" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint">In memory only until this tab closes. Wiped after a successful broadcast.</div>
+      </div>
+      <button class="secondary" id="post-key-btn" onclick="postWithKey()">Post to Hive with Posting Key →</button>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
+
+      <div class="slabel">FALLBACK · MANUAL POST (copy + paste into peakd / hive.blog)</div>
+      <div class="field-hint" style="margin-bottom:10px;">
+        Last-resort fallback: copy or download the body below and paste it into
+        peakd.com / hive.blog with the title <code>v4call-server</code> and the
+        tags shown above.
       </div>
       <div class="btn-row">
         <button class="secondary" onclick="copyBody()">📋 Copy body</button>
@@ -250,6 +267,7 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@hiveio/dhive@1.3.2/dist/dhive.js"></script>
 <script type="module">
 // ── nostr-tools loader — used to verify pasted attestation events before posting.
 import {
@@ -631,6 +649,100 @@ function postToHive() {
   );
 }
 
+// ── Posting key paste fallback ────────────────────────────
+// Signs and broadcasts the Hive post operation directly via dhive when
+// Keychain is unavailable or buggy. The posting key lives only in this
+// tab's memory; it's wiped after a successful broadcast.
+async function postWithKey() {
+  showErr(''); showOk('');
+  const f = collect();
+  const err = validate(f);
+  if (err) return showErr(err);
+
+  const keyStr = document.getElementById('posting-key').value.trim();
+  if (!keyStr) return showErr('Paste your Hive posting private key first.');
+
+  if (typeof dhive === 'undefined') {
+    return showErr('dhive library failed to load — check internet / CDN.');
+  }
+
+  let priv;
+  try { priv = dhive.PrivateKey.fromString(keyStr); }
+  catch (e) { return showErr(`Invalid posting key: ${e.message}`); }
+
+  const issued    = nowIsoUtc();
+  const body      = buildBody(f, issued);
+  const permlink  = permlinkFor(Date.now());
+  const parentTag = f.tags[0]; // "v4call-server"
+
+  // Build the Hive json_metadata exactly like the Keychain path
+  const v4callMeta = {
+    protocol:      f.protocol,
+    software:      f.software,
+    domain:        f.domain,
+    verify_url:    f.verify_url,
+    federation_ws: f.fed_ws,
+    escrow:        f.escrow,
+    fee_account:   f.fee_account,
+    declared:      issued
+  };
+  if (f.nostr_npub || f.nostr_hex || f.nostr_relays.length || f.nostr_attestation) {
+    v4callMeta.nostr = {};
+    if (f.nostr_npub)          v4callMeta.nostr.pubkey      = f.nostr_npub;
+    if (f.nostr_hex)           v4callMeta.nostr.pubkey_hex  = f.nostr_hex;
+    if (f.nostr_relays.length) v4callMeta.nostr.relays      = f.nostr_relays;
+    if (f.nostr_attestation)   v4callMeta.nostr.attestation = f.nostr_attestation;
+  }
+  const jsonMeta = {
+    tags:   f.tags,
+    app:    APP_NAME,
+    format: 'markdown',
+    v4call: v4callMeta
+  };
+
+  const btn = document.getElementById('post-key-btn');
+  btn.disabled = true; btn.textContent = 'Broadcasting…';
+
+  // Multi-node fallback for robustness
+  const NODES = [
+    'https://api.hive.blog',
+    'https://api.deathwing.me',
+    'https://hive-api.arcange.eu',
+    'https://api.openhive.network'
+  ];
+
+  let lastErr = null;
+  for (const node of NODES) {
+    try {
+      const client = new dhive.Client(node);
+      const op = ['comment', {
+        parent_author:   '',
+        parent_permlink: parentTag,
+        author:          f.account,
+        permlink:        permlink,
+        title:           FIXED_TITLE,
+        body:            body,
+        json_metadata:   JSON.stringify(jsonMeta)
+      }];
+      const result = await client.broadcast.sendOperations([op], priv);
+      // Success — wipe the key + report
+      document.getElementById('posting-key').value = '';
+      btn.disabled = false; btn.textContent = 'Post to Hive with Posting Key →';
+      showOk(`✓ Posted to Hive as @${f.account}/${permlink} via ${node} — tx ${result.id}`);
+      document.getElementById('preview-status').textContent = 'posted';
+      document.getElementById('preview-status').style.color = 'var(--green)';
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`broadcast via ${node} failed:`, e.message);
+      // Try next node
+    }
+  }
+
+  btn.disabled = false; btn.textContent = 'Post to Hive with Posting Key →';
+  showErr(`Broadcast failed on all Hive nodes. Last error: ${lastErr ? lastErr.message : 'unknown'}`);
+}
+
 // ── Copy / Download fallback ─────────────────────────────
 function copyBody() {
   const text = document.getElementById('preview-area').value;
@@ -714,7 +826,7 @@ setTimeout(() => {
     el.textContent = '✓ Keychain detected — ready to post.';
     el.style.color = 'var(--green)';
   } else {
-    el.textContent = '⚠ Keychain not detected. Install from hive-keychain.com, or use Copy/Download below.';
+    el.textContent = '⚠ Keychain not detected. Paste your posting key below to broadcast directly, OR copy/download the body for manual posting.';
     el.style.color = 'var(--accent)';
     btn.disabled = true;
   }
