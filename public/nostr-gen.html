@@ -599,6 +599,16 @@
 
 </div>
 
+<script type="module">
+// ── nostr-tools loader ────────────────────────────────────────────────────────
+// Same lib + version as server-sign.html / rate-editor.html, so the npub we
+// emit here is guaranteed to match what those pages derive from the same nsec.
+// (The previous in-file BigInt secp256k1 had a pointAdd edge-case bug that
+// produced wrong x-coordinates → npubs that did not match their nsec.)
+import { getPublicKey, nip19 } from 'https://esm.sh/nostr-tools@2.7.2';
+window.nGate = { getPublicKey, nip19, ready: true };
+document.dispatchEvent(new CustomEvent('nGate-ready'));
+</script>
 <script>
 // ── Bech32 encoding ───────────────────────────────────────────────────────────
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
@@ -649,16 +659,6 @@ function encodeBech32(hrp, hexStr) {
   return bech32Encode(hrp, data);
 }
 
-// ── secp256k1 public key derivation ──────────────────────────────────────────
-// Uses the browser's SubtleCrypto to derive the public key from a private key
-// secp256k1 via ECDSA — we extract the raw public key point
-async function privkeyToPublicKeyHex(privHex) {
-  // Import as raw private key for ECDH (secp256k1 = P-256 is NOT the same,
-  // but browser SubtleCrypto doesn't support secp256k1 natively.
-  // We use the noble-secp256k1 library loaded below instead.
-  return await nobleGetPublicKey(privHex);
-}
-
 // ── SHA-256 ───────────────────────────────────────────────────────────────────
 async function sha256(message) {
   const encoder = new TextEncoder();
@@ -672,57 +672,13 @@ async function sha256Bytes(bytes) {
   return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2,'0')).join('');
 }
 
-// ── noble-secp256k1 (inlined minimal implementation) ─────────────────────────
-// Minimal secp256k1 for public key derivation only
-// Based on the tiny-secp256k1 approach using BigInt arithmetic
-const SECP256K1 = {
-  p: 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2Fn,
-  n: 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n,
-  Gx: 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798n,
-  Gy: 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8n,
-};
-
-function modP(n) { return ((n % SECP256K1.p) + SECP256K1.p) % SECP256K1.p; }
-function modInverse(a, m) {
-  let [old_r, r] = [a, m], [old_s, s] = [1n, 0n];
-  while (r !== 0n) {
-    const q = old_r / r;
-    [old_r, r] = [r, old_r - q * r];
-    [old_s, s] = [s, old_s - q * s];
-  }
-  return ((old_s % m) + m) % m;
-}
-function pointAdd(P, Q) {
-  if (!P) return Q;
-  if (!Q) return P;
-  if (P.x === Q.x && P.y === Q.y) return pointDouble(P);
-  const lam = modP((Q.y - P.y) * modInverse(Q.x - P.x, SECP256K1.p));
-  const x   = modP(lam * lam - P.x - Q.x);
-  const y   = modP(lam * (P.x - x) - P.y);
-  return { x, y };
-}
-function pointDouble(P) {
-  const lam = modP(3n * P.x * P.x * modInverse(2n * P.y, SECP256K1.p));
-  const x   = modP(lam * lam - 2n * P.x);
-  const y   = modP(lam * (P.x - x) - P.y);
-  return { x, y };
-}
-function pointMul(k, P) {
-  let R = null, Q = P;
-  while (k > 0n) {
-    if (k & 1n) R = pointAdd(R, Q);
-    Q = pointDouble(Q);
-    k >>= 1n;
-  }
-  return R;
-}
-function nobleGetPublicKey(privHex) {
-  const k   = BigInt('0x' + privHex);
-  const G   = { x: SECP256K1.Gx, y: SECP256K1.Gy };
-  const pub = pointMul(k, G);
-  // Return x-coordinate only (32 bytes) — this is the Nostr public key format
-  return pub.x.toString(16).padStart(64, '0');
-}
+// ── secp256k1 public key derivation ──────────────────────────────────────────
+// Delegated to nostr-tools (loaded as ES module above, exposed on window.nGate).
+// Earlier versions of this file shipped a homegrown BigInt secp256k1 whose
+// pointAdd had an unhandled "P.x === Q.x && P.y !== Q.y" (point-at-infinity)
+// case — it produced wrong x-coordinates for many scalars, so the npubs it
+// emitted did NOT match their nsecs in real Nostr clients. Don't reintroduce.
+const SECP256K1_ORDER = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141n;
 
 // ── UI ────────────────────────────────────────────────────────────────────────
 let currentMode = 'passphrase';
@@ -777,17 +733,22 @@ async function generate() {
 
   // Ensure private key is within secp256k1 order
   const privBig = BigInt('0x' + privHex);
-  if (privBig === 0n || privBig >= SECP256K1.n) {
+  if (privBig === 0n || privBig >= SECP256K1_ORDER) {
     alert('Generated key is invalid (astronomically rare) — please try again.');
     return;
   }
 
-  // Derive public key
-  const pubHex = nobleGetPublicKey(privHex);
+  // nostr-tools must be ready (ES module loads async)
+  if (!window.nGate || !window.nGate.ready) {
+    alert('Crypto library still loading — please wait a moment and try again.');
+    return;
+  }
 
-  // Encode as bech32
-  const nsec = encodeBech32('nsec', privHex);
-  const npub = encodeBech32('npub', pubHex);
+  // Derive public key + bech32-encode via nostr-tools (authoritative)
+  const privBytes = new Uint8Array(privHex.match(/.{1,2}/g).map(b => parseInt(b, 16)));
+  const pubHex    = window.nGate.getPublicKey(privBytes);
+  const nsec      = window.nGate.nip19.nsecEncode(privBytes);
+  const npub      = window.nGate.nip19.npubEncode(pubHex);
 
   // Show output
   document.getElementById('out-nsec').textContent    = nsec;

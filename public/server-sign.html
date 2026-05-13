@@ -117,6 +117,44 @@
     </div>
 
     <div class="card">
+      <div class="card-title">NOSTR <span style="font-size:0.65rem;color:var(--subtext);font-weight:normal;letter-spacing:0;">— optional, baked into the signed proof</span></div>
+      <div class="info-box" style="font-size:0.72rem;">
+        Including your server's Nostr identity here means a single fetch of <code>v4call-server.json</code> gives discoverers <strong>both</strong> the domain proof <strong>and</strong> the Nostr key claim — all signed by the same Hive posting key. Skip this card if you don't have a Nostr keypair for the server yet; the file remains valid without it. Use <a href="/nostr-gen.html" style="color:var(--blue);">nostr-gen.html</a> to generate one (browser-only, keys never leave your machine).
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (npub)</label>
+        <input id="nostr-npub" type="text" placeholder="npub1..." autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">Bech32 form. Hex auto-fills below if you paste a valid npub.</div>
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (hex)</label>
+        <input id="nostr-hex" type="text" placeholder="64-char lowercase hex (auto-fills from npub)" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">Same key, different encoding. nGate / nostr-rs-relay <code>pubkey_whitelist</code> entries need this form.</div>
+      </div>
+      <div class="slabel">RELAYS — up to 5 (any blank rows are skipped)</div>
+      <div class="field">
+        <label>NOSTR RELAY 1</label>
+        <input id="nostr-relay-1" type="text" value="wss://nostr.v4call.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 2</label>
+        <input id="nostr-relay-2" type="text" value="wss://nostr.hive-book.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 3</label>
+        <input id="nostr-relay-3" type="text" placeholder="wss://your-third-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 4</label>
+        <input id="nostr-relay-4" type="text" placeholder="wss://your-fourth-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+      <div class="field">
+        <label>NOSTR RELAY 5</label>
+        <input id="nostr-relay-5" type="text" placeholder="wss://your-fifth-relay.example.com" autocapitalize="none" spellcheck="false"/>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="card-title">TIMING</div>
       <div class="row">
         <div class="field">
@@ -146,15 +184,36 @@
       <div class="err-box" id="err-box"></div>
       <div class="ok-box"  id="ok-box"></div>
 
-      <div class="slabel">PREFERRED · KEYCHAIN (key never leaves your browser)</div>
+      <!-- Nostr attestation — only shown when a Nostr pubkey is declared above.
+           Without a valid attestation, nGate-verify will reject the well-known. -->
+      <div id="nostr-attestation-section" style="display:none;margin-bottom:16px;">
+        <div class="slabel">STEP 1 OF 2 · NOSTR ATTESTATION (required when claiming a Nostr key)</div>
+        <div class="info-box" style="font-size:0.72rem;">
+          Because you've declared a Nostr key, the page will ask your Nostr signer to attest:
+          <em>"I, the holder of this Nostr key, am bound to Hive account X at domain Y."</em>
+          Without this, nGate-verify rejects the announce as unverifiable. The attestation is a
+          NIP-78 (kind 30078) Nostr event, embedded in the signed JSON output.
+        </div>
+        <div class="slabel" style="margin-top:10px;">PREFERRED · NIP-07 (key stays in browser extension)</div>
+        <div class="keychain-note" id="nip07-status">Detecting NIP-07 (nos2x / Alby / etc)…</div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;"/>
+        <div class="slabel">FALLBACK · NSEC PASTE</div>
+        <div class="field">
+          <label>NOSTR PRIVATE KEY — DISPOSABLE / TEST KEYS ONLY</label>
+          <input id="nostr-nsec" type="password" placeholder="nsec1…  (or 64-char hex)" autocomplete="off" spellcheck="false"/>
+          <div class="field-hint" style="color:var(--danger);">⚠ The nsec is the PRIVATE Nostr key. It lives in browser memory until signing completes, then is discarded. Use a key you can rotate.</div>
+        </div>
+      </div>
+
+      <div class="slabel"><span id="hive-step-label">PREFERRED</span> · HIVE KEYCHAIN (key never leaves your browser)</div>
       <button class="keychain" id="sign-keychain-btn" onclick="signWithKeychain()">⚡ Sign with Hive Keychain</button>
       <div class="keychain-note" id="keychain-status">Detecting Keychain…</div>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
 
-      <div class="slabel">FALLBACK · POSTING KEY PASTE</div>
+      <div class="slabel">FALLBACK · HIVE POSTING KEY PASTE</div>
       <div class="field">
-        <label>POSTING PRIVATE KEY (starts with <code>5J</code>)</label>
+        <label>HIVE POSTING PRIVATE KEY (starts with <code>5J</code>)</label>
         <input id="posting-key" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
         <div class="field-hint">Only used locally for signing. Never sent anywhere. Stays in memory until you close this tab.</div>
       </div>
@@ -206,10 +265,89 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@hiveio/dhive@1.3.2/dist/dhive.js"></script>
+<script type="module">
+// ── nostr-tools loader (Nostr attestation signing + verification) ─────
+// Exposes the bits we need on window.nGate so the rest of the page (which
+// uses classic <script>) can call them. Same lib + version as nostr-handson.
+import {
+  finalizeEvent,
+  getPublicKey,
+  verifyEvent,
+  nip19
+} from 'https://esm.sh/nostr-tools@2.7.2';
+window.nGate = { finalizeEvent, getPublicKey, verifyEvent, nip19, ready: true };
+document.dispatchEvent(new CustomEvent('nGate-ready'));
+</script>
 <script>
 // ── Constants ─────────────────────────────────────────────
 const CLAIM = 'v4call-server-ownership';
 const KEY_TYPE = 'posting';
+const V4CALL_ROLE = 'server';
+const V4CALL_PROTOCOL_VERSION = '0.3';
+const ATTESTATION_D_TAG = 'v4call-server-cross-attestation';
+
+// ── Bech32 (npub <-> hex) — same primitives as nostr-gen.html / server-announce.html ─
+const BECH32_CHARSET   = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_GENERATOR = [0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3];
+function bech32Polymod(values) {
+  let chk = 1;
+  for (let p = 0; p < values.length; p++) {
+    const top = chk >> 25;
+    chk = (chk & 0x1ffffff) << 5 ^ values[p];
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= BECH32_GENERATOR[i];
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const ret = [];
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) >> 5);
+  ret.push(0);
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) & 31);
+  return ret;
+}
+function bech32CreateChecksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]);
+  const polymod = bech32Polymod(values) ^ 1;
+  const ret = [];
+  for (let i = 0; i < 6; i++) ret.push((polymod >> (5*(5-i))) & 31);
+  return ret;
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0, bits = 0;
+  const ret = [], maxv = (1 << toBits) - 1;
+  for (let i = 0; i < data.length; i++) {
+    acc = (acc << fromBits) | data[i];
+    bits += fromBits;
+    while (bits >= toBits) { bits -= toBits; ret.push((acc >> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+  else if (!pad && (bits >= fromBits || ((acc << (toBits - bits)) & maxv))) return null;
+  return ret;
+}
+function hexToNpub(hexStr) {
+  const bytes = hexStr.match(/.{1,2}/g).map(b => parseInt(b, 16));
+  const data  = convertBits(bytes, 8, 5, true);
+  const combined = data.concat(bech32CreateChecksum('npub', data));
+  return 'npub1' + combined.map(d => BECH32_CHARSET[d]).join('');
+}
+function npubToHex(s) {
+  s = s.toLowerCase().trim();
+  if (!s.startsWith('npub1')) throw new Error('not an npub');
+  const sep = s.lastIndexOf('1');
+  if (sep < 1 || sep + 7 > s.length) throw new Error('bad bech32 format');
+  const hrp = s.slice(0, sep);
+  if (hrp !== 'npub') throw new Error('hrp mismatch');
+  const data = [];
+  for (let i = sep + 1; i < s.length; i++) {
+    const idx = BECH32_CHARSET.indexOf(s[i]);
+    if (idx < 0) throw new Error('invalid char in npub');
+    data.push(idx);
+  }
+  if (bech32Polymod(bech32HrpExpand(hrp).concat(data)) !== 1) throw new Error('bad checksum');
+  const bytes = convertBits(data.slice(0, -6), 5, 8, false);
+  if (!bytes || bytes.length !== 32) throw new Error('decoded length not 32 bytes');
+  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+}
 
 // ── Utilities ─────────────────────────────────────────────
 function genNonce() {
@@ -231,8 +369,14 @@ function toggleExpiry() {
 
 // ── Canonical payload ─────────────────────────────────────
 // Order-dependent — verifiers reproduce this exact string.
+// Two conditional trailers:
+//   1. Nostr-fields trailer (npub | hex | relays_csv) when ANY Nostr field set
+//   2. Attestation id trailer (the kind-30078 event's id) when an attestation
+//      is attached. This binds the Hive signature to a specific Nostr event,
+//      preventing swap-the-attestation attacks.
+// JSONs that opt out of Nostr keep the original 9-field shape.
 function buildPayload(obj) {
-  return [
+  const base = [
     obj.claim,
     obj.domain,
     obj.hive_account,
@@ -242,11 +386,27 @@ function buildPayload(obj) {
     obj.issued,
     obj.expires || '',
     obj.nonce
-  ].join('|');
+  ];
+  const relays  = Array.isArray(obj.nostr_relays) ? obj.nostr_relays.filter(Boolean) : [];
+  const hasNostr = !!(obj.nostr_npub || obj.nostr_hex || relays.length);
+  if (hasNostr) {
+    base.push(
+      obj.nostr_npub || '',
+      obj.nostr_hex  || '',
+      relays.join(',')
+    );
+    if (obj.nostr_attestation && obj.nostr_attestation.id) {
+      base.push(obj.nostr_attestation.id);
+    }
+  }
+  return base.join('|');
 }
 
 function collectFields() {
-  return {
+  const relays = [1,2,3,4,5]
+    .map(i => document.getElementById('nostr-relay-' + i).value.trim())
+    .filter(Boolean);
+  const f = {
     claim:         CLAIM,
     domain:        document.getElementById('domain').value.trim().toLowerCase(),
     hive_account:  document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, ''),
@@ -261,6 +421,14 @@ function collectFields() {
     key_type:      KEY_TYPE,
     signature:     ''                                      // filled at sign time
   };
+  // Optional Nostr block — only attach the fields that are actually set, so
+  // operators who skip the Nostr card produce JSONs identical to the old shape.
+  const nostrNpub = document.getElementById('nostr-npub').value.trim();
+  const nostrHex  = document.getElementById('nostr-hex').value.trim().toLowerCase();
+  if (nostrNpub)      f.nostr_npub   = nostrNpub;
+  if (nostrHex)       f.nostr_hex    = nostrHex;
+  if (relays.length)  f.nostr_relays = relays;
+  return f;
 }
 
 function validate(fields) {
@@ -276,11 +444,96 @@ function validate(fields) {
   if (!fields.federation_ws.startsWith('ws://') && !fields.federation_ws.startsWith('wss://')) {
     return 'Federation WS URL must start with ws:// or wss://';
   }
+  // Nostr fields are optional. Only validate format if something was provided.
+  if (fields.nostr_npub && !fields.nostr_npub.startsWith('npub1')) return 'NOSTR npub must start with "npub1".';
+  if (fields.nostr_hex  && !/^[0-9a-f]{64}$/.test(fields.nostr_hex)) return 'NOSTR hex pubkey must be exactly 64 lowercase hex characters.';
+  if (fields.nostr_relays) {
+    for (const r of fields.nostr_relays) {
+      if (!r.startsWith('ws://') && !r.startsWith('wss://')) return `NOSTR relay "${r}" must start with ws:// or wss://`;
+    }
+  }
   return null;
 }
 
 function showErr(msg)  { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
 function showOk(msg)   { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
+
+// ── Nostr attestation ─────────────────────────────────────
+// Build the unsigned kind-30078 event that ties the Nostr key to the Hive claim.
+function buildAttestationEvent(fields, attestationNonce) {
+  return {
+    kind: 30078,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['d', ATTESTATION_D_TAG],
+      ['v4call_hive_account', fields.hive_account],
+      ['v4call_domain',       fields.domain],
+      ['v4call_role',         V4CALL_ROLE],
+      ['v4call_protocol',     V4CALL_PROTOCOL_VERSION],
+      ['nonce',               attestationNonce]
+    ],
+    content: `I, holder of Nostr key ${fields.nostr_hex}, attest that I am bound to Hive account ${fields.hive_account} at domain ${fields.domain} as a v4call ${V4CALL_ROLE} identity.`
+  };
+}
+
+// Sign the attestation either via NIP-07 (preferred) or pasted nsec (fallback).
+// Returns the fully signed event (with id + sig) or throws an Error.
+async function signAttestation(fields) {
+  if (!window.nGate || !window.nGate.ready) {
+    throw new Error('nostr-tools failed to load (check internet / esm.sh). Refresh the page and retry.');
+  }
+  const attestationNonce = genNonce();
+  const unsigned = buildAttestationEvent(fields, attestationNonce);
+
+  let signed;
+
+  // ── NIP-07 path ──
+  if (window.nostr && typeof window.nostr.signEvent === 'function') {
+    let extPubkey;
+    try { extPubkey = await window.nostr.getPublicKey(); }
+    catch (e) { throw new Error('NIP-07 getPublicKey() failed: ' + e.message); }
+    if (extPubkey.toLowerCase() !== fields.nostr_hex.toLowerCase()) {
+      throw new Error(`NIP-07 extension holds key ${extPubkey.slice(0,16)}… but you declared ${fields.nostr_hex.slice(0,16)}…. Switch extension key OR fix the form.`);
+    }
+    unsigned.pubkey = extPubkey;
+    try { signed = await window.nostr.signEvent(unsigned); }
+    catch (e) { throw new Error('NIP-07 signEvent() failed (user cancelled?): ' + e.message); }
+  }
+  // ── nsec paste fallback ──
+  else {
+    const nsecStr = (document.getElementById('nostr-nsec').value || '').trim();
+    if (!nsecStr) {
+      throw new Error('No NIP-07 extension detected and no nsec pasted. Install nos2x/Alby, or paste your Nostr private key in the form.');
+    }
+    let privBytes;
+    try {
+      if (nsecStr.startsWith('nsec1')) {
+        const dec = window.nGate.nip19.decode(nsecStr);
+        if (dec.type !== 'nsec') throw new Error('not an nsec');
+        privBytes = dec.data;
+      } else if (/^[0-9a-f]{64}$/i.test(nsecStr)) {
+        privBytes = new Uint8Array(nsecStr.toLowerCase().match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      } else {
+        throw new Error('paste an nsec1... or 64-char hex');
+      }
+    } catch (e) {
+      throw new Error('Bad Nostr private key: ' + e.message);
+    }
+    const derived = window.nGate.getPublicKey(privBytes);
+    if (derived.toLowerCase() !== fields.nostr_hex.toLowerCase()) {
+      throw new Error(`Pasted nsec derives to ${derived.slice(0,16)}… but you declared ${fields.nostr_hex.slice(0,16)}…. Fix the form or paste the matching key.`);
+    }
+    try { signed = window.nGate.finalizeEvent(unsigned, privBytes); }
+    catch (e) { throw new Error('finalizeEvent failed: ' + e.message); }
+    // Wipe the nsec field immediately after use
+    document.getElementById('nostr-nsec').value = '';
+  }
+
+  if (!window.nGate.verifyEvent(signed)) {
+    throw new Error('Signed event but verifyEvent() failed — refusing to attach a self-invalid attestation.');
+  }
+  return signed;
+}
 
 // ── Render output ─────────────────────────────────────────
 function renderOutput(obj, label) {
@@ -290,20 +543,23 @@ function renderOutput(obj, label) {
 
   // Show the "Next step" link with prefilled querystring for server-announce.html
   if (label === 'signed' && obj.domain && obj.hive_account) {
-    const qs = new URLSearchParams({
+    const params = {
       account:  obj.hive_account,
       domain:   obj.domain,
       escrow:   obj.escrow || '',
       fee:      obj.fee_account || '',
       ws:       obj.federation_ws || ''
-    }).toString();
-    document.getElementById('next-step-link').href = `/server-announce.html?${qs}`;
+    };
+    if (obj.nostr_npub)            params.nostr_npub   = obj.nostr_npub;
+    if (obj.nostr_hex)             params.nostr_hex    = obj.nostr_hex;
+    if (obj.nostr_relays?.length)  params.nostr_relays = obj.nostr_relays.join(',');
+    document.getElementById('next-step-link').href = `/server-announce.html?${new URLSearchParams(params).toString()}`;
     document.getElementById('next-step-box').style.display = 'block';
   }
 }
 
 // ── Signing — Keychain path ──────────────────────────────
-function signWithKeychain() {
+async function signWithKeychain() {
   showErr(''); showOk('');
   const fields = collectFields();
   const err = validate(fields);
@@ -313,12 +569,29 @@ function signWithKeychain() {
     return showErr('Hive Keychain not detected. Install it from https://hive-keychain.com or use the Posting Key paste option below.');
   }
 
+  const btn = document.getElementById('sign-keychain-btn');
+  btn.disabled = true;
+
+  // STEP 1 (if Nostr fields declared): sign Nostr attestation first.
+  // The Hive signature in STEP 2 covers the attestation's id, so the order
+  // matters — attestation must exist before Hive payload is canonicalised.
+  if (fields.nostr_hex) {
+    btn.textContent = 'Step 1/2 — signing Nostr attestation…';
+    showOk('Step 1/2 — signing Nostr attestation (NIP-07 or nsec)…');
+    try {
+      fields.nostr_attestation = await signAttestation(fields);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = '⚡ Sign with Hive Keychain';
+      return showErr('Nostr attestation failed: ' + e.message);
+    }
+  }
+
+  // STEP 2: Hive Keychain. Payload now includes nostr_attestation.id if present.
   fields.issued = nowIso();
   document.getElementById('issued').value = fields.issued;
   const payload = buildPayload(fields);
 
-  const btn = document.getElementById('sign-keychain-btn');
-  btn.disabled = true; btn.textContent = 'Opening Keychain…';
+  btn.textContent = fields.nostr_hex ? 'Step 2/2 — opening Hive Keychain…' : 'Opening Hive Keychain…';
 
   window.hive_keychain.requestSignBuffer(fields.hive_account, payload, 'Posting', (response) => {
     btn.disabled = false; btn.textContent = '⚡ Sign with Hive Keychain';
@@ -326,25 +599,36 @@ function signWithKeychain() {
       return showErr(`Keychain: ${response.message || 'cancelled'}`);
     }
     fields.signature = response.result;
-    showOk(`✓ Signed by @${fields.hive_account} via Keychain.`);
+    showOk(`✓ Signed by @${fields.hive_account}${fields.nostr_attestation ? ' WITH Nostr attestation (triple-bound)' : ''}.`);
     renderOutput(fields, 'signed');
   });
 }
 
 // ── Signing — posting key paste path ─────────────────────
-function signWithKey() {
+async function signWithKey() {
   showErr(''); showOk('');
   const fields = collectFields();
   const err = validate(fields);
   if (err) return showErr(err);
 
   const keyStr = document.getElementById('posting-key').value.trim();
-  if (!keyStr) return showErr('Paste your posting private key first.');
+  if (!keyStr) return showErr('Paste your Hive posting private key first.');
 
   let priv;
   try { priv = dhive.PrivateKey.fromString(keyStr); }
   catch(e) { return showErr(`Invalid posting key: ${e.message}`); }
 
+  // STEP 1 (if Nostr fields declared): sign Nostr attestation first
+  if (fields.nostr_hex) {
+    showOk('Step 1/2 — signing Nostr attestation (NIP-07 or nsec)…');
+    try {
+      fields.nostr_attestation = await signAttestation(fields);
+    } catch (e) {
+      return showErr('Nostr attestation failed: ' + e.message);
+    }
+  }
+
+  // STEP 2: Hive ECDSA signature on the canonical payload
   fields.issued = nowIso();
   document.getElementById('issued').value = fields.issued;
   const payload = buildPayload(fields);
@@ -352,7 +636,7 @@ function signWithKey() {
   try {
     const hash = dhive.cryptoUtils.sha256(payload);
     fields.signature = priv.sign(hash).toString();
-    showOk(`✓ Signed by @${fields.hive_account} with pasted posting key.`);
+    showOk(`✓ Signed by @${fields.hive_account} with pasted posting key${fields.nostr_attestation ? ' WITH Nostr attestation (triple-bound)' : ''}.`);
     renderOutput(fields, 'signed');
   } catch(e) {
     showErr(`Sign error: ${e.message}`);
@@ -383,24 +667,71 @@ async function runVerify() {
     if (!pubKeyStr) { resultEl.style.color='var(--danger)'; resultEl.textContent = '✗ Could not fetch posting pubkey'; return; }
   } catch(e) { resultEl.style.color='var(--danger)'; resultEl.textContent = `✗ Hive fetch error: ${e.message}`; return; }
 
-  // Reproduce payload + verify
+  // Reproduce payload + verify Hive signature
+  let hiveValid;
   try {
     const payload = buildPayload(obj);
     const hash    = dhive.cryptoUtils.sha256(payload);
     const pubKey  = dhive.PublicKey.fromString(pubKeyStr);
     const sig     = dhive.Signature.fromString(obj.signature);
-    const ok      = pubKey.verify(hash, sig);
-    if (ok) {
-      const expNote = obj.expires ? ` (expires ${obj.expires})` : ' (no expiry set)';
-      resultEl.style.color = 'var(--green)';
-      resultEl.textContent = `✓ Signature valid. Domain ${obj.domain} is signed by @${obj.hive_account}${expNote}.`;
-    } else {
-      resultEl.style.color='var(--danger)';
-      resultEl.textContent = '✗ Signature does NOT match the posting key for this account.';
-    }
+    hiveValid     = pubKey.verify(hash, sig);
   } catch(e) {
     resultEl.style.color='var(--danger)';
-    resultEl.textContent = `✗ Verify error: ${e.message}`;
+    resultEl.textContent = `✗ Hive verify error: ${e.message}`;
+    return;
+  }
+  if (!hiveValid) {
+    resultEl.style.color='var(--danger)';
+    resultEl.textContent = '✗ Hive signature does NOT match the posting key for this account.';
+    return;
+  }
+
+  // If Nostr fields are claimed, attestation MUST be present + verify cleanly
+  const hasNostr = obj.nostr_npub || obj.nostr_hex;
+  if (hasNostr) {
+    if (!obj.nostr_attestation) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = '✗ Hive sig valid BUT Nostr key claimed without attestation — nGate-verify will REJECT this.';
+      return;
+    }
+    if (!window.nGate || !window.nGate.ready) {
+      resultEl.style.color='var(--accent)';
+      resultEl.textContent = '⚠ Hive sig valid; nostr-tools not yet loaded — refresh and re-verify to check the attestation.';
+      return;
+    }
+    const ev = obj.nostr_attestation;
+    if (!window.nGate.verifyEvent(ev)) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = '✗ Hive sig valid BUT Nostr attestation event verifyEvent() fails (tampered or wrong sig).';
+      return;
+    }
+    if (ev.pubkey.toLowerCase() !== (obj.nostr_hex || '').toLowerCase()) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = `✗ Hive sig valid BUT attestation pubkey ${ev.pubkey.slice(0,16)}… ≠ well-known nostr_hex.`;
+      return;
+    }
+    const tag = (name) => ev.tags.find(t => t[0] === name)?.[1];
+    if (tag('d') !== ATTESTATION_D_TAG) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = `✗ Attestation d-tag ≠ "${ATTESTATION_D_TAG}" (got "${tag('d')}").`;
+      return;
+    }
+    if (tag('v4call_hive_account') !== obj.hive_account) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = `✗ Attestation v4call_hive_account tag (${tag('v4call_hive_account')}) ≠ well-known hive_account (${obj.hive_account}).`;
+      return;
+    }
+    if (tag('v4call_domain') !== obj.domain) {
+      resultEl.style.color='var(--danger)';
+      resultEl.textContent = `✗ Attestation v4call_domain tag (${tag('v4call_domain')}) ≠ well-known domain (${obj.domain}).`;
+      return;
+    }
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = `✓ TRIPLE-BOUND: Hive sig by @${obj.hive_account} valid; Nostr attestation by ${ev.pubkey.slice(0,16)}… valid; hive+domain tags agree. nGate-verify will accept.`;
+  } else {
+    const expNote = obj.expires ? ` (expires ${obj.expires})` : ' (no expiry set)';
+    resultEl.style.color = 'var(--green)';
+    resultEl.textContent = `✓ Hive signature valid. Domain ${obj.domain} signed by @${obj.hive_account}${expNote}. (No Nostr key declared; participates without Nostr-discovery.)`;
   }
 }
 
@@ -437,21 +768,81 @@ document.getElementById('issued').value = nowIso();
   set('escrow',       'escrow');
   set('fee-account',  'fee');
   set('fed-ws',       'ws');
+  set('nostr-npub',   'nostr_npub');
+  set('nostr-hex',    'nostr_hex');
+  const rs = p.get('nostr_relays');
+  if (rs) rs.split(',').slice(0,5).forEach((r, i) => {
+    const el = document.getElementById('nostr-relay-' + (i+1));
+    if (el && r.trim()) el.value = r.trim();
+  });
 })();
+
+// ── Auto-sync npub <-> hex (only updates the OTHER field; user-typed
+//    field is left alone so we never fight the cursor)
+document.getElementById('nostr-npub').addEventListener('input', (e) => {
+  const v = e.target.value.trim();
+  if (v.startsWith('npub1') && v.length >= 60) {
+    try {
+      const hex = npubToHex(v);
+      const hexField = document.getElementById('nostr-hex');
+      if (hexField.value.trim().toLowerCase() !== hex) hexField.value = hex;
+    } catch {}
+  }
+});
+document.getElementById('nostr-hex').addEventListener('input', (e) => {
+  const v = e.target.value.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(v)) {
+    try {
+      const npub = hexToNpub(v);
+      const npubField = document.getElementById('nostr-npub');
+      if (npubField.value.trim() !== npub) npubField.value = npub;
+    } catch {}
+  }
+});
 
 // Detect Keychain presence
 setTimeout(() => {
   const el = document.getElementById('keychain-status');
   const btn = document.getElementById('sign-keychain-btn');
   if (window.hive_keychain) {
-    el.textContent = '✓ Keychain detected — recommended (no key paste needed).';
+    el.textContent = '✓ Hive Keychain detected — recommended (no key paste needed).';
     el.style.color = 'var(--green)';
   } else {
-    el.textContent = '⚠ Keychain not detected. Install from hive-keychain.com, or use the posting-key paste option below.';
+    el.textContent = '⚠ Hive Keychain not detected. Install from hive-keychain.com, or use the posting-key paste option below.';
     el.style.color = 'var(--accent)';
     btn.disabled = true;
   }
 }, 400);
+
+// Detect NIP-07 (browser-side Nostr signer)
+setTimeout(() => {
+  const el = document.getElementById('nip07-status');
+  if (!el) return;
+  if (window.nostr && typeof window.nostr.signEvent === 'function') {
+    el.textContent = '✓ NIP-07 extension detected — will sign Nostr attestation via the extension (no nsec paste needed).';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚠ No NIP-07 extension (nos2x / Alby / etc) detected. Use the nsec paste fallback below.';
+    el.style.color = 'var(--accent)';
+  }
+}, 400);
+
+// Show/hide the Nostr attestation section based on whether Nostr fields are filled.
+// (Operators who don't declare a Nostr key skip the attestation step entirely.)
+function updateAttestationSectionVisibility() {
+  const npub = document.getElementById('nostr-npub').value.trim();
+  const hex  = document.getElementById('nostr-hex').value.trim();
+  const section = document.getElementById('nostr-attestation-section');
+  const stepLabel = document.getElementById('hive-step-label');
+  if (!section) return;
+  const showing = !!(npub || hex);
+  section.style.display = showing ? 'block' : 'none';
+  if (stepLabel) stepLabel.textContent = showing ? 'STEP 2 OF 2' : 'PREFERRED';
+}
+['nostr-npub','nostr-hex'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateAttestationSectionVisibility);
+});
+updateAttestationSectionVisibility();
 </script>
 </body>
 </html>

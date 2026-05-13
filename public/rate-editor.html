@@ -144,11 +144,17 @@
       <div class="row">
         <div class="field" style="flex:2;">
           <label>NOSTR NPUB (optional)</label>
-          <input id="my-nostr" type="text" placeholder="npub1…" autocapitalize="none" spellcheck="false"/>
+          <input id="my-nostr" type="text" placeholder="npub1… — hex auto-fills below" autocapitalize="none" spellcheck="false"/>
         </div>
         <div class="field">
           <label>ESCROW ACCOUNT</label>
           <input id="escrow-account" type="text" placeholder="v4call-escrow" spellcheck="false"/>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:1;">
+          <label>NOSTR PUBKEY HEX (optional)</label>
+          <input id="my-nostr-hex" type="text" placeholder="64-char lowercase hex (auto-fills from npub)" autocapitalize="none" spellcheck="false"/>
         </div>
       </div>
     </div>
@@ -209,6 +215,32 @@
       <div id="lists-container"></div>
     </div>
 
+    <!-- ── NOSTR ATTESTATION ─────────────────────────── -->
+    <!-- Visible only when NOSTR NPUB/HEX is filled. Without a valid attestation,
+         the post will publish but user-tier nGate-verify will reject it. -->
+    <div class="card" id="attestation-card" style="display:none;">
+      <div class="card-title">NOSTR ATTESTATION (required when claiming a Nostr key)</div>
+      <div class="info-box">
+        Prove you own the Nostr key you've declared above by signing a NIP-78
+        (kind 30078) event tying your Nostr identity to your Hive username.
+        The signed event gets embedded (base64-JSON) in your rates post. Without
+        this, user-tier nGate relays reject your post — anyone could claim to own
+        your npub. The attestation is invalidated automatically when you change
+        your Hive username, server, NOSTR NPUB, or NOSTR HEX — re-sign after edits.
+      </div>
+      <div class="keychain-note" id="nip07-status" style="margin-bottom:10px;">Detecting NIP-07 (nos2x / Alby / etc)…</div>
+      <div class="field" id="attestation-nsec-wrap" style="display:none;">
+        <label>NOSTR PRIVATE KEY — DISPOSABLE / TEST KEYS ONLY</label>
+        <input id="attestation-nsec" type="password" placeholder="nsec1…  (or 64-char hex)" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint" style="color:var(--danger);">⚠ The nsec is your PRIVATE Nostr key. Lives in browser memory until signing completes, then is discarded.</div>
+      </div>
+      <div class="btn-row">
+        <button class="primary" onclick="signNostrAttestation()" style="background:var(--purple);">🔑 Sign Nostr Attestation</button>
+        <button class="secondary" onclick="clearAttestation()">Clear</button>
+      </div>
+      <div class="keychain-note" id="attestation-status" style="margin-top:10px;color:var(--danger);">⚠ No attestation signed yet — Post to Hive will fail.</div>
+    </div>
+
   </div>
 
   <!-- ═══════════════ RIGHT: OUTPUT ════════════════ -->
@@ -256,6 +288,18 @@
   </div>
 </div>
 
+<script type="module">
+// ── nostr-tools loader — exposes the bits we need on window.nGate
+// so the rest of the page (classic <script>) can sign + verify Nostr events.
+import {
+  finalizeEvent,
+  getPublicKey,
+  verifyEvent,
+  nip19
+} from 'https://esm.sh/nostr-tools@2.7.2';
+window.nGate = { finalizeEvent, getPublicKey, verifyEvent, nip19, ready: true };
+document.dispatchEvent(new CustomEvent('nGate-ready'));
+</script>
 <script>
 // ══════════════════════════════════════════════════════════
 //  FORKER CONFIG — change these five lines to rebrand
@@ -265,6 +309,253 @@ const ESCROW_DEFAULT       = 'v4call-escrow';
 const PLATFORM_FEE_DEFAULT = 10;
 const WIKI_URL             = 'https://www.completenoobs.com/index.php/v4call';
 const APP_VERSION          = 'v4call/2.0';
+
+// ══════════════════════════════════════════════════════════
+//  NOSTR ATTESTATION CONFIG (NIP-78 / kind 30078)
+// ══════════════════════════════════════════════════════════
+// User-tier d-tag — distinct from server-sign's so the same Nostr key can
+// carry BOTH a server-tier and a user-tier attestation without one replacing
+// the other on Nostr relays (parameterized-replaceable deduplication is per
+// (pubkey, kind, d-tag) triple).
+const ATTESTATION_D_TAG_USER  = 'v4call-user-cross-attestation';
+const V4CALL_ROLE_USER        = 'user';
+const V4CALL_PROTOCOL_VERSION = '0.3';
+
+// ══════════════════════════════════════════════════════════
+//  BECH32 (npub <-> hex) — same primitives as nostr-gen.html / server-sign.html
+// ══════════════════════════════════════════════════════════
+const BECH32_CHARSET   = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+const BECH32_GENERATOR = [0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3];
+function bech32Polymod(values) {
+  let chk = 1;
+  for (let p = 0; p < values.length; p++) {
+    const top = chk >> 25;
+    chk = (chk & 0x1ffffff) << 5 ^ values[p];
+    for (let i = 0; i < 5; i++) if ((top >> i) & 1) chk ^= BECH32_GENERATOR[i];
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp) {
+  const ret = [];
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) >> 5);
+  ret.push(0);
+  for (let p = 0; p < hrp.length; p++) ret.push(hrp.charCodeAt(p) & 31);
+  return ret;
+}
+function bech32CreateChecksum(hrp, data) {
+  const values = bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]);
+  const polymod = bech32Polymod(values) ^ 1;
+  const ret = [];
+  for (let i = 0; i < 6; i++) ret.push((polymod >> (5*(5-i))) & 31);
+  return ret;
+}
+function convertBits(data, fromBits, toBits, pad) {
+  let acc = 0, bits = 0;
+  const ret = [], maxv = (1 << toBits) - 1;
+  for (let i = 0; i < data.length; i++) {
+    acc = (acc << fromBits) | data[i];
+    bits += fromBits;
+    while (bits >= toBits) { bits -= toBits; ret.push((acc >> bits) & maxv); }
+  }
+  if (pad && bits > 0) ret.push((acc << (toBits - bits)) & maxv);
+  else if (!pad && (bits >= fromBits || ((acc << (toBits - bits)) & maxv))) return null;
+  return ret;
+}
+function hexToNpub(hexStr) {
+  const bytes = hexStr.match(/.{1,2}/g).map(b => parseInt(b, 16));
+  const data  = convertBits(bytes, 8, 5, true);
+  const combined = data.concat(bech32CreateChecksum('npub', data));
+  return 'npub1' + combined.map(d => BECH32_CHARSET[d]).join('');
+}
+function npubToHex(s) {
+  s = s.toLowerCase().trim();
+  if (!s.startsWith('npub1')) throw new Error('not an npub');
+  const sep = s.lastIndexOf('1');
+  if (sep < 1 || sep + 7 > s.length) throw new Error('bad bech32 format');
+  const hrp = s.slice(0, sep);
+  if (hrp !== 'npub') throw new Error('hrp mismatch');
+  const data = [];
+  for (let i = sep + 1; i < s.length; i++) {
+    const idx = BECH32_CHARSET.indexOf(s[i]);
+    if (idx < 0) throw new Error('invalid char in npub');
+    data.push(idx);
+  }
+  if (bech32Polymod(bech32HrpExpand(hrp).concat(data)) !== 1) throw new Error('bad checksum');
+  const bytes = convertBits(data.slice(0, -6), 5, 8, false);
+  if (!bytes || bytes.length !== 32) throw new Error('decoded length not 32 bytes');
+  return bytes.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ══════════════════════════════════════════════════════════
+//  NOSTR ATTESTATION HELPERS
+// ══════════════════════════════════════════════════════════
+// Tracks the currently-signed attestation (or null if none / stale).
+// Invalidated whenever any identity field (account / server / npub / hex)
+// changes — the operator must re-sign after edits.
+let currentAttestation = null;
+
+// Snapshot of identity fields at sign time — compared against current form
+// values to detect "form changed since sign" so we can warn.
+let attestationBoundTo = null;
+
+// Build the unsigned kind-30078 event tying Nostr key to the user's Hive
+// identity for the user tier. (Server-tier uses a different d-tag in
+// server-sign.html, so the same Nostr key can carry both attestations
+// without one displacing the other on Nostr relays.)
+function buildUserAttestationEvent(snap, nonce) {
+  return {
+    kind: 30078,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['d',                   ATTESTATION_D_TAG_USER],
+      ['v4call_hive_account', snap.account],
+      ['v4call_server',       snap.server],
+      ['v4call_role',         V4CALL_ROLE_USER],
+      ['v4call_protocol',     V4CALL_PROTOCOL_VERSION],
+      ['nonce',               nonce]
+    ],
+    content: `I, holder of Nostr key ${snap.nostrHex}, attest that I am the v4call user @${snap.account} (server ${snap.server}).`
+  };
+}
+
+function snapshotIdentity() {
+  return {
+    account:  (document.getElementById('my-username').value || '').trim().toLowerCase(),
+    server:   (document.getElementById('my-server').value || '').trim(),
+    nostrNpub:(document.getElementById('my-nostr').value || '').trim(),
+    nostrHex: (document.getElementById('my-nostr-hex').value || '').trim().toLowerCase()
+  };
+}
+
+// Sign the user-tier attestation via NIP-07 (preferred) or pasted nsec (fallback).
+// Returns the fully signed event with id + sig, or throws Error.
+async function signUserAttestation(snap) {
+  if (!window.nGate || !window.nGate.ready) {
+    throw new Error('nostr-tools not loaded (check internet / esm.sh). Refresh and retry.');
+  }
+  if (!snap.account)  throw new Error('Hive username is empty.');
+  if (!snap.server)   throw new Error('Server field is empty.');
+  if (!snap.nostrHex) throw new Error('NOSTR HEX is empty — fill it before signing.');
+  if (!/^[0-9a-f]{64}$/.test(snap.nostrHex)) throw new Error('NOSTR HEX must be 64-char lowercase hex.');
+
+  const nonce = (crypto.getRandomValues(new Uint8Array(8))
+                   ? Array.from(crypto.getRandomValues(new Uint8Array(8)))
+                       .map(b => b.toString(16).padStart(2, '0')).join('')
+                   : Date.now().toString(16));
+  const unsigned = buildUserAttestationEvent(snap, nonce);
+
+  let signed;
+
+  // ── NIP-07 path ──
+  if (window.nostr && typeof window.nostr.signEvent === 'function') {
+    let extPubkey;
+    try { extPubkey = await window.nostr.getPublicKey(); }
+    catch (e) { throw new Error('NIP-07 getPublicKey() failed: ' + e.message); }
+    if (extPubkey.toLowerCase() !== snap.nostrHex) {
+      throw new Error(`NIP-07 extension holds key ${extPubkey.slice(0,16)}… but you declared ${snap.nostrHex.slice(0,16)}…. Switch extension key OR fix the form.`);
+    }
+    unsigned.pubkey = extPubkey;
+    try { signed = await window.nostr.signEvent(unsigned); }
+    catch (e) { throw new Error('NIP-07 signEvent() failed (user cancelled?): ' + e.message); }
+  }
+  // ── nsec paste fallback ──
+  else {
+    const nsecStr = (document.getElementById('attestation-nsec').value || '').trim();
+    if (!nsecStr) {
+      throw new Error('No NIP-07 extension and no nsec pasted. Install nos2x/Alby, or paste your nsec in the form.');
+    }
+    let privBytes;
+    try {
+      if (nsecStr.startsWith('nsec1')) {
+        const dec = window.nGate.nip19.decode(nsecStr);
+        if (dec.type !== 'nsec') throw new Error('not an nsec');
+        privBytes = dec.data;
+      } else if (/^[0-9a-f]{64}$/i.test(nsecStr)) {
+        privBytes = new Uint8Array(nsecStr.toLowerCase().match(/.{1,2}/g).map(b => parseInt(b, 16)));
+      } else {
+        throw new Error('paste an nsec1... or 64-char hex');
+      }
+    } catch (e) {
+      throw new Error('Bad Nostr private key: ' + e.message);
+    }
+    const derived = window.nGate.getPublicKey(privBytes);
+    if (derived.toLowerCase() !== snap.nostrHex) {
+      throw new Error(`Pasted nsec derives to ${derived.slice(0,16)}… but you declared ${snap.nostrHex.slice(0,16)}…. Fix the form or paste the matching key.`);
+    }
+    try { signed = window.nGate.finalizeEvent(unsigned, privBytes); }
+    catch (e) { throw new Error('finalizeEvent failed: ' + e.message); }
+    document.getElementById('attestation-nsec').value = '';  // wipe immediately
+  }
+
+  if (!window.nGate.verifyEvent(signed)) {
+    throw new Error('Signed event but verifyEvent() failed — refusing to attach self-invalid attestation.');
+  }
+  return signed;
+}
+
+// UI action — sign + store, update status
+async function signNostrAttestation() {
+  const statusEl = document.getElementById('attestation-status');
+  statusEl.style.color = 'var(--subtext)';
+  statusEl.textContent = 'Signing…';
+  const snap = snapshotIdentity();
+  try {
+    const signed = await signUserAttestation(snap);
+    currentAttestation = signed;
+    attestationBoundTo = snap;
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = `✓ Attestation signed for ${signed.pubkey.slice(0,16)}… at ${new Date().toLocaleString()} — ready to post.`;
+    generateOutput();  // refresh preview with NOSTR-ATTESTATION line
+    showStatus('Nostr attestation signed.', 'green');
+  } catch (e) {
+    currentAttestation = null;
+    attestationBoundTo = null;
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '✗ Sign failed: ' + e.message;
+    showStatus('Attestation sign failed: ' + e.message, 'danger');
+  }
+}
+
+function clearAttestation() {
+  currentAttestation = null;
+  attestationBoundTo = null;
+  const statusEl = document.getElementById('attestation-status');
+  statusEl.style.color = 'var(--danger)';
+  statusEl.textContent = '⚠ Attestation cleared. Re-sign before posting.';
+  generateOutput();
+}
+
+// Returns true if the stored attestation still matches the current form's identity.
+function attestationStillValid() {
+  if (!currentAttestation || !attestationBoundTo) return false;
+  const now = snapshotIdentity();
+  return (
+    now.account   === attestationBoundTo.account &&
+    now.server    === attestationBoundTo.server  &&
+    now.nostrHex  === attestationBoundTo.nostrHex
+    // npub auto-syncs from hex; if hex matches, npub matches too
+  );
+}
+
+function nostrFieldsPresent() {
+  const s = snapshotIdentity();
+  return !!(s.nostrNpub || s.nostrHex);
+}
+
+// Show/hide the attestation card based on Nostr-field presence.
+function updateAttestationCardVisibility() {
+  const card = document.getElementById('attestation-card');
+  if (!card) return;
+  card.style.display = nostrFieldsPresent() ? 'block' : 'none';
+
+  // Detect identity drift — if user changed account/server/hex after signing,
+  // mark the attestation stale.
+  if (currentAttestation && !attestationStillValid()) {
+    const statusEl = document.getElementById('attestation-status');
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '⚠ Identity changed since attestation was signed — re-sign before posting.';
+  }
+}
 
 // ══════════════════════════════════════════════════════════
 //  STATE
@@ -559,6 +850,7 @@ function generateOutput() {
   const chain       = document.getElementById('my-chain').value || 'hive';
   const server      = document.getElementById('my-server').value.trim() || SERVER_DOMAIN;
   const nostrNpub   = document.getElementById('my-nostr').value.trim();
+  const nostrHex    = document.getElementById('my-nostr-hex').value.trim().toLowerCase();
   const platformFee = parseFloat(document.getElementById('platform-fee').value) || PLATFORM_FEE_DEFAULT;
   const escrow      = document.getElementById('escrow-account').value.trim() || ESCROW_DEFAULT;
   const now         = new Date().toISOString().split('T')[0];
@@ -568,6 +860,17 @@ function generateOutput() {
   out    += `CHAIN:${chain}\n`;
   out    += `SERVER:${server}\n`;
   if (nostrNpub) out += `NOSTR:${nostrNpub}\n`;
+  if (nostrHex)  out += `NOSTR-HEX:${nostrHex}\n`;
+  // Embed the kind-30078 attestation as base64-encoded JSON on a single line.
+  // Only emitted when an attestation is signed AND still matches the current
+  // identity fields (account/server/nostr_hex). Without this, user-tier
+  // nGate-verify rejects the post.
+  if (nostrHex && currentAttestation && attestationStillValid()) {
+    const b64 = btoa(JSON.stringify(currentAttestation));
+    out += `NOSTR-ATTESTATION:${b64}\n`;
+  } else if (nostrHex) {
+    out += `NOSTR-ATTESTATION:<NOT SIGNED — click "🔑 Sign Nostr Attestation" before posting>\n`;
+  }
   out    += `UPDATED:${now}\n`;
   out    += `PLATFORM-FEE:${platformFee}%\n`;
   out    += `ESCROW:${escrow}\n`;
@@ -692,6 +995,21 @@ function postToHive() {
     return;
   }
 
+  // Refuse to post if Nostr fields are declared but the attestation is missing
+  // or stale. Sending a Nostr-claiming post without attestation would result in
+  // it being rejected by user-tier nGate-verify anyway — better to catch it
+  // here than burn an irreversible Hive post.
+  if (nostrFieldsPresent()) {
+    if (!currentAttestation) {
+      alert('You\'ve declared a Nostr key but haven\'t signed an attestation yet.\n\nClick "🔑 Sign Nostr Attestation" in the NOSTR ATTESTATION card before posting.\n\n(Without it, user-tier nGate relays will reject your post.)');
+      return;
+    }
+    if (!attestationStillValid()) {
+      alert('Your attestation is stale — the Hive username, server, or Nostr key changed since you signed it.\n\nClick "🔑 Sign Nostr Attestation" again to re-sign with the current values.');
+      return;
+    }
+  }
+
   const body     = generateOutput();
   const title    = 'v4call-rates';
   const permlink = 'v4call-rates-' + Date.now();
@@ -773,8 +1091,35 @@ async function loadFromHive() {
 
   try {
     parseAndApplyRates(ratesPost.body);
+    // If parseAndApplyRates loaded a NOSTR-ATTESTATION, bind it to the
+    // now-populated identity fields so attestationStillValid() returns true.
+    if (window.__pendingAttestation) {
+      attestationBoundTo = snapshotIdentity();
+      window.__pendingAttestation = false;
+      // Sanity-check: the loaded attestation's pubkey + tags should agree with
+      // the loaded identity. If not, the post on Hive is malformed.
+      if (currentAttestation) {
+        const tag = (n) => (currentAttestation.tags.find(t => t[0] === n) || [])[1];
+        const okPubkey = currentAttestation.pubkey?.toLowerCase() === attestationBoundTo.nostrHex;
+        const okAcct   = tag('v4call_hive_account') === attestationBoundTo.account;
+        const okServer = tag('v4call_server')       === attestationBoundTo.server;
+        if (!okPubkey || !okAcct || !okServer) {
+          console.warn('Loaded attestation does not match loaded identity — clearing');
+          currentAttestation = null;
+          attestationBoundTo = null;
+        }
+      }
+    }
     saveState();
     render();
+    updateAttestationCardVisibility();
+    if (currentAttestation && attestationStillValid()) {
+      const s = document.getElementById('attestation-status');
+      if (s) {
+        s.style.color = 'var(--green)';
+        s.textContent = `✓ Attestation loaded from Hive for ${currentAttestation.pubkey.slice(0,16)}… — still valid.`;
+      }
+    }
     generateOutput();
     showStatus(`✓ Loaded from Hive (@${username})`, 'green');
   } catch(e) {
@@ -814,7 +1159,29 @@ function parseAndApplyRates(body) {
     if      (line.startsWith('ACCOUNT:'))       { document.getElementById('my-username').value     = line.slice(8); }
     else if (line.startsWith('CHAIN:'))         { document.getElementById('my-chain').value        = line.slice(6).toLowerCase(); }
     else if (line.startsWith('SERVER:'))        { document.getElementById('my-server').value       = line.slice(7); }
-    else if (line.startsWith('NOSTR:'))         { document.getElementById('my-nostr').value        = line.slice(6); }
+    else if (line.startsWith('NOSTR-ATTESTATION:')) {
+      // Try to decode + validate. If valid, store as currentAttestation so
+      // the operator doesn't have to re-sign immediately on load.
+      const raw = line.slice(18).trim();
+      if (raw && !raw.startsWith('<')) {
+        try {
+          const ev = JSON.parse(atob(raw));
+          if (window.nGate && window.nGate.ready && window.nGate.verifyEvent(ev)) {
+            currentAttestation = ev;
+            // Snapshot will be set below once identity fields are populated
+            window.__pendingAttestation = true;
+          } else {
+            currentAttestation = null;
+            console.warn('NOSTR-ATTESTATION present but verifyEvent failed — will need re-sign');
+          }
+        } catch (e) {
+          currentAttestation = null;
+          console.warn('NOSTR-ATTESTATION decode failed:', e.message);
+        }
+      }
+    }
+    else if (line.startsWith('NOSTR-HEX:'))     { document.getElementById('my-nostr-hex').value    = line.slice(10).trim().toLowerCase(); }
+    else if (line.startsWith('NOSTR:'))         { document.getElementById('my-nostr').value        = line.slice(6).trim(); }
     else if (line.startsWith('PLATFORM-FEE:')) { document.getElementById('platform-fee').value    = parseFloat(line.slice(13)) || PLATFORM_FEE_DEFAULT; }
     else if (line.startsWith('ESCROW:'))        { document.getElementById('escrow-account').value  = line.slice(7); }
 
@@ -975,6 +1342,36 @@ function loadState() {
 // Auto-save on any field input (button actions call saveState() directly)
 document.addEventListener('input', saveState);
 
+// Auto-sync NOSTR npub <-> hex (only updates the OTHER field; user-typed
+// field is left alone so we never fight the cursor)
+document.getElementById('my-nostr').addEventListener('input', (e) => {
+  const v = e.target.value.trim();
+  if (v.startsWith('npub1') && v.length >= 60) {
+    try {
+      const hex = npubToHex(v);
+      const hexField = document.getElementById('my-nostr-hex');
+      if (hexField.value.trim().toLowerCase() !== hex) hexField.value = hex;
+    } catch {}
+  }
+});
+document.getElementById('my-nostr-hex').addEventListener('input', (e) => {
+  const v = e.target.value.trim().toLowerCase();
+  if (/^[0-9a-f]{64}$/.test(v)) {
+    try {
+      const npub = hexToNpub(v);
+      const npubField = document.getElementById('my-nostr');
+      if (npubField.value.trim() !== npub) npubField.value = npub;
+    } catch {}
+  }
+});
+
+// Toggle the attestation card whenever Nostr fields change, AND mark the
+// stored attestation stale when account/server/hex change away from its
+// signing snapshot.
+['my-username','my-server','my-nostr','my-nostr-hex'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updateAttestationCardVisibility);
+});
+
 // ══════════════════════════════════════════════════════════
 //  INIT
 // ══════════════════════════════════════════════════════════
@@ -997,6 +1394,22 @@ if (lists.length === 0) lists = [defaultList()];
 // Render UI then generate preview
 render();
 generateOutput();
+updateAttestationCardVisibility();
+
+// Detect NIP-07 (browser-side Nostr signer)
+setTimeout(() => {
+  const el = document.getElementById('nip07-status');
+  if (!el) return;
+  if (window.nostr && typeof window.nostr.signEvent === 'function') {
+    el.textContent = '✓ NIP-07 extension detected — sign attestation via the extension (no nsec paste needed).';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚠ No NIP-07 extension (nos2x / Alby / etc) detected. Use the nsec paste fallback below.';
+    el.style.color = 'var(--accent)';
+    const nsecWrap = document.getElementById('attestation-nsec-wrap');
+    if (nsecWrap) nsecWrap.style.display = 'block';
+  }
+}, 400);
 </script>
 </body>
 </html>

@@ -81,6 +81,24 @@
   <!-- ═══════════════ LEFT: FORM ═══════════════ -->
   <div id="editor">
 
+    <!-- ═══ PASTE SIGNED JSON (recommended — single source of truth) ═══ -->
+    <div class="card" style="border-color:rgba(167,139,250,0.4);">
+      <div class="card-title" style="color:var(--purple);">PASTE SIGNED v4call-server.json (recommended)</div>
+      <div class="info-box" style="font-size:0.74rem;background:rgba(167,139,250,0.05);border-color:rgba(167,139,250,0.25);color:var(--text);">
+        If you've just signed your <code>v4call-server.json</code> in
+        <a href="/server-sign.html" style="color:var(--purple);">server-sign.html</a>,
+        paste it here — the form auto-populates AND the embedded Nostr attestation
+        flows through to the Hive post body (as a base64 line). One signed event,
+        two surfaces, no double-signing.
+      </div>
+      <textarea id="json-paste" rows="6" placeholder='{"claim":"v4call-server-ownership", ...}' style="font-size:0.7rem;resize:vertical;height:120px;"></textarea>
+      <div class="btn-row">
+        <button class="secondary" onclick="loadFromJson()">📥 Load fields from JSON</button>
+        <button class="secondary" onclick="clearLoadedAttestation()">Clear attestation</button>
+      </div>
+      <div id="json-load-status" class="field-hint" style="margin-top:8px;"></div>
+    </div>
+
     <div class="card">
       <div class="card-title">IDENTITY</div>
       <div class="field">
@@ -232,10 +250,25 @@
 
 </div>
 
+<script type="module">
+// ── nostr-tools loader — used to verify pasted attestation events before posting.
+import {
+  verifyEvent,
+  nip19
+} from 'https://esm.sh/nostr-tools@2.7.2';
+window.nGate = { verifyEvent, nip19, ready: true };
+document.dispatchEvent(new CustomEvent('nGate-ready'));
+</script>
 <script>
 // ── Constants ─────────────────────────────────────────────
 const FIXED_TITLE = 'v4call-server';
 const APP_NAME    = 'v4call-announce/0.3';
+const ATTESTATION_D_TAG = 'v4call-server-cross-attestation';
+
+// ── State ─────────────────────────────────────────────────
+// Holds the kind-30078 Nostr attestation event extracted from a pasted
+// v4call-server.json. null when no attestation is loaded.
+let loadedAttestation = null;
 
 // ── Bech32 (npub <-> hex) — same primitives as nostr-gen.html ─────────
 const BECH32_CHARSET   = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l';
@@ -331,7 +364,8 @@ function collect() {
     tags:          document.getElementById('tags').value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
     nostr_npub:    document.getElementById('nostr-npub').value.trim(),
     nostr_hex:     document.getElementById('nostr-hex').value.trim().toLowerCase(),
-    nostr_relays:  relays
+    nostr_relays:  relays,
+    nostr_attestation: loadedAttestation
   };
 }
 
@@ -352,6 +386,24 @@ function validate(f) {
   if (f.nostr_hex  && !/^[0-9a-f]{64}$/.test(f.nostr_hex)) return 'NOSTR hex pubkey must be exactly 64 lowercase hex characters.';
   for (const r of f.nostr_relays) {
     if (!r.startsWith('ws://') && !r.startsWith('wss://')) return `NOSTR relay "${r}" must start with ws:// or wss://`;
+  }
+  // If Nostr fields are declared, attestation MUST be loaded — otherwise nGate-verify
+  // will reject the announce.
+  if ((f.nostr_npub || f.nostr_hex) && !f.nostr_attestation) {
+    return 'Nostr key declared but no attestation loaded. Paste your signed v4call-server.json at the top, OR clear all Nostr fields to announce without Nostr-discovery.';
+  }
+  // If we DO have an attestation, sanity-check its tags match the current form values.
+  if (f.nostr_attestation) {
+    const tag = (n) => (f.nostr_attestation.tags.find(t => t[0] === n) || [])[1];
+    if (f.nostr_hex && f.nostr_attestation.pubkey.toLowerCase() !== f.nostr_hex) {
+      return `Attestation pubkey (${f.nostr_attestation.pubkey.slice(0,16)}…) doesn't match NOSTR HEX (${f.nostr_hex.slice(0,16)}…). Re-paste the signed JSON or re-sign.`;
+    }
+    if (tag('v4call_hive_account') !== f.account) {
+      return `Attestation v4call_hive_account tag (${tag('v4call_hive_account')}) doesn't match HIVE ACCOUNT field (${f.account}). Re-paste the signed JSON or re-sign with the right values.`;
+    }
+    if (tag('v4call_domain') !== f.domain) {
+      return `Attestation v4call_domain tag (${tag('v4call_domain')}) doesn't match DOMAIN field (${f.domain}). Re-paste the signed JSON or re-sign with the right values.`;
+    }
   }
   return null;
 }
@@ -374,6 +426,13 @@ function buildBody(f, issued) {
   if (f.nostr_npub)         lines.push(`NOSTR-PUBKEY: ${f.nostr_npub}`);
   if (f.nostr_hex)          lines.push(`NOSTR-PUBKEY-HEX: ${f.nostr_hex}`);
   if (f.nostr_relays.length) lines.push(`NOSTR-RELAYS: ${f.nostr_relays.join(', ')}`);
+  // Embed the kind-30078 cross-attestation as a single base64-encoded JSON line.
+  // nGate-discovery base64-decodes + verifies; without this, user-tier and
+  // server-tier relays reject the post.
+  if (f.nostr_attestation) {
+    const b64 = btoa(JSON.stringify(f.nostr_attestation));
+    lines.push(`NOSTR-ATTESTATION: ${b64}`);
+  }
   lines.push(`DECLARED: ${issued}`);
   lines.push('[/V4CALL-SERVER-V1]');
   const block = lines.join('\n');
@@ -403,6 +462,97 @@ function buildBody(f, issued) {
     '',
     `*Posted via v4call server-announce tool · protocol ${f.protocol}*`
   ].join('\n');
+}
+
+// ── Load fields + attestation from a pasted signed v4call-server.json ────
+function loadFromJson() {
+  const statusEl = document.getElementById('json-load-status');
+  const raw = document.getElementById('json-paste').value.trim();
+  if (!raw) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = 'Paste the signed v4call-server.json above first.';
+    return;
+  }
+  let obj;
+  try { obj = JSON.parse(raw); }
+  catch (e) {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = '✗ JSON parse error: ' + e.message;
+    return;
+  }
+  if (obj.claim !== 'v4call-server-ownership') {
+    statusEl.style.color = 'var(--danger)';
+    statusEl.textContent = `✗ Wrong claim string — expected "v4call-server-ownership", got "${obj.claim}".`;
+    return;
+  }
+
+  // Populate fields
+  const setIf = (id, val) => { if (val !== undefined && val !== null) document.getElementById(id).value = val; };
+  setIf('hive-account', obj.hive_account);
+  setIf('domain',       obj.domain);
+  setIf('escrow',       obj.escrow);
+  setIf('fee-account',  obj.fee_account);
+  setIf('fed-ws',       obj.federation_ws);
+  setIf('nostr-npub',   obj.nostr_npub);
+  setIf('nostr-hex',    obj.nostr_hex);
+  // Relays
+  const relays = Array.isArray(obj.nostr_relays) ? obj.nostr_relays : [];
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById('nostr-relay-' + i);
+    if (el) el.value = relays[i - 1] || '';
+  }
+
+  // Validate + store attestation
+  if (obj.nostr_attestation) {
+    if (!window.nGate || !window.nGate.ready) {
+      statusEl.style.color = 'var(--accent)';
+      statusEl.textContent = '⚠ nostr-tools not loaded yet — try again in a moment.';
+      return;
+    }
+    const ev = obj.nostr_attestation;
+    if (!window.nGate.verifyEvent(ev)) {
+      statusEl.style.color = 'var(--danger)';
+      statusEl.textContent = '✗ JSON loaded BUT the embedded nostr_attestation event fails verifyEvent (tampered or invalid sig).';
+      loadedAttestation = null;
+      updatePreview();
+      return;
+    }
+    const tag = (n) => (ev.tags.find(t => t[0] === n) || [])[1];
+    if (tag('d') !== ATTESTATION_D_TAG) {
+      statusEl.style.color = 'var(--danger)';
+      statusEl.textContent = `✗ Attestation d-tag is "${tag('d')}" — expected "${ATTESTATION_D_TAG}".`;
+      loadedAttestation = null;
+      updatePreview();
+      return;
+    }
+    if (obj.nostr_hex && ev.pubkey.toLowerCase() !== obj.nostr_hex.toLowerCase()) {
+      statusEl.style.color = 'var(--danger)';
+      statusEl.textContent = '✗ Attestation pubkey doesn\'t match well-known nostr_hex (corrupt JSON).';
+      loadedAttestation = null;
+      updatePreview();
+      return;
+    }
+    loadedAttestation = ev;
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = `✓ Loaded — fields populated + verified attestation by ${ev.pubkey.slice(0,16)}… ready to post.`;
+  } else if (obj.nostr_npub || obj.nostr_hex) {
+    statusEl.style.color = 'var(--accent)';
+    statusEl.textContent = '⚠ Fields loaded but the JSON has no nostr_attestation — nGate-verify will reject. Re-sign in server-sign.html.';
+    loadedAttestation = null;
+  } else {
+    loadedAttestation = null;
+    statusEl.style.color = 'var(--green)';
+    statusEl.textContent = '✓ Loaded (no Nostr fields — announce will not include Nostr-discovery info).';
+  }
+  updatePreview();
+}
+
+function clearLoadedAttestation() {
+  loadedAttestation = null;
+  const statusEl = document.getElementById('json-load-status');
+  statusEl.style.color = 'var(--subtext)';
+  statusEl.textContent = 'Attestation cleared. Note: any Nostr fields you leave in the form will fail nGate-verify without an attestation.';
+  updatePreview();
 }
 
 function updatePreview() {
@@ -442,11 +592,12 @@ function postToHive() {
     fee_account:   f.fee_account,
     declared:      issued
   };
-  if (f.nostr_npub || f.nostr_hex || f.nostr_relays.length) {
+  if (f.nostr_npub || f.nostr_hex || f.nostr_relays.length || f.nostr_attestation) {
     v4callMeta.nostr = {};
-    if (f.nostr_npub)          v4callMeta.nostr.pubkey     = f.nostr_npub;
-    if (f.nostr_hex)           v4callMeta.nostr.pubkey_hex = f.nostr_hex;
-    if (f.nostr_relays.length) v4callMeta.nostr.relays     = f.nostr_relays;
+    if (f.nostr_npub)          v4callMeta.nostr.pubkey      = f.nostr_npub;
+    if (f.nostr_hex)           v4callMeta.nostr.pubkey_hex  = f.nostr_hex;
+    if (f.nostr_relays.length) v4callMeta.nostr.relays      = f.nostr_relays;
+    if (f.nostr_attestation)   v4callMeta.nostr.attestation = f.nostr_attestation;
   }
   const jsonMeta = {
     tags:   f.tags,
