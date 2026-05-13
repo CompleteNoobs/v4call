@@ -369,12 +369,20 @@ function toggleExpiry() {
 
 // ── Canonical payload ─────────────────────────────────────
 // Order-dependent — verifiers reproduce this exact string.
-// Two conditional trailers:
-//   1. Nostr-fields trailer (npub | hex | relays_csv) when ANY Nostr field set
-//   2. Attestation id trailer (the kind-30078 event's id) when an attestation
-//      is attached. This binds the Hive signature to a specific Nostr event,
-//      preventing swap-the-attestation attacks.
-// JSONs that opt out of Nostr keep the original 9-field shape.
+// Optional Nostr-fields trailer (npub | hex | relays_csv) when ANY Nostr
+// field set. JSONs that opt out of Nostr keep the original 9-field shape,
+// which is also what v4call's existing federation handshake code in
+// server.js reproduces. This keeps the Hive signature compatible with
+// every layer that verifies it.
+//
+// NOTE: the Nostr attestation event (obj.nostr_attestation) is INTENTIONALLY
+// not included in the canonical string. The attestation is self-verifying
+// via its own NIP-01 id + schnorr sig, and the tag cross-check during
+// nGate-verify catches any swap-attempt (an attestation's tags name a
+// specific hive_account + domain, so reusing one under a different
+// well-known fails the cross-check). Keeping the attestation OUT of the
+// Hive canonical preserves backward compatibility with v4call's existing
+// federation code, which expects the 9-or-12-field shape.
 function buildPayload(obj) {
   const base = [
     obj.claim,
@@ -395,9 +403,6 @@ function buildPayload(obj) {
       obj.nostr_hex  || '',
       relays.join(',')
     );
-    if (obj.nostr_attestation && obj.nostr_attestation.id) {
-      base.push(obj.nostr_attestation.id);
-    }
   }
   return base.join('|');
 }
@@ -586,7 +591,10 @@ async function signWithKeychain() {
     }
   }
 
-  // STEP 2: Hive Keychain. Payload now includes nostr_attestation.id if present.
+  // STEP 2: Hive Keychain signs the canonical payload. The Nostr attestation
+  // sits in the JSON alongside the Hive sig but isn't covered by it — the
+  // attestation is self-verifying via its own NIP-01 sig, and the tag
+  // cross-check during nGate-verify binds it to the surrounding fields.
   fields.issued = nowIso();
   document.getElementById('issued').value = fields.issued;
   const payload = buildPayload(fields);
