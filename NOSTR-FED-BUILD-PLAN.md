@@ -1,0 +1,278 @@
+# v4call ↔ Nostr Federation — Build Plan & Steps
+
+> **Read order:** v4call `CLAUDE.md` → v4call `FEDERATION-BUILD-SPEC.md` → this file →
+> nGate `NOSTR-DESIGN.md` + `NOSTR-DESIGN-NOTES.md` (the design rationale; lives in the
+> nGate repo at `/home/noob/CAI/nGate/`).
+>
+> **Purpose:** A self-contained pickup point for the v4call-side Nostr federation work.
+> Any thread / AI / person should be able to read this and know exactly what is done,
+> what is not, the locked decisions, and the next concrete step. Design lives in nGate;
+> **execution lives here.**
+>
+> **Status:** Planning. No v4call-side code written yet. Created 2026-05-18.
+
+---
+
+## 1. The one-paragraph situation
+
+v4call has working WebSocket federation (presence, paid DMs, calls, payments) but it
+has reliability problems — "users sometimes don't show across servers." The fix is to
+move *discovery and presence* onto a Nostr pub/sub substrate while keeping Hive as the
+trust root and keeping all real-time/paid/signaling concerns on the existing server
+infrastructure. **The relay-side gate (nGate) is already built and live in production.**
+The remaining work is entirely the v4call `server.js` side: a server-only Nostr client
+that publishes its own announce and subscribes to others.
+
+---
+
+## 2. Two repos, two jobs — do not conflate
+
+| | nGate (`/home/noob/CAI/nGate/`) | v4call (`/home/noob/CAI/v4call/`) |
+|---|---|---|
+| Role | The bouncer at the relay door | The guest who publishes & listens |
+| Decides | Which server npubs may **write** to a relay | Which relays to read; what to publish |
+| Driven by | Hive `v4call-server` posts → strfry whitelist | Each server's own Hive `NOSTR-RELAYS` field |
+| State | **DONE — Stage 4 strfry live on both relays** | **NOT BUILT — this plan** |
+
+**Critical separation (intentional, from nGate NOSTR-DESIGN-NOTES "separation of
+concerns"):** nGate does NOT advertise relay URLs to v4call. v4call servers learn
+relays from each peer's own Hive announce post. Do not wire nGate → v4call directly;
+it destroys the composability that was deliberately designed in. Each side evolves
+independently.
+
+---
+
+## 3. What is already done (do not rebuild)
+
+- **nGate Stage 4 (2026-05-18):** strfry policy-plugin relays live and reproducible on
+  `nostr.v4call.com` AND `nostr.hive-book.com`. Whitelist updates are a live
+  `whitelist.json` rewrite — no relay restart. nGate holds no private keys.
+- **nGate scan/verify/gate pipeline:** reads Hive `v4call-server` posts, verifies Hive
+  sig + Nostr attestation + tag cross-checks, applies HP/token gate, rewrites whitelist.
+- **Operator tooling already emits Nostr fields:** `server-sign.html` and
+  `server-announce.html` have the NOSTR card (npub + hex + relay slots) and embed a
+  kind-30078 attestation. `server-announce.html` adds `NOSTR_PUBKEY:` / Nostr trailer
+  to the Hive post body. Option B canonical payload (Hive sig covers 9-or-12 fields,
+  NOT attestation.id) — backward-compatible with v4call's existing federation verify.
+- **server.js already parses a per-user `NOSTR:` field** in V2 rate posts. **This is a
+  DIFFERENT namespace** (the v0.18.5 per-user reachability feature) — see §7.
+
+**Implication:** the original 8-phase plan's Phases 1–3 (learn Nostr / spike / run a
+relay) are effectively spent by the nGate work. v4call enters at ~Phase 4. There are
+live relays to test against on day one.
+
+---
+
+## 4. Locked design decisions (this plan)
+
+Carries forward nGate `NOSTR-DESIGN.md` "Design Decisions Locked In" plus decisions
+made 2026-05-18:
+
+1. **Architecture B before C, non-negotiable.**
+   - **B** = Nostr augments/replaces the 2-hour Hive discovery scan. Low blast radius,
+     additive, validates the whole key→relay→whitelist→subscribe pipeline. Ship this.
+   - **C** = presence federation ("user foo went offline @hive-book.com"). The actual
+     fix for "users don't show." Higher risk. Separate version, AFTER B is stable in
+     production. Do not bundle.
+   - Honest note: B alone is *partly cosmetic* (server discovery is rare). B's real job
+     is to de-risk C and add a parallel-failure-mode channel + reduced Hive RPC load.
+
+2. **Per-server Nostr keypair, file-first, in the mounted data dir.**
+   - Path: `data/nostr-key.json`, chmod 600. `data/` is already fully `.gitignore`d.
+   - **Survives `docker compose down && build --no-cache` automatically** because
+     `./data/` is a host bind-mount (same persistence guarantee as the SQLite ledger
+     DB). Zero operator action on rebuild. Only lost if the host `data/` dir is deleted.
+   - **Bring-your-own key supported (file-first detection):** on boot, if
+     `data/nostr-key.json` exists → use it (server-generated OR operator-supplied before
+     first boot). If absent → auto-generate.
+   - **Optional one-time `.env` seed:** `NOSTR_NSEC` (an existing nsec). Read **once** to
+     write `data/nostr-key.json`, then the file wins forever. Operator should remove the
+     env var after first boot. Convenience path for BYO without hand-crafting JSON. The
+     key never lives only in `.env` long-term (keeps it out of the escrow-key blast
+     radius — escrow key stays the only long-lived secret in `.env`).
+   - **Key never goes browser-side, never logged.**
+
+3. **Hive↔npub cross-reference is the trust backstop, re-checked in server.js.**
+   - Every Nostr event is intrinsically schnorr-signed; nGate's relay only admits
+     whitelisted npubs. But **public fallback relays do NOT run nGate policy.** So
+     `server.js` MUST independently re-verify the Hive announce ↔ npub binding before
+     trusting any discovered peer. No fourth signing layer needed — verify the three
+     anchors that already exist (Nostr sig + relay whitelist + Hive cross-ref).
+
+4. **Key rotation flow (resolves nGate open question #3):** generate new key → update
+   `NOSTR_PUBKEY:` in the Hive announce post (via `server-announce.html`) → republish.
+   The old key naturally ages out of the relay whitelist on nGate's next scan. No
+   signed-transition-note protocol at current scale (3 informally-trusted operators).
+   Revisit if the federation grows to many untrusted operators.
+
+5. **Discovery feeds the EXISTING approval flow, never auto-connect.** Nostr-discovered
+   peers become candidates in the existing `discoveredPeers` → `admin-peers.html`
+   manual-approval path, same as Hive-scan candidates. The Hive 2h scan stays as a
+   fallback — it is NOT deleted. Fail-open to the old path.
+
+6. **Server-side only.** New module is required by `server.js` (e.g. `lib/nostr-fed.js`).
+   `public/index.html` is untouched (consistent with v4call's "don't split index.html"
+   and "browsers stay dumb" rules). No browser ever connects to a relay.
+
+7. **kind 30078 (NIP-78 parameterized replaceable), `d` tag = domain.** Re-announces
+   replace, don't pile up. `t=v4call-server` for discovery. (`t=v4call-presence`,
+   `d=domain:users` is Architecture C / Phase D — not B.)
+
+8. **No federation protocol bump.** Nostr is entirely outside the existing federation
+   WS protocol. v0.4 stays valid. Existing `FEDERATION_PEERS` keeps working. Purely
+   additive.
+
+---
+
+## 5. Phased build path (v4call repo)
+
+Each phase ships something working and is independently rollback-able. Stop and
+measure in production at the Phase C checkpoint before touching Phase D.
+
+### Phase A — Spike (throwaway, ~1 day)
+- `scripts/nostr-spike.js` (~100 lines, `nostr-tools`).
+- Generate a key, publish kind-30078 `t=v4call-server` to the **live**
+  `nostr.v4call.com`, run a second instance subscribing for the same tag, see it
+  round-trip.
+- **Why first:** proves server-key → nGate-whitelist → publish/subscribe works
+  end-to-end against real infra before any `server.js` change. The relays already exist.
+- **Exit:** spike works from two machines / two keys. Throwaway after.
+
+### Phase B — server.js publishes (Architecture B, half 1)
+- New `lib/nostr-fed.js`, required by `server.js`. Behind `NOSTR_ENABLED` (default off
+  until proven, then default on).
+- Key bootstrap per §4.2 (file-first; auto-gen; optional one-time `NOSTR_NSEC` seed).
+- On first boot with no npub in own Hive announce: print a loud, non-blocking warning
+  ("Add NOSTR_PUBKEY:npub… to your Hive announce post"). Graceful degradation — server
+  runs normally on Hive-only discovery meanwhile.
+- Publish own kind-30078 announce on boot + every `NOSTR_REPUBLISH_HOURS` (default 6).
+- **Exit:** the server's announce is observable from an external Nostr client.
+
+### Phase C — server.js subscribes + feeds discovery (Architecture B, half 2) — **SHIPPABLE MILESTONE**
+- Subscribe to configured relays with a `t=v4call-server` filter.
+- For each event: re-verify Hive↔npub binding server-side (§4.3), then drop the peer
+  into the existing `discoveredPeers` structure → surfaces in `admin-peers.html` for
+  manual approval. Hive 2h scan stays as fallback.
+- Multi-relay publish + dedupe-on-read by event id (standard Nostr pattern).
+- **Exit / checkpoint:** new peers appear in the admin approval queue within seconds
+  (vs up to 2h). Run in production. Measure reliability + RPC-load delta BEFORE Phase D.
+- **This is the v0.19-class ship.** Stop here until it's boringly stable.
+
+### Phase D — Presence federation (Architecture C) — separate version, separate scope
+- Only after Phase C is stable in production with measured improvement.
+- Throttled `kind 30078`, `d=domain:users`, `t=v4call-presence` events: server batches
+  join/leave changes (≤1 publish / 30s) + heartbeat republish (~60s).
+- Each server subscribes to peers' presence, maintains a local cross-fed user
+  directory, renders it in the lobby with click-through to the peer server (Q1 decision:
+  click-through via existing Hive auth — no new contact-request protocol).
+- **This is the real "users don't show" fix.** Document its own sub-plan when Phase C
+  is done; do not pre-design it in detail here (scope discipline).
+
+---
+
+## 6. Proposed `.env` / `.env.example` additions
+
+```bash
+# ── Nostr Federation Discovery (optional, additive) ───────────
+# Comma-separated relay WS URLs. Include >=1 v4call-operated relay
+# AND >=2 public relays for redundancy.
+NOSTR_RELAYS=wss://nostr.v4call.com,wss://nostr.hive-book.com,wss://relay.damus.io,wss://nos.lol
+
+# Re-publish own announce every N hours (guards against relay drops).
+NOSTR_REPUBLISH_HOURS=6
+
+# Master switch. false = server runs Hive-only discovery, unchanged.
+NOSTR_ENABLED=true
+
+# OPTIONAL one-time bring-your-own-key seed. An existing nsec.
+# Read ONCE on first boot to create data/nostr-key.json, then ignored.
+# Remove this line after first successful boot. Leave blank to auto-generate.
+NOSTR_NSEC=
+```
+
+`data/nostr-key.json` needs no `.gitignore` entry — `data/` is already fully ignored.
+
+---
+
+## 7. Two `NOSTR` namespaces — do not cross them
+
+| | Per-user `NOSTR:` (rate post V2) | Server `NOSTR_PUBKEY:` (server-announce) |
+|---|---|---|
+| Scope | One v4call user's reachability | One v4call server's federation identity |
+| Set via | `rate-editor.html` | `server-sign.html` / `server-announce.html` |
+| Feature | v0.18.5 per-user (display-only buttons) | THIS plan (federation discovery) |
+| Parsed where | already in `server.js` `parseRatesV2` | new `lib/nostr-fed.js` |
+
+Same word, totally different trust scope and lifecycle. The v0.18.5 per-user Nostr
+plan and this federation plan are independent — keep them out of each other.
+
+---
+
+## 8. Known gotchas (collected from nGate's road)
+
+- **npub vs hex is a silent-failure class.** strfry whitelist needs hex, not bech32.
+  Be deliberate about encoding at every boundary when publishing. `nostr-tools`
+  handles both but won't stop a wrong-format-wrong-field mistake.
+- **Public fallback relays don't enforce nGate policy** — hence the mandatory
+  server-side Hive↔npub re-check (§4.3). Never trust a presence/announce event purely
+  because it arrived from a relay.
+- **Relay reliability is mediocre.** Publish to multiple, subscribe from multiple,
+  dedupe by event id. Don't go all-in on self-operated relays — keep 2–3 public ones
+  in the default list as backup.
+- **`nostr-tools` v2 is ESM-only in Node.** nGate uses a `.mjs` helper for this. Match
+  that pattern or configure module type accordingly.
+- **Don't delete the Hive scan.** It is the fallback and the trust root. Nostr is the
+  speed layer on top, not a replacement.
+- **Bind-mount persistence is the rebuild-survival mechanism** — only works if the key
+  file is under the mounted `./data/` path, not an ephemeral container path. Same trap
+  class as the historical SQLite UID/mount issues.
+
+---
+
+## 9. Scope boundaries — what this is explicitly NOT
+
+- Not browser-side. Browsers talk only to their home server, unchanged.
+- Not Nostr DMs / chat content. Direct messaging stays on the WS federation.
+- Not a payment channel. Payments stay Hive-native.
+- Not token-gating in v4call — that is nGate's job (already built). Stake/burn/
+  subscribe gating (Variant 2/3) is a separate future, not Architecture B.
+- Not a federation protocol bump. v0.4 WS protocol stays valid.
+- Not a Nostr social presence. No notes, no follows, no feeds.
+- Not for end-users to think about. Operators configure relays; users just see "the
+  federation feels more reliable."
+
+---
+
+## 10. Open questions still to resolve (carried from nGate design docs)
+
+1. Final recommended public relay default list (kind-30078 reliability + retention).
+2. Relay storage policy per kind (server announces: keep; presence: short expiry) —
+   relevant at Phase D, set in strfry config (nGate side).
+3. Nostr-only peer with no Hive announce — Phase C decision: reject / quarantine with
+   "unverified" badge. Lean: quarantine + operator-visible flag, never auto-approve.
+4. Presence throttle interval — start 30s, tune from Phase D operational data.
+
+Resolved by this plan: key storage (§4.2), BYO key (§4.2), key rotation (§4.4),
+discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
+
+---
+
+## 11. Status log
+
+- **2026-05-19** — **Phase A DONE.** `scripts/nostr-spike.mjs` (self-contained, own
+  deps, nothing in server.js/index.html touched). Round-trip proven on a public relay.
+  nGate confirmed blocking non-whitelisted keys on BOTH `nostr.v4call.com` and
+  `nostr.hive-book.com` ("blocked: not on relay whitelist"). Three gotchas captured in
+  `noob-docs/nostr-fed-walkthrough.wiki`: (1) Node-18 Web Crypto polyfill;
+  (2) nostr-tools 2.23 takes a single filter object, not an array; (3) `pool.publish`
+  RESOLVES (not rejects) on an unreachable relay with a "connection failure" string —
+  so the spike now reports three states ACCEPTED / REJECTED / UNREACHABLE, a
+  distinction Phase C must reuse (peer-down ≠ peer-rejected). Spike is disposable now
+  the wiki exists.
+- **2026-05-18** — Plan created. nGate confirmed at Stage 4 (strfry live, both relays).
+  Locked: Architecture B first; per-server key file-first in `data/nostr-key.json`
+  (survives no-cache rebuild via bind-mount); BYO key via file-drop or one-time
+  `NOSTR_NSEC` seed; Hive↔npub re-checked server-side; key rotation = update Hive
+  announce + age out; discovery feeds existing approval flow; server-side only; no
+  protocol bump. Phases A→D defined; Phase C is the shippable milestone with a
+  measure-in-production checkpoint before Phase D.

@@ -256,6 +256,7 @@
         <span>permlink: <strong id="meta-permlink">—</strong></span>
       </div>
       <textarea id="preview-area" readonly placeholder="Fill the form — a live preview of the Hive post body will appear here."></textarea>
+      <div id="nostr-warning" class="warn-box" style="display:none;margin-top:12px;background:rgba(245,166,35,0.07);border-color:rgba(245,166,35,0.35);"></div>
       <div class="warn-box" style="margin-top:12px;">
         <strong>Note:</strong> posting to Hive costs Resource Credits. Make sure <code>@your-account</code> has some Hive Power staked (or delegated).
         A new post consumes roughly the same RC as a comment — usually fine if the account has 10+ HP.
@@ -405,11 +406,11 @@ function validate(f) {
   for (const r of f.nostr_relays) {
     if (!r.startsWith('ws://') && !r.startsWith('wss://')) return `NOSTR relay "${r}" must start with ws:// or wss://`;
   }
-  // If Nostr fields are declared, attestation MUST be loaded — otherwise nGate-verify
-  // will reject the announce.
-  if ((f.nostr_npub || f.nostr_hex) && !f.nostr_attestation) {
-    return 'Nostr key declared but no attestation loaded. Paste your signed v4call-server.json at the top, OR clear all Nostr fields to announce without Nostr-discovery.';
-  }
+  // Attestation is optional. Without it, the post simply omits the NOSTR-ATTESTATION
+  // line and consumers that require nGate-verify will skip Nostr-discovery for this
+  // peer (everything else — Hive verification, federation handshake, calls, DMs —
+  // still works). If you want full Nostr-discovery, paste your signed
+  // v4call-server.json at the top of the page so the attestation flows through.
   // If we DO have an attestation, sanity-check its tags match the current form values.
   if (f.nostr_attestation) {
     const tag = (n) => (f.nostr_attestation.tags.find(t => t[0] === n) || [])[1];
@@ -582,6 +583,18 @@ function updatePreview() {
   document.getElementById('preview-area').value = body;
   document.getElementById('meta-title').textContent    = FIXED_TITLE;
   document.getElementById('meta-permlink').textContent = permlink;
+  // Soft warning: Nostr fields without an attestation — post is still valid,
+  // but consumers requiring nGate-verify will skip Nostr-discovery for this peer.
+  const warnEl = document.getElementById('nostr-warning');
+  if (warnEl) {
+    if ((f.nostr_npub || f.nostr_hex) && !f.nostr_attestation) {
+      warnEl.style.display = 'block';
+      warnEl.textContent = '⚠ Nostr fields are set but no attestation is loaded. The post will publish without the NOSTR-ATTESTATION line — Nostr-discovery will be skipped by strict consumers. Paste your signed v4call-server.json above to include it.';
+    } else {
+      warnEl.style.display = 'none';
+      warnEl.textContent = '';
+    }
+  }
 }
 
 // ── Keychain post ─────────────────────────────────────────
