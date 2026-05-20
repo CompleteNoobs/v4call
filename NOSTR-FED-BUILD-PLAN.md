@@ -259,6 +259,29 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-19** — **Phase B DONE & proven on production servers.** `nostr-fed.mjs`
+  (ESM, isolated), ~20 lines in `server.js` (config consts + non-blocking dynamic
+  `import()` after the unchanged federation block), `nostr-tools` added to
+  `package.json`, `./data/nostr:/app/nostr` mount, `.env.example` block,
+  `FED_DISCOVERY_MODE=both` knob. Key bootstrap (file → NOSTR_NSEC seed →
+  generate) verified incl. crash-proof backstop. Live result on hive-book.com:
+  identity persisted, all 4 relays (2 gated + 2 public) ACCEPTED (nGate
+  whitelisting via Hive announce works end-to-end). Phase B wiki section written
+  with real log output.
+  **Two traps captured (do not repeat):**
+  (1) **Dockerfile COPY trap** — the Dockerfile copies files individually
+  (`COPY server.js`, `COPY public/`); a new top-level server file is NOT
+  auto-included. Every new top-level server file needs its own `COPY` line in
+  the Dockerfile, or it's missing inside the container (`Cannot find module`).
+  (2) **Account-mismatch after `git reset --hard`** — federation verifies that
+  `.env` `SERVER_HIVE_ACCOUNT`, the deployed `/.well-known/v4call-server.json`
+  signer, and the Hive announce `HIVE-ACCOUNT` all name the SAME Hive account.
+  Restoring a `bk.v4call-server.json` signed by a different-but-valid account
+  (`hive-book` vs `hive-book.com` — both real Hive accounts) makes federation
+  flap forever with "account mismatch". Not Nostr-related; a rebuild merely
+  surfaced latent config drift. Fix = align all three, no rebuild needed
+  (`.env` + static file only). Lesson: after a break "caused by a build",
+  check what the reset/build *restored*, not only what code changed.
 - **2026-05-19** — **Phase A DONE.** `scripts/nostr-spike.mjs` (self-contained, own
   deps, nothing in server.js/index.html touched). Round-trip proven on a public relay.
   nGate confirmed blocking non-whitelisted keys on BOTH `nostr.v4call.com` and

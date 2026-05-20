@@ -1,0 +1,684 @@
+= Local Recording and Adaptive Bitrate for v4call Rooms =
+
+'''Status:''' Design notes only. Not implemented. Captures the design discussion before context fades.
+
+'''Why this exists:''' WebRTC trades latency for quality. On a bad connection, the received stream stutters and freezes, and there is no fix in post-production because the damage happened on the wire. The fix is to '''decouple the recording from the transport''' — every participant records their own mic and camera locally, at full quality, while the WebRTC stream becomes a low-latency monitor feed for the live conversation. The editor later combines the clean local tracks into the final artifact. This is how Riverside.fm, Squadcast, Zencastr, and Cleanfeed work. It is genuinely competitive with those services and fits v4call's architecture cleanly.
+
+This document also covers a related feature: '''host-controlled bitrate policy'''. Once recording is decoupled from the wire, the wire stream's only job is "good enough that humans can talk in real time," which means the host can dial the WebRTC quality way down to favor latency and reliability on bad networks.
+
+'''Read this first if you are a noob:''' "WebRTC" is the technology browsers use for video calls. It sends audio and video over the internet using a protocol (UDP) that prioritises speed over reliability — it would rather drop a packet than wait for it. That is the right choice for live conversation. But it means the received stream is sometimes glitchy, especially on bad connections, and you cannot fix that in editing. The trick this document describes: every participant records their own clean mic and camera '''locally''' on their own machine, at full quality, while the WebRTC stream just shows everyone what is happening live. Afterwards the editor stitches the local recordings together. The live experience does not have to be perfect because the recording is not the live stream.
+
+'''One more thing for the noob:''' the late phases of the design (Phase 7) bring in '''IPFS''' for paid recordings — the recordings get encrypted in the browser, uploaded to a decentralised storage network, and the link to download them is shared in the room. Only people with the right Hive key can decrypt. The v4call server never sees the plaintext recording. This is the trust-minimised, sovereign version of "cloud recording" — same convenience, none of the "the platform can watch your podcast" problem.
+
+== Document structure ==
+
+* '''Part 1 — Why local recording, what the competitive landscape looks like.'''
+* '''Part 2 — The mechanics of local recording in the browser.'''
+* '''Part 3 — The hard sub-problems (storage, tab lifecycle, consent, federation, clock sync).'''
+* '''Part 4 — Telling the host who is recording.'''
+* '''Part 5 — Host-controlled bitrate policy.'''
+* '''Part 6 — How the two features reinforce each other.'''
+* '''Part 7 — Open questions and decisions to make at build time.'''
+* '''Part 8 — Phased implementation plan.'''
+* '''Part 9 — References and glossary.'''
+
+----
+
+= PART 1 — WHY LOCAL RECORDING, AND THE COMPETITIVE LANDSCAPE =
+
+== The problem ==
+
+Today, if a v4call room is recorded by some external means (OBS, Zoom-style cloud recording, or screen-capture software), the recording captures the '''received''' WebRTC stream. That stream has been:
+
+* Compressed by the sender's encoder (some quality loss).
+* Sent over UDP (some packets lost).
+* Reconstructed by the receiver's decoder (some quality loss).
+* Subject to packet-loss concealment and jitter-buffer fudging (some artifacts).
+
+The result is an archive that permanently encodes whatever network problems happened during the call. Bad audio in a particular minute? Bad audio in the recording, forever. No edit will fix it.
+
+== The fix: local recording per participant ==
+
+Each participant's browser records their own raw mic and camera output directly, '''before''' anything touches the network. The local recording sees the clean, full-quality stream straight from <code>getUserMedia</code>. The network can be on fire, the WebRTC stream can be a glitchy mess, and the local recordings are still pristine.
+
+After the call, the host (or a designated editor) collects the local recordings from each participant and assembles them on a timeline. Each speaker's track is full-quality. The editor cuts, trims, and produces a final podcast / video / VAR.
+
+== The competitive landscape ==
+
+This category is called '''local recording''' or '''isolated track recording'''. Established players:
+
+* '''Riverside.fm''' — probably the market leader. Each participant's browser records locally; progressive upload during the session; host gets per-participant tracks at the end. Pitch: "studio-quality recordings, even over bad internet."
+* '''Squadcast''' (now owned by Descript) — same model, podcast focus.
+* '''Zencastr''' — one of the earliest in this space.
+* '''Cleanfeed''' — focuses on audio (radio-quality remote interviews).
+* '''StreamYard''' — has a local recording option.
+* '''Descript SquadCast mode''' — integrated with Descript's transcription/editing pipeline.
+
+Zoom and Google Meet have "record locally" options but they typically record the '''received mixed stream''' by default. The isolated-track-per-participant version is a paid add-on for some plans, and the integration with their editor is weaker.
+
+== Why v4call is well-suited to this ==
+
+* v4call already does WebRTC peer-to-peer media, so the streams exist client-side and can be tapped for local recording without architectural change.
+* v4call's audience (federation operators, crypto-native users, regions with patchy connectivity, mobile users on 4G) genuinely benefits from the "good recording even on bad network" property. This is exactly where Riverside-class services shine and where Zoom struggles.
+* v4call has '''payments''' built in. Local recording is a sellable premium feature. A room where the host pays in HBD or a custom token per participant-hour for local recording is a real business model wrapped around the feature. Riverside charges per-host monthly subscriptions; v4call could charge per-room or per-participant-hour in HBD.
+
+----
+
+= PART 2 — THE MECHANICS OF LOCAL RECORDING IN THE BROWSER =
+
+== The API ==
+
+Every modern browser has the '''MediaRecorder API'''. It takes a <code>MediaStream</code> (which v4call already has, from <code>getUserMedia</code> for mic/cam) and writes it to a <code>Blob</code> in chunks. You give it a codec — typically:
+
+  video/webm; codecs="vp9,opus"     // best quality, modern browsers
+  video/webm; codecs="vp8,opus"     // broader compatibility
+  audio/webm; codecs="opus"          // audio-only
+
+…and the browser produces a continuously growing WebM file.
+
+== The naive approach (do not do this) ==
+
+  const recorder = new MediaRecorder(localStream);
+  const chunks = [];
+  recorder.ondataavailable = e => chunks.push(e.data);
+  recorder.onstop = () => {
+    const blob = new Blob(chunks, { type: 'video/webm' });
+    downloadBlob(blob, 'recording.webm');
+  };
+  recorder.start();
+
+Problems with the naive approach:
+
+* All chunks held in memory until <code>stop()</code>. For a 1-hour 1080p recording that's 1-3 GB of RAM. Browser may run out and crash.
+* If the tab closes or crashes mid-recording, '''everything is lost'''.
+* No way to recover partial recordings.
+
+== The right approach ==
+
+Chunk every few seconds. Write each chunk to '''IndexedDB''' with a sequence number. On <code>stop()</code> (or recovery from crash), reassemble chunks in order into a single Blob.
+
+  const recorder = new MediaRecorder(localStream, {
+    mimeType: 'video/webm; codecs="vp9,opus"',
+    videoBitsPerSecond: 5_000_000,    // 5 Mbps local recording
+    audioBitsPerSecond: 128_000        // 128 kbps audio
+  });
+
+  let chunkSeq = 0;
+  recorder.ondataavailable = async (e) => {
+    if (e.data.size === 0) return;
+    await idb.put('recordings', {
+      roomId, participantHex, seq: chunkSeq++,
+      blob: e.data, timestamp: Date.now()
+    });
+  };
+
+  recorder.start(5000);   // chunk every 5 seconds
+
+On crash recovery, on next page load, check IndexedDB for any orphaned chunks tagged with rooms that the user was in, and offer to recover/download them.
+
+== Progressive upload (Riverside-style) ==
+
+Instead of just storing chunks locally, '''upload each chunk to the v4call server as it is written'''. The server accumulates the chunks server-side. On <code>stop()</code>, the server already has the full recording.
+
+Benefits:
+* Survives client crashes (already partially uploaded).
+* Host can retrieve recordings without chasing participants.
+* Local IndexedDB stays small (chunks can be deleted after upload).
+
+Costs:
+* Uses bandwidth during the call (in addition to WebRTC bandwidth).
+* Server needs storage capacity.
+* If upload fails, fall back to local-only mode.
+
+'''Recommended:''' offer both modes per room. Default to progressive upload for "host-organized podcast" rooms; default to local-only for ephemeral conversations.
+
+----
+
+= PART 3 — THE HARD SUB-PROBLEMS =
+
+== 3.1 Storage quota ==
+
+A 1-hour 1080p WebM at reasonable quality is 1-3 GB. IndexedDB has quotas — typically generous (often gigabytes available on desktop) but variable, and a user with a nearly-full disk will hit a quota error mid-recording.
+
+'''Mitigations:'''
+* Before recording starts, call <code>navigator.storage.estimate()</code> to check available space.
+* If estimated free space < expected recording size × 1.5, warn the user and ask whether to start anyway, drop resolution, or switch to audio-only.
+* During recording, monitor quota usage; if approaching limit, either auto-drop resolution mid-session or auto-trigger upload to server to free local space.
+* Refuse to start if free space is critically low.
+
+== 3.2 Browser tab lifecycle ==
+
+This is the silent killer. If the user:
+
+* Backgrounds the tab → modern browsers throttle background tabs aggressively. MediaRecorder may pause or drop frames.
+* Navigates away → recording stops mid-stream.
+* Closes laptop lid → tab suspends.
+* Switches to another app on mobile → OS may suspend the browser process.
+* Mobile Safari especially → hostile to long-running media capture.
+
+'''Mitigations:'''
+* Use <code>navigator.wakeLock.request('screen')</code> to keep the screen awake during recording.
+* Show a persistent "Recording in progress — please keep this tab open" indicator.
+* Use the Page Visibility API; if the page goes hidden, show a notification.
+* On mobile, surface a warning at recording start: "Mobile recording is best-effort. If you switch apps, recording may stop."
+* Use <code>navigator.storage.persist()</code> to request persistent storage permission, which makes IndexedDB less likely to be evicted.
+* Heartbeat from the recording tab to the server every N seconds; if the heartbeat stops while a recording is in progress, the server can log a "recording possibly interrupted" event for the host.
+
+== 3.3 Consent and privacy ==
+
+Multi-party recording has consent implications that vary by jurisdiction. Two-party consent states in the US (California, Florida, others) require all parties to consent.
+
+Even outside legal requirements, the social contract of "I am being recorded" is opt-in. v4call should:
+
+* Show an unambiguous indicator on every participant's tile when '''anyone''' in the room is recording (see Part 4 for the wire format).
+* Log the recording start as a room event.
+* Allow users to refuse to be in a room where others are recording (they leave the room).
+* Optionally, the host can set the room to "by joining you consent to local recording" — gating join on consent.
+
+The legal-coverage version: a room-creation option that says "this is a recorded room; participants who join consent to being recorded by other participants." Surface this at join time, capture the consent, log it.
+
+== 3.4 Clock sync (this is the make-or-break detail) ==
+
+If each participant's recording has a slightly different start time and slight clock drift, the editor has to align them manually — usually by clap-syncing on an audible event. Tedious, error-prone, and the difference between "professional output" and "amateur mess."
+
+'''The fix:''' record a server-synced GMT timestamp into the recording's sidecar metadata, ideally with periodic sync samples throughout the recording.
+
+'''Why not just use the browser's wall clock:''' browser clocks drift, NTP adjusts mid-recording, users sometimes have system time set wrong deliberately, mobile devices' clocks are especially flaky. A "GMT timestamp from the user's machine" without server cross-check looks authoritative but is not.
+
+'''Recommended approach:'''
+
+# On recording start, the browser asks the v4call server for the current GMT (a simple socket round-trip).
+# Browser measures the round-trip time and computes the server's "now" at the moment of recording start, accounting for one-way latency (RTT/2 is a reasonable estimate).
+# Browser stores <code>recordingStartGMT</code> in a sidecar JSON file alongside the WebM.
+# Every N seconds during recording, browser re-syncs with the server and records the offset. Drift over time becomes measurable.
+# Sidecar JSON file looks roughly like:
+
+  {
+    "roomId": "podcast-2026-05-20",
+    "participantHex": "abc123...",
+    "displayName": "alice",
+    "recordingStartGMT": "2026-05-20T14:30:00.123Z",
+    "recordingStopGMT": "2026-05-20T15:45:12.987Z",
+    "syncSamples": [
+      { "atRecordingMs": 0, "serverGMT": "2026-05-20T14:30:00.123Z" },
+      { "atRecordingMs": 60000, "serverGMT": "2026-05-20T14:31:00.119Z" },
+      { "atRecordingMs": 120000, "serverGMT": "2026-05-20T14:32:00.115Z" }
+    ],
+    "chunks": [
+      { "seq": 0, "startMs": 0, "endMs": 5000, "filename": "chunk-0000.webm" },
+      { "seq": 1, "startMs": 5000, "endMs": 10000, "filename": "chunk-0001.webm" }
+    ],
+    "audioCodec": "opus",
+    "videoCodec": "vp9",
+    "resolution": "1920x1080",
+    "framerate": 30
+  }
+
+With this metadata, the editor (or an automated tool) can align all participants' tracks to millisecond precision regardless of their local clock state.
+
+'''This is the single highest-leverage piece of work in the whole feature.''' Do it well or do not bother. The difference between "editor opens four files and they are auto-aligned" and "editor opens four files and clap-syncs by ear" is the difference between a feature people use once and a feature people pay for.
+
+== 3.5 Federation delivery ==
+
+v0.16 cross-server rooms mean a federated participant's local recording lives on '''their''' browser, on a different v4call server's session. The host server does not automatically receive it.
+
+Recommended approach: out-of-band delivery via signed upload URL.
+
+# Host's server generates a signed, one-time upload URL for each federated participant when they start recording.
+# Federated participant's browser uploads chunks to that URL directly (not through the federation socket).
+# Federation socket carries only the small control messages: "recording started," "recording stopped," "upload progress."
+
+Rationale: recordings are large (gigabytes), federation socket is built for small control messages, and direct upload sidesteps the federation socket entirely. The federation server's role is identity verification and event coordination, not bulk file transfer.
+
+== 3.6 Editor delivery ==
+
+What does the editor receive at the end?
+
+'''Recommended package:''' a ZIP file containing:
+* One WebM per participant.
+* One sidecar JSON per participant (clock sync metadata, chunk info).
+* A master manifest listing all participants, their roles in the room (host, guest, etc.), and the absolute time range of the session.
+
+Most modern NLEs handle WebM natively (Adobe Premiere added it in ~2022, DaVinci Resolve has it via codec packs, Descript ingests it directly).
+
+'''Optional premium service:''' transcode to ProRes or DNxHD server-side before delivery, for editors using older or more demanding software. Costs CPU but might be worth it for paid v4call rooms.
+
+----
+
+= PART 4 — TELLING THE HOST WHO IS RECORDING =
+
+== The wire format ==
+
+A new room socket event:
+
+  // When a participant starts recording locally
+  socket.emit('local-recording-started', {
+    username: 'alice',
+    startedAtGMT: '2026-05-20T14:30:00.123Z',
+    mode: 'av'   // or 'audio-only'
+  });
+
+  // When they stop
+  socket.emit('local-recording-stopped', {
+    username: 'alice',
+    stoppedAtGMT: '2026-05-20T15:45:12.987Z',
+    durationMs: 4512864
+  });
+
+The server broadcasts these to all other participants in the room. Same pattern as the existing 🎤/🎥/🖥️ device-toggle events.
+
+== UX surfaces ==
+
+'''A red dot on the recording participant's tile.''' Simplest indicator, sits in the corner of their video tile. v4call already has overlay infrastructure from v0.15 (spotlight/pin badges), so adding a record indicator is a few lines of CSS.
+
+'''A room header status.''' Something like "🔴 3 of 4 participants recording locally" near the room title. Useful for the host running the show, who wants to know at a glance whether the editor will have full coverage.
+
+'''A first-time consent toast.''' When the first participant starts a local recording in a room, every other participant gets a one-time toast:
+
+  [alice] has started recording her local audio/video.
+  This is her own copy of her own mic and cam.
+  [Acknowledge]
+
+Users can dismiss it; the recording continues either way. The point is not to require consent (this is the user's own track, not a recording '''of''' others), it is to make the social contract visible.
+
+'''A room policy knob set by the host at room creation:'''
+
+* '''Local recording allowed''' (default, opt-in per participant).
+* '''Local recording required''' (host has set up a podcast — everyone records or does not get in).
+* '''Local recording forbidden''' (private conversation — server rejects the <code>local-recording-started</code> event, client refuses to start MediaRecorder).
+
+The "forbidden" mode is only '''socially''' enforceable — a determined participant can always screen-record from outside the browser, or run OBS, or point a phone at their monitor. v4call cannot stop that, no software can. But the policy + visible indicators handle the 99% honest-users case, which is what matters for the trust model. Make it a room property, surface it clearly when joining ("This room forbids local recording — by joining you agree not to record outside the platform either"), and let the host pick.
+
+== Federation passthrough ==
+
+The <code>local-recording-started</code> and <code>local-recording-stopped</code> events need to flow over federation too, for v0.16 cross-server rooms. Add them to the federation envelope for room events. The federated participant's canonical form (<code>user@server</code>) goes in the event. No protocol bump — just a new event type within the existing v0.4 federation protocol.
+
+----
+
+= PART 5 — HOST-CONTROLLED BITRATE POLICY =
+
+== The principle ==
+
+WebRTC bitrate control happens '''sender-side, in each participant's browser'''. There is no server in the media path (v4call media is peer-to-peer), so there is no single place to "dial down everyone's bitrate." Instead:
+
+# The host sets the room's bitrate policy.
+# The v4call server stores it as a room property.
+# When any participant joins (or when the policy changes), the server broadcasts a <code>room-bitrate-policy</code> event.
+# Each participant's browser receives the event and applies the limits to its own outgoing senders.
+
+This is '''policy-by-cooperation''', not policy-by-enforcement. A malicious client could ignore the policy. For v4call's threat model (Hive-authenticated participants in rooms they were allowed into), that is fine. Mitigation if needed: the host's client can observe each peer's actual incoming bitrate via <code>RTCRtpReceiver.getStats()</code> and the existing banlist machinery handles non-compliance socially rather than technically.
+
+== The JavaScript APIs ==
+
+'''<code>RTCRtpSender.setParameters()</code> — the modern, clean approach.''' Each browser grabs its outgoing video sender, mutates <code>encodings[0].maxBitrate</code>, and calls <code>setParameters()</code>. No SDP renegotiation needed.
+
+  const sender = pc.getSenders().find(s => s.track.kind === 'video');
+  const params = sender.getParameters();
+  if (!params.encodings) params.encodings = [{}];
+  params.encodings[0].maxBitrate = 300_000;    // 300 kbps
+  params.encodings[0].maxFramerate = 15;
+  params.encodings[0].scaleResolutionDownBy = 2;   // half resolution
+  await sender.setParameters(params);
+
+'''<code>MediaTrackConstraints / applyConstraints()</code> — controls capture side.''' Tells the camera/microphone what to actually capture. Useful when you want to actually stop capturing 1080p, not just stop sending it.
+
+  await videoTrack.applyConstraints({
+    width: 640, height: 480, frameRate: 15
+  });
+
+'''SDP munging — the older approach.''' Edit the <code>b=AS:</code> line in the session description before sending. Requires renegotiation. v4call already has renegotiation plumbing (used for share-screen and text-only-joiner fixes), so it is available, but <code>setParameters</code> is preferred when it does the job.
+
+== The presets ==
+
+Most hosts do not want to think about kbps. Offer presets:
+
+* '''Low (mobile-friendly):''' 300 kbps video / 64 kbps audio / 480p / 15 fps. Works on cellular and poor wifi.
+* '''Standard:''' 1 Mbps video / 96 kbps audio / 720p / 30 fps. Default. Works on most broadband.
+* '''High quality:''' 2.5 Mbps video / 128 kbps audio / 1080p / 30 fps. Requires good network on both ends.
+* '''Recording mode (low-latency monitor):''' 300 kbps video / 64 kbps audio / 480p / 15 fps. Same as "Low" but specifically marketed as the companion mode when local recording is active.
+* '''Auto:''' let WebRTC's adaptive bitrate algorithm decide. Default behaviour without policy.
+
+Power users can poke into custom values via an "advanced" disclosure. Per-stream-type controls (video / audio / screen-share) should be independent knobs because they have different needs — voice can be 64 kbps and stay perfectly intelligible, but screen-share might need higher video bitrate (for text legibility) at lower framerate (5 fps is fine for slides).
+
+== Live bandwidth dashboard for the host ==
+
+A small panel showing each participant's current outgoing bitrate. Source: each participant's browser reads its own <code>getStats()</code> output every few seconds and emits a small <code>my-outgoing-stats</code> event to the room; the host's client aggregates these into a dashboard.
+
+Useful for:
+* Confirming the policy is taking effect.
+* Spotting participants on degraded connections (packet loss, high RTT).
+* Telling the loud guy with a 3 Mbps mic to dial it down.
+
+Same plumbing can flag "participant X is on a bad connection" by watching packet loss and round-trip time stats — useful even outside the bitrate-policy context.
+
+== Sticky vs transient ==
+
+Two affordances in the host UI:
+
+* '''Apply now''' — current session only. Reverts to room default on next session.
+* '''Save as room default''' — persists as a room property for all future sessions.
+
+== Federation passthrough ==
+
+<code>room-bitrate-policy</code> events need to flow over federation, same way the recording-status events do. No protocol bump needed.
+
+----
+
+= PART 6 — HOW THE TWO FEATURES REINFORCE EACH OTHER =
+
+The recording feature and the bitrate policy feature are independently useful, but they become significantly stronger '''together''':
+
+== Two-stream architecture ==
+
+WebRTC and the MediaRecorder are looking at the same camera and microphone, but they do not have to use the same quality. The right architecture:
+
+# Call <code>getUserMedia</code> ONCE at high resolution (e.g. 1920×1080, 30 fps).
+# Feed the original full-resolution stream into the '''MediaRecorder''' (which writes to disk locally at full quality).
+# Feed a '''downscaled''' version into the '''RTCPeerConnection''' (which sends 480p / 15 fps / 300 kbps over the network).
+
+Both streams come from the same camera capture. The WebRTC stream is small, fast, and tolerant of network problems. The local recording is pristine, full-quality, and never touches the network.
+
+The browser supports this via <code>RTCRtpSender.setParameters()</code> with <code>scaleResolutionDownBy</code>, or via separate <code>MediaStreamTrack</code> clones with different constraints applied.
+
+== The product story ==
+
+When both features ship, you can tell a clean product story:
+
+  v4call rooms have two stream modes.
+
+  In CONVERSATION MODE (default), WebRTC tries to give you the best
+  live experience your network can support.
+
+  In RECORDING MODE (auto-engaged when any participant is recording
+  locally), the WebRTC stream prioritises latency and reliability —
+  you'll see lower resolution and hear slightly more compressed audio
+  during the live session, but the local recordings are full quality.
+
+  You're getting a podcast-grade artifact even when the live experience
+  has to give ground on bad networks.
+
+This is a real differentiator. The worse the network, the more valuable this architecture is, because the gap between "what came out the wire" and "what got recorded locally" grows. Riverside and similar services do not optimize for bad networks because they assume reasonable broadband on both ends. v4call's audience often does not have that — federation operators, mobile users on 4G, regions with patchy connectivity — and this design genuinely helps them.
+
+== Auto-coupling ==
+
+When the recording-mode logic kicks in (any participant starts recording), the room bitrate policy auto-shifts to the Recording-mode preset. Host does not need to do anything; the system does the right thing. Same for un-shifting when all recordings stop. Show a small "switching to recording mode" notice in the room header so users understand why the video quality changed.
+
+== Free win: low-bandwidth mode for users on slow networks ==
+
+Once the infrastructure exists to run a low-quality WebRTC stream, expose it as a manual toggle for users on slow networks who want to opt into low-bandwidth mode '''even without recording'''. "Mobile data mode" feature falls out of the same machinery for free.
+
+----
+
+= PART 7 — OPEN QUESTIONS AND DECISIONS TO MAKE AT BUILD TIME =
+
+# '''Codec choice for local recording.''' VP9 is best-quality; VP8 has broader browser support; H.264 (via MediaRecorder where available) is friendliest for editors but has licensing implications. Probably default to VP9 with VP8 fallback; offer H.264 as a per-server config option.
+# '''Local-only vs progressive-upload default.''' Per-room option. Default to local-only for ephemeral conversations; default to progressive-upload for explicitly-marked podcast/recording rooms. (Note: "upload" for paid recordings means '''encrypted upload to IPFS''', not to the v4call server — see Phase 7.)
+# '''Storage policy for free local recordings.''' For unpaid recordings that stay local-only or use the v4call server's progressive-upload mode (Phase 6), how long does the v4call server keep them? Tied to existing <code>ROOM_RETENTION_DAYS</code>? Per-room override? Probably 7 days default. For paid recordings on IPFS (Phase 7), retention is tied to the pinning credit and is independent of v4call server retention.
+# '''Payment model for paid recording.''' Per-participant-hour pricing in HBD or custom token, split into platform fee + IPFS pinning credit. Pinning credit is escrowed and refunded on unused portions. See Phase 7 for the full model.
+# '''Pinning provider choice.''' Operator-configured per v4call server. Options: Pinata (well-documented API, established), Web3.Storage (Protocol Labs, free tier exists), Filebase (S3-compatible IPFS), self-hosted IPFS node. Probably ship with Pinata as the default and document the swap-out process for the others.
+# '''Recipient set defaults.''' For paid recording, the host picks who can decrypt. UI defaults: "Admin-only" (podcast workflow), "All in room at recording time" (collaborative meetings), "Custom list." Probably default to "Admin-only" because that's the most common podcast pattern, with a one-click "Share with all participants" option.
+# '''Mobile Safari support.''' MediaRecorder support on iOS Safari is partial. May need to mark recording as "desktop / Android only" initially, with audio-only mode as a possible iOS fallback. IPFS upload from mobile browsers is more taxing on battery and data — surface this clearly.
+# '''Editor integration.''' Just ship a ZIP of (decrypted) WebMs and let editors use their own tools (Premiere, Resolve, Descript)? Or build a minimal in-browser editor for simple cuts? Probably the former for v0.1 — leave editing to dedicated tools. The decryption step adds one extra "download and decrypt" UX moment that needs to be smooth.
+# '''Recording indicator detail.''' Just a red dot, or include the recording duration ("🔴 12:34")? Probably just the dot at first; duration can be a hover tooltip.
+# '''Bitrate policy lock vs cap.''' If the host sets "Low" bitrate, can individual participants opt to send '''lower''' than that (to save their own data), or is the host policy a hard cap in both directions? Probably cap-only (participants can go lower but not higher).
+# '''Clock-sync frequency.''' Every minute, every 30 seconds, every 10 seconds? More frequent = more accurate sync data = more socket traffic. Probably every 60 seconds is fine.
+# '''What happens if a participant's recording is interrupted mid-session.''' Auto-resume on reconnect? Mark the gap in the sidecar JSON? Notify the host? Probably all three.
+# '''Custodial-mode decryption trade-off.''' For paid recordings going to custodial users, the v4call server must decrypt on the user's behalf because it holds the memo key. This re-introduces the "server can technically see content" property documented in <code>custodial-accounts.wiki</code>. Label clearly in the UI so users understand which mode they're in.
+# '''Recipient revocation.''' Once a memo-key holder has the symmetric key for a recording, they cannot be cleanly revoked without re-encryption and re-upload. Document this property; offer "re-encrypt with new recipient set" as an explicit operation.
+# '''CID privacy.''' IPFS CIDs are content-addressed and globally discoverable. Even encrypted, the existence of the recording is observable to anyone watching the IPFS network. For most podcast/meeting use this is fine. For genuinely sensitive recordings, consider a private IPFS swarm or an encrypted-CID-only design where the CID itself is shared via Hive memo encryption.
+
+----
+
+= PART 8 — PHASED IMPLEMENTATION PLAN =
+
+== Phase 1 — Recording status indicators ==
+
+'''Duration:''' 2-3 days.
+
+* New socket events <code>local-recording-started</code> / <code>local-recording-stopped</code>.
+* Red dot on tile of recording participant.
+* Room header status indicator.
+* First-time consent toast for other participants.
+* Federation passthrough for cross-server rooms.
+
+'''No actual recording yet'''. This phase just builds the social-layer machinery.
+
+'''Exit criterion:''' a fake recording event (sent manually via dev tools) shows up correctly on all other participants' UIs, including federated participants in cross-server rooms.
+
+== Phase 2 — Local recording MVP ==
+
+'''Duration:''' 2-3 weeks.
+
+* "🔴 Record" button in room media toolbar.
+* MediaRecorder integration with chunked writes to IndexedDB.
+* Sidecar JSON with clock sync metadata (server-synced GMT, periodic samples).
+* "Stop and download" UX — produces a single WebM + JSON for the participant.
+* Quota check before start, mid-recording quota monitoring.
+* Wake lock to keep screen alive.
+* Crash recovery — orphaned chunks in IndexedDB are recoverable on next page load.
+
+'''No upload to server, no host-collected recordings yet.''' Each participant gets their own files and sends them to the editor manually after the call.
+
+'''Exit criterion:''' a participant can record a 30-minute session locally, download a WebM and matching JSON, and the editor can align it with another participant's recording using only the JSON's clock-sync data.
+
+== Phase 3 — Bitrate policy ==
+
+'''Duration:''' 1-2 weeks.
+
+* Room property <code>bitratePolicy: { videoMax, audioMax, screenMax, framerateMax, scaleDownBy } | null</code>.
+* <code>room-bitrate-policy</code> socket event.
+* Client-side <code>setParameters</code> on receipt.
+* Host UI with 3-4 presets plus advanced custom values.
+* Federation passthrough.
+
+'''Exit criterion:''' host sets "Low" preset, all participants' outgoing video bitrate drops to ~300 kbps within a few seconds, verifiable via getStats output.
+
+== Phase 4 — Live bandwidth dashboard ==
+
+'''Duration:''' 1 week.
+
+* Each participant emits its own outgoing stats every few seconds.
+* Host's client aggregates into a per-participant dashboard.
+* Surface packet loss / RTT issues.
+
+'''Exit criterion:''' host can see at a glance who is on a good connection vs degraded, and can spot non-compliance with bitrate policy.
+
+== Phase 5 — Two-stream architecture and recording-mode auto-coupling ==
+
+'''Duration:''' 2-3 weeks.
+
+* Capture at high resolution, send downscaled over WebRTC, record full-quality locally.
+* When any participant starts recording, auto-shift room to recording-mode bitrate preset.
+* Auto-shift back when all recordings stop.
+* "Switching to recording mode" notice in UI.
+
+'''Exit criterion:''' on a deliberately-throttled network (use browser dev tools to simulate 3G), live conversation remains responsive and audible, while local recordings remain 1080p full-quality. Demonstrated with side-by-side comparison.
+
+== Phase 6 — Progressive upload to server ==
+
+'''Duration:''' 2-3 weeks.
+
+* Upload chunks to server as they are written.
+* Server-side storage with configurable retention.
+* Host can download per-participant ZIPs at session end.
+* Federated participants upload via signed URLs to host's server, not via federation socket.
+
+'''Exit criterion:''' host clicks "Download all recordings" after a session and gets a ZIP containing every participant's WebM + JSON, including federated participants.
+
+== Phase 7 — Paid recording with IPFS storage and end-to-end encryption ==
+
+'''Duration:''' 3-5 weeks.
+
+'''Status:''' design baking. The IPFS integration is a wider v4call effort (still being shaped) — see the IPFS notes section below. This phase is the paid-recording slice of that wider integration.
+
+The principle: instead of the v4call server storing the recordings (Phase 6's progressive-upload-to-server model), the recordings are '''encrypted in each participant's browser''' to a chosen set of recipient public keys, then uploaded to '''IPFS'''. The IPFS link (CID) is shared in the room. Only users who hold one of the recipient private keys can decrypt and watch.
+
+The v4call server's role shrinks to: payment processing, IPFS-pinning-cost passthrough, and CID distribution. It never sees plaintext recordings, and ideally never stores any recording bytes on its own disk at all.
+
+=== Why this is the right design ===
+
+* '''Trust-minimised.''' The v4call server cannot read the recordings, even if it wanted to. The decryption keys are held by the room admin and (at the admin's choice) other room members.
+* '''Storage offloaded.''' v4call server operators do not need to provision terabytes of storage for podcast recordings. IPFS pinning services (Pinata, Web3.Storage, Filebase, self-hosted IPFS nodes) handle the bytes.
+* '''Content-addressed.''' IPFS CIDs are cryptographic hashes of the content. The CID itself proves what file the link points to — nobody can substitute a different file under the same link.
+* '''Censorship-resistant.''' If one pinning provider drops the file, anyone with the CID can re-pin it elsewhere. The recording is not tied to a single server's uptime.
+* '''Fits v4call's payment plumbing.''' The host pays in HBD or custom token; the platform fee is taken; the remainder covers IPFS pinning cost and any platform overhead. Exactly the same pattern as paid calls and paid DMs.
+
+=== The flow ===
+
+# '''Setup (room creation).''' Host enables paid recording on the room. Host chooses the '''recipient set''' for the recording's encryption keys — options:
+#* '''Admin-only:''' only the room host/admins can decrypt. Common for podcast workflows where only the editor needs the files.
+#* '''All-in-room:''' every participant present at recording time can decrypt. Common for collaborative meetings where everyone wants a copy.
+#* '''Custom list:''' specific Hive accounts the host nominates. E.g. "host + editor + sponsor."
+# '''Recipient public keys are gathered.''' Each recipient's Hive '''memo public key''' is fetched from the chain at room-creation time. Memo keys are the right key class for this — they exist specifically for encrypting payloads to a recipient.
+# '''Recording happens locally.''' Each participant's MediaRecorder captures their own mic/cam to chunks in IndexedDB (Phase 2 mechanics, unchanged).
+# '''Encryption at upload time.''' When the participant finishes recording (or in chunks during the session, for progressive-upload style):
+## A random symmetric key (AES-256) is generated in the browser for this recording.
+## The recording chunks are encrypted with that symmetric key using authenticated encryption (AES-GCM).
+## The symmetric key is itself encrypted '''once per recipient''', using the recipient's memo public key (via the same ECIES-style flow Hive already uses for memo encryption).
+## The result is: one encrypted blob (the recording) + N encrypted key-envelopes (one per recipient).
+# '''Upload to IPFS.''' The encrypted blob and the key-envelopes manifest are uploaded to IPFS. Returns a CID. Browser can use:
+#* A pinning service API (Pinata, Web3.Storage, Filebase) — simplest, requires API credentials.
+#* A v4call-server-operated IPFS gateway — more control, more ops work for the operator.
+#* The user's own IPFS node if they run one — most sovereign, least common.
+# '''CID distribution.''' The participant emits a room socket event:
+
+      socket.emit('recording-published', {
+        username: 'alice',
+        cid: 'bafy...',
+        recipientKeys: [...],   // which memo pubkeys can decrypt
+        sizeBytes: 1234567890,
+        durationMs: 4512864,
+        sidecarManifest: {...}  // clock-sync data, etc.
+      });
+
+    The v4call server broadcasts to the room and stores the CID + metadata in its database (for the room's lifetime + retention period).
+# '''Payment settlement.''' The host's escrow disburses the recording fee on call end. The fee covers v4call platform overhead + a pinning-service top-up to keep the CID alive for the agreed retention period. If using a third-party pinning service, the v4call server makes the pin-payment API call on behalf of the host.
+# '''Decryption (later).''' Any recipient can:
+## Fetch the encrypted blob from any IPFS gateway by CID.
+## Use their Hive memo private key (via Keychain or the v4call server's stored key in custodial mode) to decrypt their key-envelope, recovering the symmetric key.
+## Use the symmetric key to decrypt the recording locally.
+## Play it, edit it, transcribe it — full sovereignty over the artifact.
+
+=== Key management details ===
+
+'''Why Hive memo keys, not posting/active keys.''' Memo keys exist specifically for encrypting payloads to a recipient (they are used today for encrypted memos on HBD transfers). Using them keeps the security model clean — the same key class for the same job, and v4call already has the libraries for ECIES-style encryption with these keys (<code>hivecrypt</code>).
+
+'''Forward secrecy.''' Each recording uses a fresh random symmetric key. Compromise of one recording's symmetric key does not affect any other recording. The memo private keys themselves never appear in the encrypted output — only single-recording symmetric keys.
+
+'''Adding recipients after the fact.''' If the host later wants to give a new person access (e.g. a guest editor joins the project a week later), it does not require re-uploading the recording. The host decrypts the symmetric key with their own memo key, re-encrypts it to the new recipient's memo public key, and adds the new key-envelope to the manifest. The encrypted blob on IPFS is unchanged.
+
+'''Removing recipients is harder.''' Once a recipient has the symmetric key, they have it forever. To "revoke" access in any meaningful sense, the host would have to re-encrypt the recording with a fresh symmetric key, re-upload to IPFS (new CID), and re-distribute. This is a property of all key-envelope schemes; document it clearly.
+
+'''Custodial mode and decryption.''' In custodial accounts (see <code>custodial-accounts.wiki</code>), the v4call server holds the user's memo key on their behalf. So a custodial user's "decrypt the recording" flow is: server fetches the CID, server decrypts the user's key-envelope using the stored memo key, server decrypts the recording with the symmetric key, server streams the plaintext to the user's browser. That re-introduces the "server can technically see the content" trade-off documented in the custodial-accounts design — same caveats apply. Self-custody users do the decryption in their own browser via Keychain and the v4call server never sees plaintext.
+
+=== Federation ===
+
+Federated participants (cross-server rooms, v0.16) upload to IPFS from their own browsers, just like local participants. The IPFS layer is naturally federation-agnostic — CIDs work the same way regardless of which server the participant logged into.
+
+The room's authoritative CID list lives on the host's server (the one that created the room). The host's server announces newly-published CIDs to all federated peers via the existing room-event federation envelope. No new federation protocol features needed.
+
+=== Pinning cost passthrough ===
+
+The cost of keeping a CID alive on IPFS over time is real and must be paid by someone. Recommended model:
+
+* '''Fee structure shown at room creation:''' "1 hour of paid recording = X HBD platform fee + Y HBD pinning credit for 30 days of retention."
+* '''The pinning credit is held in escrow until used.''' If the recording is shorter than expected, the unused portion is refunded — same as v4call's existing call-fee refund pattern.
+* '''Operator chooses the pinning provider.''' Server operator configures their v4call server with credentials for their chosen IPFS pinning service (Pinata, Web3.Storage, Filebase, self-hosted). The fee math is calibrated to that provider's pricing.
+* '''Extension on demand.''' Recipients can pay to extend the pinning period beyond the initial retention, individually, via a "Keep this recording alive for another 30 days" button. Direct HBD transfer to the pinning credit pool.
+* '''Expiry behaviour.''' When the pinning credit runs out, the recording is unpinned. The bytes may still survive briefly on the IPFS network if other nodes have them cached, but eventually become unreachable. Recipients are warned 7 days before expiry and offered the extension option.
+
+=== Exit criterion ===
+
+A host can spend X HBD to enable paid recording on a room. Four participants record locally during a 1-hour session. At end-of-session, each participant's recording is encrypted in their own browser to the host's memo public key (admin-only setting), uploaded to IPFS, and the CIDs are shared via the v4call room event. The host (or any other authorized recipient) can fetch the recording from any IPFS gateway, decrypt using their Hive memo key, and play it back. The v4call server never sees plaintext recording bytes. After 30 days of retention with no extension, the recording is unpinned and gradually becomes unreachable.
+
+=== IPFS notes (parking lot for the wider v4call IPFS integration) ===
+
+The paid-recording feature is one slice of a wider IPFS integration that is still baking. Other slices being considered:
+
+* '''File transfer.''' When foo sends a file to bar, the file is encrypted to bar's memo public key, uploaded to IPFS, and the CID + decryption manifest is delivered via DM. bar fetches and decrypts. Removes the need for v4call servers to act as file-transfer relays.
+* '''Avatar / profile asset storage.''' Hive blockchain is text-only; profile images and other binary assets need somewhere to live. IPFS is the natural home, with the CID stored in the Hive profile post.
+* '''Long-form content.''' Room exports (<code>.v4room</code> files from v0.14.5) could optionally be IPFS-pinned for permanent availability instead of local-download-only.
+* '''Federation announces.''' Server verify files and rate-card posts could be IPFS-mirrored for resilience, in addition to being served from the operator's own domain.
+
+These are all consistent with the same encryption-before-upload pattern: v4call handles identity, payment, and routing; IPFS handles bytes; users hold their own decryption keys. The wider IPFS integration design will get its own wiki when the shape settles.
+
+== Phase 8 — Polish ==
+
+'''Duration:''' ongoing.
+
+* Optional in-browser preview of one's own recording during the session.
+* Optional automatic transcription (Whisper / Deepgram integration).
+* Optional ProRes / DNxHD transcoding for editor delivery.
+* Mobile-specific recording paths and limitations clearly surfaced.
+
+----
+
+= PART 9 — REFERENCES AND GLOSSARY =
+
+== References ==
+
+* MediaRecorder API: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+* RTCRtpSender.setParameters: https://developer.mozilla.org/en-US/docs/Web/API/RTCRtpSender/setParameters
+* IndexedDB API: https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API
+* Page Visibility API: https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API
+* Storage API (quota / persist): https://developer.mozilla.org/en-US/docs/Web/API/Storage_API
+* Wake Lock API: https://developer.mozilla.org/en-US/docs/Web/API/Screen_Wake_Lock_API
+* WebRTC stats reference: https://www.w3.org/TR/webrtc-stats/
+* Riverside.fm (competitor reference): https://riverside.fm
+* IPFS protocol overview: https://docs.ipfs.tech
+* IPFS CIDs (content identifiers): https://docs.ipfs.tech/concepts/content-addressing/
+* Pinata (pinning service): https://www.pinata.cloud
+* Web3.Storage (pinning service, Protocol Labs): https://web3.storage
+* Filebase (S3-compatible IPFS): https://filebase.com
+* <code>hivecrypt</code> (Hive memo-key encryption library): https://gitlab.syncad.com/hive/hivecrypt
+* AES-GCM authenticated encryption (WebCrypto): https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/encrypt#aes-gcm
+* v4call main repo: https://github.com/CompleteNoobs/v4call
+
+== Glossary ==
+
+; WebRTC : The browser API for real-time peer-to-peer audio and video. Uses UDP underneath. Trades reliability for latency.
+; UDP : User Datagram Protocol. Sends packets without retransmission or ordering guarantees. Used by WebRTC for media because it favours speed over completeness — better a tiny audio glitch now than a growing delay forever.
+; MediaRecorder : Browser API that captures a <code>MediaStream</code> to a file (WebM, MP4 where supported). Operates locally; no network involvement.
+; getUserMedia : Browser API that returns the user's mic and camera as a <code>MediaStream</code>. The source for both WebRTC and MediaRecorder.
+; IndexedDB : Browser-local database, suitable for storing the chunked recording blobs during a session.
+; setParameters : <code>RTCRtpSender</code> method that lets the sender change outgoing bitrate, framerate, and resolution without SDP renegotiation.
+; SDP : Session Description Protocol. The text format browsers exchange to set up a WebRTC connection. Can be edited to control bitrate at a coarser level than setParameters.
+; Sidecar JSON : A separate metadata file accompanying a recording. Holds clock-sync data, chunk info, and editor-relevant metadata.
+; Clock sync : The process of agreeing on a common time reference (typically server GMT) across multiple recording participants, so the editor can align their tracks accurately.
+; Local recording : Each participant records their own mic and camera on their own machine, before anything touches the network. Source of pristine audio/video for editing.
+; Progressive upload : Recordings uploaded to a server in small chunks during the session, rather than as one big file at the end. Survives client crashes; reduces local storage pressure.
+; Two-stream architecture : Capturing at high quality, recording locally at full quality, and sending a downscaled version over WebRTC. The wire stream is a low-latency monitor; the local recording is the artifact.
+; Bitrate policy : Host-set rules for how much bandwidth WebRTC streams may use in a room. Enforced cooperatively by each participant's browser.
+; getStats : <code>RTCPeerConnection</code> method that returns connection metrics — bitrate, packet loss, RTT, etc. Used for the live bandwidth dashboard.
+; IPFS : InterPlanetary File System. A decentralised content-addressed storage network. Files are identified by CIDs (hashes of their content) rather than by location. Used by v4call for paid recording storage and (in future) file transfer and other binary assets.
+; CID : Content Identifier. The cryptographic hash of a file's content, used as its address on IPFS. The same content always produces the same CID; different content always produces different CIDs. Makes the link itself a proof of what the file is.
+; Pinning : Telling an IPFS node "please keep this file available." Without pinning, files on IPFS may eventually be evicted from nodes that hold them. Pinning services (Pinata, Web3.Storage, Filebase) sell pinning as a paid service so files stay reachable for the agreed duration.
+; Memo key : The Hive key class designed for encrypting payloads to a recipient. v4call uses memo keys (not posting or active keys) for recording encryption, because that is exactly the job memo keys exist for. Memo keys can be looked up on-chain from any Hive account name.
+; AES-GCM : Authenticated symmetric encryption. Used by v4call to encrypt the recording bytes with a per-recording random key. The key is then encrypted to recipients' memo public keys, giving end-to-end encryption with multiple recipients.
+; Key envelope : The encrypted-once-per-recipient symmetric key. A recording has one encrypted blob + N envelopes (one per authorised recipient). Adding a recipient adds an envelope; the encrypted blob is unchanged.
+
+----
+
+= STATUS LOG =
+
+* '''2026-05-20 (initial)''' — Design captured from a Claude conversation. Not yet implemented. Slotted as post-v0.17 / post-Architecture-C work, alongside or after custodial-accounts. Key decisions:
+** Local recording is decoupled from WebRTC transport — captures from <code>getUserMedia</code> directly, never touches the network.
+** Chunked writes to IndexedDB are essential — single-Blob recording in RAM is fragile and loses data on crash.
+** Server-synced GMT clock sync into a sidecar JSON is the highest-leverage detail in the whole feature. Get this right or do not bother.
+** Recording status indicators are a small, social-value first phase. Build these before the recording machinery itself.
+** Bitrate policy is host-set, cooperatively enforced by each client. Policy-by-trust is the right model for v4call.
+** Two-stream architecture (high-quality local capture + downscaled WebRTC send) is the synthesis that makes both features shine. Auto-couple them: when anyone records, the room auto-shifts to recording-mode bitrate.
+** Federation passthrough for both recording status and bitrate policy is straightforward — new event types in the existing v0.4 protocol, no bump.
+** Paid recording is the sellable business model. Fits existing v4call payment plumbing. Differentiates from Riverside by being self-hostable and crypto-native.
+** Sequence: recording-status indicators first (small, social), then local recording MVP (medium, big feature), then bitrate policy (medium, technical), then live dashboard (small refinement), then two-stream architecture (medium, the synthesis), then progressive upload to server (medium), then paid recording (small wiring), then polish.
+
+* '''2026-05-20 (revision)''' — Phase 7 (paid recording) expanded from "wire into v4call payment plumbing" into the full '''IPFS + end-to-end encryption''' design. Replaces server-stored recordings with encrypt-in-browser → upload to IPFS → distribute CID. Key shifts:
+** Recordings are encrypted in the participant's browser using a fresh AES-GCM symmetric key, with that key encrypted to each authorised recipient's Hive memo public key. v4call server never sees plaintext.
+** Recipient set is host-chosen at room creation: admin-only (default, podcast workflow), all-in-room, or custom list of Hive accounts.
+** Storage is IPFS (Pinata / Web3.Storage / Filebase / self-hosted IPFS node — operator's choice). v4call server's role shrinks to payment processing, CID distribution, and pinning-credit passthrough. No bulk recording bytes on the v4call server's disk.
+** Retention is tied to a pinning credit paid by the host. Unused credit refunds like v4call's existing call-fee model. Recipients can extend pinning by paying additional credit when the original expires.
+** Adding recipients after the fact is cheap (new envelope, same CID). Removing recipients requires re-encryption + re-upload (new CID); document this property explicitly.
+** Custodial users have decryption done server-side because the v4call server holds their memo key — the same trust trade-off documented in <code>custodial-accounts.wiki</code> applies. Self-custody users decrypt in their own browser via Keychain; v4call server never sees plaintext for them.
+** Federation: federated participants upload to IPFS from their own browsers; CIDs are announced via the existing room-event federation envelope. No new federation protocol features.
+** Phase 7 duration revised upward: 1-2 weeks → 3-5 weeks, reflecting the IPFS-pinning integration, the encryption layer, the recipient-set UX, and the pinning-credit accounting work.
+** Documented as one slice of a wider IPFS integration that is still baking. Other planned slices (file transfer between users, avatar storage, room-export pinning, federation announce mirroring) follow the same encrypt-before-upload pattern and will get their own wiki when that wider design settles.

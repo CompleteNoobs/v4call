@@ -1,0 +1,405 @@
+= Custodial Accounts for v4call =
+
+'''Status:''' Design notes only. Not implemented. Captures the design discussion before context fades.
+
+'''Why this exists:''' v4call's current onboarding requires Hive Keychain (or pasting a posting key). That is a wall for anyone who is not already a crypto user. This document captures the design for an optional custodial-account mode that allows email/password (or Google/X/GitHub/Facebook OAuth) signup, with a clean "graduate to self-custody" path so the user can take ownership of their Hive account whenever they want.
+
+'''Read this first if you are a noob:''' a Hive account is identified by a username and controlled by a set of cryptographic '''keys'''. Whoever holds the keys controls the account, full stop. Normally the user holds the keys (Hive Keychain stores them in the browser). In custodial mode, the v4call service holds the keys on the user's behalf, and the user logs in with email and password like a normal website. The service can later hand the account over to the user by rotating the keys to a fresh pair that only the user knows.
+
+== Document structure ==
+
+* '''Part 1 — The problem and the basic shape of the solution.'''
+* '''Part 2 — What you trade for the convenience.''' Read this carefully before building anything.
+* '''Part 3 — Signup and login flow (Web2 mode).'''
+* '''Part 4 — The "graduate to self-custody" flow.''' The clever part that lets the user own their account without ever knowing the service's owner key.
+* '''Part 5 — Open questions and decisions to make at build time.'''
+* '''Part 6 — Phased implementation plan.'''
+* '''Part 7 — References and glossary.'''
+
+----
+
+= PART 1 — THE PROBLEM AND THE SHAPE OF THE SOLUTION =
+
+== The problem ==
+
+Hive Keychain is a fantastic tool but it is a browser extension that has to be installed and configured before the first login. For the target audience of "people who want to make a podcast / take paid calls / join a private room," that is a ten-minute prerequisite that 90% of potential users will not complete. Mobile Safari and iOS Brave do not support Keychain at all, so the experience on iPhone is degraded for paid actions even when the user is willing.
+
+The standard Web2 escape hatch is email signup with password reset by email, plus OAuth (Google / X / GitHub / Facebook). That is the pattern users already know. We want that pattern available '''as an option''' alongside the existing self-custody Keychain flow.
+
+== The shape of the solution ==
+
+A v4call server can optionally run a small in-house identity provider alongside <code>server.js</code>. On signup:
+
+# User provides email and password, or clicks "Sign in with [Google/X/etc.]".
+# The service creates a Hive account on-chain (e.g. <code>v4c-u-9k2x1</code>, random suffix, not user-chosen — the username the user sees is a display name stored in the service's database, not the Hive account name).
+# The service generates the four Hive keys (owner, active, posting, memo) server-side.
+# The service encrypts the private keys with a server-held master key and stores the ciphertext in its database.
+# The user never sees the Hive account name or any keys unless they go looking.
+
+On login:
+
+# User provides email/password (or completes OAuth).
+# The service decrypts the user's posting key into RAM for that session.
+# The service signs DMs, room messages, calls, and payments on the user's behalf using that key.
+# Session ends, decrypted key is wiped from memory.
+
+This is on-chain '''indistinguishable''' from a normal Hive account — the chain does not care whether a human with Keychain signed the transaction or a service with a database did. Whoever has the keys controls the account.
+
+== What Hive natively supports that makes this clean ==
+
+Hive has been designed with key-rotation as a first-class operation since its earliest days (inherited from Steem). The <code>account_update</code> operation can replace any combination of the four keys with new ones in a single transaction, signed by the current owner key. This is the on-chain primitive that lets us hand the account over to the user cleanly when they want self-custody — see Part 4.
+
+----
+
+= PART 2 — WHAT YOU TRADE FOR THE CONVENIENCE =
+
+'''This section must be read by anyone building this feature. The trade-offs are real and some of them undermine the things v4call is trying to be.'''
+
+== 1. You become a custodian. You become a target. ==
+
+Without custodial accounts: a v4call operator's database breach leaks ciphertext DMs and a payment ledger. Bad, but bounded.
+
+With custodial accounts: a breach leaks '''every user's posting and active keys'''. An attacker can post as them, drain their HBD, transfer their tokens, impersonate them in calls. The blast radius is much larger.
+
+'''Mitigations:'''
+
+* Encrypt private keys at rest with a service-held master key.
+* Store the master key in a Hardware Security Module (HSM) or, at minimum, in a separate key server that is not the same process as <code>server.js</code>.
+* Never log decrypted keys anywhere. Wipe from memory after each use.
+* Consider per-user key encryption (each user's keys encrypted with a key derived from their password) so a database breach without password-cracking yields nothing useful.
+
+== 2. The E2E encryption story changes shape ==
+
+v4call's DMs are currently encrypted with the user's Hive posting key. The promise "server only sees ciphertext" only holds if the server does not hold that key.
+
+In custodial mode, the server '''can''' decrypt the DM (it has the key); it just promises not to. That is a normal Web2 trust model and most users are fine with it — but it is a downgrade from the existing self-custody promise.
+
+'''Action:''' label this clearly in the UI. Two-tier UX:
+
+* '''Custodial account:''' "Your messages are encrypted in transit and at rest, but this server holds your decryption key. For end-to-end privacy that the server cannot read, use a self-custody account with Hive Keychain."
+* '''Self-custody account:''' "End-to-end encrypted. This server only stores ciphertext."
+
+Do not paper over the difference. Honest framing earns trust.
+
+== 3. Password reset by email is the weakest link, and it's where money lives ==
+
+In a normal Web2 app, an email-reset compromise loses a social account.
+
+In a custodial Hive app, an email-reset compromise '''gives the attacker the active key''' — i.e. the wallet. The attacker can drain HBD and any Hive-Engine tokens the user holds.
+
+'''Mitigations (apply at least one, ideally several):'''
+
+* '''Cap custodial balances.''' Refuse to hold large amounts on custodial accounts. Force sweeps to a user-nominated external Hive account once the balance exceeds a threshold (e.g. 10 HBD).
+* '''Require 2FA / TOTP for payouts above a threshold.''' Email reset alone does not unlock spending.
+* '''Scheduled sweeps.''' Earnings flow to a user-controlled external Hive address on a schedule, so the custodial wallet is "in-transit only" rather than "accumulating funds."
+* '''Withdrawal delay.''' Any outbound payment over a threshold has a 24-hour delay during which the user is emailed and can cancel. Slows down a fast attack.
+
+These are normal exchange-style mitigations. They feel like friction but the alternative is occasional total losses for users.
+
+== 4. Regulatory framing shifts ==
+
+Holding other people's keys on a chain that carries spendable assets (HBD, Hive-Engine tokens) is, in many jurisdictions, '''custody of financial instruments'''. UK FCA, EU MiCA, US state money-transmitter laws — these can apply to a service that holds user funds.
+
+A non-custodial v4call server is "a chat app." A custodial v4call server with email signup and HBD balances starts to look like a small exchange. Not insurmountable, but it is a different legal posture.
+
+'''Action:''' get UK (or local) legal advice before shipping custodial accounts commercially. Document the utility-only nature of the platform. Consider whether to incorporate as an entity with clear terms of service before holding user funds at any scale.
+
+== 5. The Hive account creation cost ==
+
+Creating a Hive account costs either:
+
+* ~3 HIVE paid at account-creation time, '''or'''
+* one '''Account Creation Token (ACT)''' — produced by accounts with enough Resource Credits over time.
+
+A v4call server running custodial mode is now also a small registrar. Two consequences:
+
+* '''Unit economics:''' if the service creates accounts for thousands of users, that's thousands of HIVE (or thousands of ACTs that take time to accumulate). Factor this into pricing.
+* '''Resource Credits (RC):''' every user's posts, DMs, and payments consume RC from '''the user's''' account. New Hive accounts start with very low RC. The service may need to delegate HP to user accounts to give them enough RC to function, especially in the first weeks. Plan for this.
+
+== 6. OAuth signup is a lux convenience worth offering, with honest labelling ==
+
+v4call's design philosophy is to give the user '''the option to be as root as possible''', while also offering the option to lean on a polished third-party service in exchange for a fee or in exchange for some account-ownership distance. We have no objection to large service providers — Google, X, GitHub, Facebook — they are large because they deliver a great experience and a lot of users genuinely prefer that experience to managing keys themselves. That is a legitimate choice.
+
+The point of this section is not to discourage OAuth signup. The point is to make sure the user '''knows where they sit on the ownership spectrum''' when they pick a signup method, so the choice is informed.
+
+'''The ownership spectrum, in plain terms:'''
+
+* '''Fully self-custodial (Hive Keychain).''' The user holds their own keys. v4call cannot lock them out, recover their account, or read their encrypted DMs. If they lose their keys and have no recovery account, the account is gone forever. Maximum sovereignty, maximum responsibility.
+* '''Custodial with email + password.''' The service holds the keys; the user holds an email and password. The service can technically read decrypted DMs and sign on the user's behalf, and promises not to. Recovery is via email reset. Sovereignty: medium. Responsibility: low.
+* '''Custodial with OAuth (Google / X / GitHub / Facebook).''' The service holds the keys; the user holds an OAuth identity at a third-party provider. Same custodial properties as email+password from v4call's side, plus a dependency on the OAuth provider — if the user loses access to their Google account, they lose access to their v4call account (unless they have a fallback recovery email set up). Sovereignty: lower (depends on the third party as well as the v4call service). Responsibility: lowest (the third party handles auth UX).
+* '''"Claim my account" (graduate to self-custody).''' Available from any custodial mode. See Part 4. Moves the user to fully self-custodial whenever they are ready.
+
+All four are valid. The right choice depends on the user's threat model, comfort with keys, and how much they value smooth onboarding. v4call's job is to make all four available and to tell the user clearly what each one means.
+
+'''The federation context matters here too.''' Even if a v4call server operator chooses to gate their federation membership (only allowing certain other servers in), the v4call software itself is open and self-hostable. Once Docker images exist, anyone can spin up <code>foo.com</code> or <code>call.foo.com</code> for their own group, off the federation entirely, and run their own rules. That is the deepest "be as root as possible" layer of the design: the user can pick a custodian server, run their own custodian server, run their own self-custody-only server, or join a friend's server. Custodial mode does not constrain that — it just adds a friendly Web2-style entry point to whichever server they end up on. Operators are free to charge a fee for the convenience (v4call already supports server-level platform fees that the admin sets), and users are free to shop around or stand up their own.
+
+'''Action — inform the user at signup, in their language:'''
+
+Show a short, clear comparison at signup time (not buried in a help page). Something like:
+
+  CHOOSE HOW YOU WANT TO SIGN IN:
+
+  [Hive Keychain] — Recommended for crypto users.
+    You hold your own keys. Maximum privacy and control.
+    We can't lock you out, recover your account, or read
+    your private messages. If you lose your keys, only
+    your recovery account can help.
+
+  [Email + password] — Recommended for most users.
+    We hold your keys for you. Sign in like a normal
+    website. Reset by email if you forget your password.
+    Convenient, but we technically have the ability to
+    read your messages (we don't, but we could).
+
+  [Sign in with Google / X / GitHub / Facebook] — Easiest.
+    Same as email + password from our side, plus you'll
+    sign in via your existing account at that service.
+    Fastest setup. Your access depends on both us AND
+    your sign-in provider — if you lose your Google
+    account, set a recovery email here first so you
+    can still get in.
+
+  You can switch to self-custody (Hive Keychain) any time
+  later via "Claim my account" in settings. Your username
+  and history come with you.
+
+Honest labelling earns more trust than hiding the trade-offs. Users who want sovereignty get it. Users who want convenience get it. Both groups know what they picked.
+
+'''Bonus recommendation:''' for OAuth signups, strongly suggest (but do not require) setting a separate recovery email at v4call sign-up time. That way if the user ever loses access to their Google/X/etc. account, they still have an in-service recovery path. Frame it as "a backup, in case something happens to your sign-in account" — same way Google itself recommends a recovery email or phone.
+
+== 7. Federation and Nostr design implications ==
+
+v4call's federation assumes '''one Hive account per server''' for the server identity, plus one Hive account per user. Custodial mode does not change this — each custodial user still has their own Hive account on-chain. The change is who holds the keys, not how many accounts exist.
+
+What does change: the service's own Hive account (the one that signs federation announces) is now also the recovery account of record for hundreds or thousands of user accounts. That account becomes more security-sensitive — it is no longer just the server's identity, it is also a recovery anchor for users. Treat it accordingly.
+
+----
+
+= PART 3 — SIGNUP AND LOGIN FLOW (Web2 mode) =
+
+== Signup ==
+
+# User visits <code>https://yourdomain.com/signup</code>.
+# User enters email and password (or clicks an OAuth provider button).
+# Service verifies email (sends a confirmation link).
+# On confirmation:
+## Service generates a random Hive account name (e.g. <code>v4c-u-9k2x1</code>).
+## Service generates the four Hive keys (owner, active, posting, memo).
+## Service broadcasts an <code>account_create</code> transaction on Hive, paid either with ~3 HIVE from a funding account or by burning one ACT.
+## Service encrypts the private keys with a master key (or a key derived from the user's password — see Part 5) and stores the ciphertext.
+## Service stores the mapping: email → Hive account name → encrypted keys.
+# User is logged in and lands in the lobby.
+
+The user never sees the Hive account name. The display name in the UI is whatever they picked at signup (subject to v4call's normal username rules).
+
+== Login ==
+
+# User enters email + password (or completes OAuth flow).
+# Service verifies credentials.
+# Service decrypts the user's posting key into session memory.
+# Service issues a session token (cookie or JWT) and proceeds as normal.
+
+Active key is '''not''' decrypted on login — only on demand when a payment or other active-key operation is requested. Reduces window of exposure.
+
+== Password reset ==
+
+Standard email-based reset flow. '''Critical:''' if private keys are encrypted with a key derived from the user's password, the service '''cannot''' decrypt them with the new password — the encryption key is gone. Two design options:
+
+* '''Option A (server holds the master key):''' password reset works as in any web app, because the master key is independent of the user's password. Trade-off: a database breach without password cracking still yields the keys.
+* '''Option B (keys encrypted with password-derived key):''' password reset effectively re-encrypts the keys with a key derived from the new password. The service must store an additional '''recovery secret''' for each user (encrypted with the password as well) that is used to re-establish the encryption when the user resets. More complex but stronger against database breaches.
+
+For v0.1 of custodial mode, '''Option A''' is simpler and acceptable, with HSM-backed master key. Document the trade clearly. Option B is a future hardening step.
+
+----
+
+= PART 4 — THE "GRADUATE TO SELF-CUSTODY" FLOW =
+
+'''This is the elegant part of the design.''' It allows a user to take full ownership of their Hive account without the service ever knowing the user's new owner key. The chain enforces the handover at consensus level.
+
+== The on-chain primitive ==
+
+A Hive account has four keys: '''owner''', '''active''', '''posting''', and '''memo'''. The owner key is the master key — whoever holds it can change all the others, including itself.
+
+The <code>account_update</code> operation, signed by the current owner key, can replace any combination of those four authorities with new public keys, in a single transaction. The chain accepts the transaction iff it is signed by the current owner. After the transaction confirms, only the new keys are valid.
+
+== The handover flow ==
+
+# User clicks '''"Claim my account / Graduate to self-custody"''' in account settings.
+# UI shows a strong warning: ''"You are about to take full ownership of your account. After this, our service can no longer help recover the account if you lose your keys. Save the new keys somewhere safe."''
+# In the user's browser, a client-side library (e.g. <code>@hiveio/dhive</code> or <code>hive-tx</code>) generates four fresh keypairs locally. '''The private keys never leave the browser.'''
+# The browser shows the user all four private keys (and matching public keys), and prompts the user to save them — paper backup, password manager, hardware-backed storage, whatever they prefer. The UI requires the user to confirm by typing or pasting one of the keys back (typo defense).
+# The browser sends '''only the four public keys''' to the service.
+# The service constructs an <code>account_update</code> transaction that replaces all four authorities on the user's Hive account with the user's new public keys.
+# The service signs the transaction with its '''current owner key''' (which it still holds) and broadcasts it.
+# On the next block (typically 3 seconds), the new keys are the only valid authorities. The service's stored copy of the old keys is now useless on-chain.
+# The service marks the account as '''user-custodial''' in its database and refuses further auth attempts for the email-password login on that account. The user must log in via Keychain or by pasting their new posting key from now on.
+
+The user keeps their username, their reputation, their history, their followers, their everything. The Hive account name does not change. Only the keys do.
+
+== The 30-day owner-key recovery wrinkle ==
+
+This catches people out. Hive has a built-in account recovery mechanism: for '''30 days''' after an owner key change, the previous owner authority can be used by the account's designated '''recovery account''' to request a recovery (to mitigate stolen-key scenarios).
+
+What this means for the handover:
+
+* For 30 days after the user takes self-custody, the service is still listed as the '''recovery account''' (because the service created the account, so the recovery-account default is the service's Hive account).
+* During that window, the service '''cannot''' unilaterally take the account back — it would need to collude with someone claiming to be the user. But the service is still the recovery agent of record.
+
+'''The clean handover therefore has two steps:'''
+
+# '''Step 1 (immediate):''' the <code>account_update</code> swap above. User now controls all four keys. Service cannot sign anything on the account.
+# '''Step 2 (delayed by 30 days):''' a <code>change_recovery_account</code> operation, naming a recovery account that the user trusts (could be a friend's Hive account, a different service, or just themselves with a paper backup of the owner key). This operation has a 30-day cooldown before it takes effect — deliberate, to prevent a thief from instantly orphaning the account.
+
+Both operations can be submitted in the same session. The user signs the <code>change_recovery_account</code> with their fresh active key; the service broadcasts it (paying the RC cost as a courtesy on the way out). The 30-day clock starts immediately. After 30 days, the user's chosen recovery account takes effect, and the service has no residual claim on the account at all.
+
+== Honest UX wording ==
+
+Show the user this exact message during the handover flow, or something close to it:
+
+  Step 1 (immediate):
+  Your keys change right now. We can no longer sign anything on
+  your account. Save these keys somewhere safe — if you lose them,
+  only your recovery account can help you get back in.
+
+  Step 2 (30 days from now):
+  Your recovery account changes from our service to [whoever you choose].
+  After this takes effect, your account is fully independent of our
+  service. We have no way to recover it for you after that.
+
+Make both steps visible. Do not hide the 30-day cooldown.
+
+== Typo defense ==
+
+A user who fat-fingers a public key and signs the transition with the service's owner key has '''permanently locked themselves out of their own account''', because the new owner key is a string nobody has the private half of. The chain will never let anyone in again.
+
+'''Mandatory ceremony:'''
+
+* Show the user the four public keys they are about to commit to.
+* Require them to paste at least one of the four private keys back, and the service verifies it matches by deriving the public key from it.
+* '''Optional but strongly recommended:''' rotate just the '''posting''' key first as a test. User generates a fresh posting key locally, the service rotates only that one authority. User then signs a Hive post (or a v4call DM) using the new posting key from their own browser, proving they actually possess the matching private key. Only if that test succeeds does the service proceed with the full owner/active/memo rotation. Small ceremony, prevents the worst-case "I generated keys but my browser crashed before I saved them" outcome.
+
+== The reverse direction ==
+
+Once the user owns their owner key, the user can rotate '''back''' into custody only by signing an <code>account_update</code> themselves, handing the new owner key to the service. The service cannot pull an account back into custody without the current owner key signing for it.
+
+This is the whole point — the chain enforces that custody is consensual in both directions. Worth noting for completeness: yes, custodial → self-custody → custodial is possible if the user genuinely wants it, but the user has to initiate it.
+
+----
+
+= PART 5 — OPEN QUESTIONS AND DECISIONS TO MAKE AT BUILD TIME =
+
+# '''Master key storage.''' HSM, dedicated key server, or encrypted-at-rest in the same DB as user data? Stronger is better but adds operational complexity. Recommend at minimum a separate key server process, ideally HSM-backed for any deployment that will hold meaningful funds.
+# '''Per-user key encryption.''' Option A (server-held master key) vs Option B (password-derived key per user). Recommend Option A for v0.1, Option B as a future hardening step.
+# '''Account funding model.''' Buy HIVE in bulk to fund <code>account_create</code> ops, or accumulate ACTs via the service's HP? ACTs are free but slow to generate. Buying HIVE is fast but costs cash. Probably hybrid — ACTs for steady-state signups, HIVE purchases as needed during onboarding spikes.
+# '''Initial RC delegation.''' How much HP does the service delegate to a fresh account to get it through its first month? Probably ~50 HP delegated, withdrawn after the user has accumulated their own.
+# '''Balance cap on custodial accounts.''' What's the threshold above which the service refuses to hold funds and forces a sweep? Pick a number tied to a fiat amount (e.g. equivalent of £20–£50 in HBD).
+# '''2FA mandate threshold.''' What payout amount triggers mandatory 2FA? Same range as the balance cap, probably. Or always require 2FA for any payout regardless of amount.
+# '''OAuth providers to support.''' Google is table-stakes. X, GitHub, Facebook each add complexity. Start with Google + email, add others on demand.
+# '''Username collision.''' If the user-chosen display name collides with another user on a different v4call server, how is that handled? Probably suffix-disambiguate at display time (<code>username@server</code>), as v4call already does for federated users.
+# '''Migration path for existing self-custody users.''' Users who already have a v4call account via Keychain — can they "downgrade" to custodial? Probably not, because they would have to hand the service their owner key, which is the opposite of what we want. Document as "custodial mode is for new signups only; existing users keep their self-custody."
+# '''Terms of service.''' Custodial accounts need a TOS that clearly states custody status, liability, and recovery limits. Get legal advice.
+
+----
+
+= PART 6 — PHASED IMPLEMENTATION PLAN =
+
+Same discipline as the rest of v4call: each phase ships independently and is rollback-able.
+
+== Phase 1 — Read-only Hive account creation ==
+
+'''Duration:''' 1 week.
+
+* Implement <code>account_create</code> flow as a manual operator tool. Operator runs a script that creates a Hive account, generates keys, stores them encrypted.
+* No user-facing UI yet — this is the foundation.
+* Test on a Hive testnet first if possible; otherwise create a handful of throwaway accounts on mainnet to verify the flow.
+
+'''Exit criterion:''' operator can create N Hive accounts with stored encrypted keys, and can sign a test transaction (e.g. a vote or a custom_json) using the stored keys.
+
+== Phase 2 — Custodial signup with email + password ==
+
+'''Duration:''' 2-3 weeks.
+
+* Signup page, email verification, password storage (bcrypt or argon2).
+* Account creation triggered on email confirmation.
+* Login flow, session management.
+* User can DO basic free actions (lobby chat, free DMs, free calls). No payment flows yet — that comes after the balance-cap design is in place.
+
+'''Exit criterion:''' a brand-new user can sign up with just an email, land in the lobby, send a free DM to another user, and join a free call. Without ever knowing Hive exists.
+
+== Phase 3 — Paid actions on custodial accounts ==
+
+'''Duration:''' 2-3 weeks.
+
+* Wire up paid DMs, paid calls, custom-token payments using the user's stored active key.
+* Implement balance cap and sweep-to-external-address.
+* Implement 2FA for payouts above threshold.
+* Implement withdrawal delay for large outbound payments.
+
+'''Exit criterion:''' a custodial user can pay for a call, receive earnings, and have those earnings either accumulate (up to the cap) or be swept automatically to an external Hive address they nominated.
+
+== Phase 4 — "Claim my account" / self-custody handover ==
+
+'''Duration:''' 2 weeks.
+
+* Build the key-rotation UI with the typo-defense ceremony.
+* Wire up the optional posting-key-test-first flow.
+* Wire up the <code>change_recovery_account</code> follow-up.
+* Mark accounts as user-custodial after handover; refuse email-password auth on those accounts.
+
+'''Exit criterion:''' a custodial user can click "Claim my account," go through the ceremony, end up with full self-custody, and verify on Hive Block Explorer that the service no longer has any control. After 30 days, the recovery account change takes effect and the service has zero residual control.
+
+== Phase 5 — OAuth providers ==
+
+'''Duration:''' 1-2 weeks per provider.
+
+* Start with Google (highest demand, well-documented).
+* Add X, GitHub, Facebook as demand justifies.
+
+'''Exit criterion:''' a user can sign up with Google in 10 seconds and be in the lobby. Same Hive account is created behind the scenes; OAuth identity is mapped to the Hive account name in the service's DB.
+
+== Phase 6 — Hardening ==
+
+'''Duration:''' ongoing.
+
+* Migrate master key to HSM if not already.
+* Implement per-user password-derived key encryption (Option B from Part 3).
+* Add audit logging for all key-decryption events.
+* Penetration test before going to scale.
+
+----
+
+= PART 7 — REFERENCES AND GLOSSARY =
+
+== References ==
+
+* Hive operations reference (<code>account_update</code>, <code>account_create</code>, <code>change_recovery_account</code>): https://developers.hive.io
+* Hive account recovery NIP-equivalent docs: search the Hive developer portal for "recovery_account"
+* <code>@hiveio/dhive</code> (Node.js Hive library, used by v4call already): https://gitlab.syncad.com/hive/dhive
+* <code>hive-tx</code> (lighter-weight library, useful for browser-side key generation): https://github.com/mahdiyari/hive-tx-js
+* v4call main repo: https://github.com/CompleteNoobs/v4call
+
+== Glossary ==
+
+; Custodial account : An account where the service holds the user's keys on the user's behalf. User logs in with email/password.
+; Self-custody account : An account where the user holds their own keys (via Hive Keychain or by managing them directly). The service has no access to the keys.
+; Owner key : The master key for a Hive account. Whoever holds it can change all other keys. Should rarely be used directly.
+; Active key : Used for transfers (HBD, tokens) and account-level operations. Holding this is equivalent to holding the wallet.
+; Posting key : Used for posts, votes, comments, and v4call DMs. Lower-privilege than active.
+; Memo key : Used to encrypt memo fields on Hive transfers. Lowest-privilege.
+; Account Creation Token (ACT) : An on-chain credit that lets you create a Hive account without paying ~3 HIVE. Earned by accounts with enough Resource Credits over time.
+; Resource Credits (RC) : The on-chain bandwidth allowance. Every transaction consumes RC. RC regenerates over time, scaled by the account's staked Hive (HP).
+; Recovery account : The Hive account designated to help recover ownership if the owner key is stolen. Set at account creation; can be changed with a 30-day cooldown.
+
+----
+
+= STATUS LOG =
+
+* '''2026-05-20 (initial)''' — Design captured from a Claude conversation. Not yet implemented. Slotted as post-v0.17 work, after the federation reliability quest (Architecture C in <code>NOSTR-DESIGN.md</code>) lands. Key decisions:
+** Hive's <code>account_update</code> is the right primitive for the self-custody handover — confirmed.
+** 30-day recovery-account cooldown is a real consideration and must be surfaced in the UX.
+** Master key storage is the single most important security question — design for HSM/separate-key-server from day one.
+** Balance cap + scheduled sweeps + 2FA on payouts are the standard mitigations for the "email reset = wallet drain" attack surface.
+** OAuth is offered as a lux convenience alongside email+password and Hive Keychain. All three are valid points on the ownership spectrum. No method is "wrong" — the user picks based on their own preferences and v4call labels each option honestly.
+** Custodial mode is opt-in per server, not a global v4call change. Self-custody Keychain users keep working exactly as today.
+
+* '''2026-05-20 (revision)''' — Section 6 (OAuth) reframed. Earlier draft positioned OAuth as a Big Tech dependency that "undercuts the censorship-resistance pitch." Replaced with the '''ownership spectrum''' framing: large service providers offer a genuinely good experience and lots of users prefer it; v4call's value-add is not to compete with them but to offer a spectrum of choices from fully self-custodial to fully OAuth-managed, with honest labelling of what each choice means. Federation and self-hostability (anyone can spin up <code>foo.com</code> with Docker images, on or off the public federation) is the deepest "be as root as possible" layer of the design — custodial mode does not constrain that, it just adds a friendly entry point. Action language changed from defensive (recommend email+password as "primary") to informational (show users a clear comparison at signup so they pick knowingly).
