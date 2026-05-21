@@ -1061,7 +1061,19 @@ function postToHive() {
       if (response.success) {
         showStatus(`✓ Posted! https://hive.blog/@${username}/${permlink}`, 'green');
       } else {
-        showStatus('✗ Post failed: ' + (response.message || 'unknown error'), 'danger');
+        // v0.16.10 — dump the full Keychain response object to console so the
+        // real error is visible. Hive Keychain leaves response.message empty
+        // for several failure modes (user cancelled, wrong account, RC limits,
+        // 5-min post rule, broadcast errors) and a bare "unknown error" makes
+        // those indistinguishable. Open DevTools Console to see the full reason.
+        console.error('[postToHive] Keychain response (full):', response);
+        const detail =
+          response.message ||
+          response.error ||
+          (response.result && (response.result.message || response.result.error)) ||
+          (typeof response === 'string' ? response : null) ||
+          'unknown error — open DevTools Console for the full Keychain response';
+        showStatus('✗ Post failed: ' + detail, 'danger');
       }
     }
   );
