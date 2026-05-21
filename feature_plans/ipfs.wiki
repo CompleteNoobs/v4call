@@ -1,0 +1,481 @@
+= IPFS-Backed Encrypted File Transfer for v4call =
+
+* this is already outdated - will be working on ipfs-gate and gathering info on ipfs and v4call
+
+'''Status:''' Design notes only. Not implemented. Captures the design discussion before context fades.
+
+'''Why this exists:''' v4call DMs today carry short ciphertext strings — encrypted text messages and small metadata. That works because <code>v4call-chat.db</code> stores them as rows in SQLite. It does not work for voice notes, video notes, images, or arbitrary file transfers, which are 100KB–100MB blobs that have no business sitting in a chat table. This document captures the design for adding encrypted file transfer between v4call users, using IPFS for the actual blob storage and the existing Hive posting-key encryption for confidentiality. Server only ever sees ciphertext + size + sender pubkey + a sender-declared content-type tag.
+
+'''Read this first if you are a noob:''' "IPFS" stands for InterPlanetary File System. It is a way to store files on a network of computers such that the file's '''address''' is a cryptographic hash of its content. You don't say "the file at server.com/foo.mp3" — you say "the file with hash <code>bafy...</code>." Anyone with that hash can fetch the file from any IPFS node that happens to have it. The hash itself proves you got the right file (different content always produces a different hash). The v4call server pins the file (tells IPFS "please keep this around") for as long as the sender has paid for storage; after that, the pin is released and the file gradually becomes unreachable. The encryption happens in the sender's browser before the file ever touches IPFS, so the v4call server, the IPFS network, and anyone watching the wire all see only ciphertext. Only the recipient (who holds the matching Hive posting key) can decrypt.
+
+== Document structure ==
+
+* '''Part 1 — The problem and the shape of the solution.'''
+* '''Part 2 — The mechanics of recording, encrypting, and uploading.'''
+* '''Part 3 — The hard sub-problems (storage ops, quotas, format compatibility, abuse).'''
+* '''Part 4 — Payment model: free tier and sender-pays storage credits.'''
+* '''Part 5 — Federation: the sender's server is the pinning host.'''
+* '''Part 6 — Recipient-side enforcement (Design Decision #15).'''
+* '''Part 7 — Open questions and decisions to make at build time.'''
+* '''Part 8 — Phased implementation plan.'''
+* '''Part 9 — References and glossary.'''
+
+----
+
+= PART 1 — THE PROBLEM AND THE SHAPE OF THE SOLUTION =
+
+== The problem ==
+
+People want to send voice notes. They also want to send images, short videos, the occasional document. v4call has no path for any of this today. The closest thing is text DMs, which max out around what fits comfortably in a SQLite row.
+
+You could shove file blobs into the chat database, base64-encoded, but the database is the wrong tool. A 50MB video as a single row will choke the chat-history fetch on the recipient's first login of the day. Retention sweeps will scan gigabytes. SQLite is fine for thousands of short ciphertext rows; it is not fine for a few hundred multi-megabyte blobs.
+
+You could put blobs on the v4call server's filesystem and serve them over HTTP. That works but it bakes in the assumption that the sender's server keeps hosting the bytes forever, makes federation awkward ("which server's filesystem holds it?"), and creates a non-content-addressed link that can be tampered with. It also makes the v4call server look like a file host in a regulatory sense, which is a different posture than "the server is a courier."
+
+== The shape of the solution ==
+
+IPFS gives the right properties:
+
+* '''Content-addressed.''' The CID is a hash of the bytes. The recipient verifies they got the right blob by re-hashing.
+* '''Location-independent.''' Any IPFS gateway can serve the bytes if it has them. If the sender's server goes down, the recipient can fetch from any public gateway that has cached the CID.
+* '''Pluggable storage backend.''' The sender's server can pin to a local Kubo node, to a partner pinning service (Pinata, Web3.Storage, Filebase, Lighthouse), or to a Filecoin-backed cold tier — the rest of the system doesn't care.
+* '''Naturally separates "who paid for storage" from "who can read."''' Encryption is end-to-end (sender's browser → recipient's browser, using hivecrypt and the recipient's posting key). Storage payment is sender → sender's-server, in HBD or a custom Hive-Engine token. The two layers don't entangle.
+
+The recipient pulls the encrypted blob from any IPFS gateway, decrypts client-side with their Hive posting key, and gets the original. The v4call server's only jobs are: verify the sender's signature, charge for storage, pin the blob, notify the recipient.
+
+== What this is, and what this is not ==
+
+'''Is:''' encrypted asynchronous file delivery between v4call users. Voice notes ("hold to record"), video notes, image sharing, arbitrary file attachments in DMs.
+
+'''Is not:''' a general file-hosting service. The v4call server doesn't serve random uploads to the world; it pins blobs that have a registered v4call sender and (in v1) a registered v4call recipient. Outside that, the server has no reason to hold the bytes.
+
+'''Is not:''' a Riverside-style podcast recording service. Local recording for podcast workflows is a different feature with different requirements (clock sync, per-participant streams, host-collected packages). See <code>local-recording-bitrate.wiki</code> for that — Phase 7 of that document also lives on IPFS but with a different recipient-set model (room-scoped, host-chosen).
+
+----
+
+= PART 2 — THE MECHANICS OF RECORDING, ENCRYPTING, AND UPLOADING =
+
+== Capture ==
+
+For voice notes: <code>MediaRecorder</code> from the existing <code>getUserMedia(\{ audio: true \})</code> stream. Press-to-record button in the DM panel UI; release to stop, preview, send.
+
+For video notes: same but with <code>\{ audio: true, video: true \}</code>.
+
+For arbitrary files: <code>&lt;input type="file"&gt;</code>. Works on every browser including iOS Safari, so the file-attachment subset of this feature is iOS-compatible even where MediaRecorder is iffy.
+
+== Encryption ==
+
+Browser-side, before anything touches the network:
+
+# Read the blob into memory (or, for large files, into a stream).
+# Generate a fresh symmetric key (AES-256 via WebCrypto's <code>SubtleCrypto</code>).
+# Encrypt the blob with AES-GCM authenticated encryption.
+# Encrypt the symmetric key to the '''recipient's''' Hive memo public key (or posting public key — see Part 7) via <code>hivecrypt</code>'s ECIES-style flow.
+# Sign the envelope (CID + size + ciphertext hash + recipient + metadata) with the '''sender's''' Hive posting private key.
+
+The result is a small JSON envelope plus a big encrypted blob. The envelope is what the v4call server sees and forwards; the blob is what goes to IPFS.
+
+'''Why a fresh symmetric key per file rather than direct asymmetric encryption of the whole blob:''' asymmetric encryption is slow and has size limits. The standard practice (used everywhere from PGP to Signal to TLS) is symmetric-encrypt the bulk, asymmetric-encrypt the key. It also lets the same encrypted blob be readable by multiple recipients later (just add more encrypted-key-envelopes) without re-uploading — useful if file transfer ever extends to rooms.
+
+== Upload ==
+
+Browser POSTs to the sender's server's <code>/ipfs-upload</code> endpoint. Multipart form with the encrypted blob plus the signed metadata envelope.
+
+Server:
+
+# Verifies the envelope's signature matches the sender's posting pubkey from Hive.
+# Checks the sender's storage quota (free-tier balance or paid credit — see Part 4).
+# Refuses if the sender is over quota or the file is too large.
+# Pins the blob to its local Kubo node (or its configured partner pinning service).
+# Inserts a row into <code>ipfs_uploads</code> with CID, sender, recipient, size, expiry, the signed envelope hash, currency + amount paid.
+# Emits <code>ipfs-upload-success</code> back to the sender with the CID and the recipient-delivery status.
+# Emits <code>ipfs-message-arrived</code> to the recipient (locally, or via federation envelope cross-server — see Part 5) with the CID and envelope.
+
+== Download and decryption ==
+
+Recipient's browser:
+
+# Receives the <code>ipfs-message-arrived</code> event with the CID and envelope.
+# Fetches the encrypted blob from any IPFS gateway. Sender's server's gateway is the default (fastest, already pinned); public gateways are the fallback.
+# Verifies the blob hashes to the CID (content-addressed integrity check — defends against a malicious sender's server serving a different blob than what was signed).
+# Decrypts the symmetric key from the envelope using the recipient's posting private key (via Keychain, or in custodial mode via the server's stored key).
+# Decrypts the blob with the symmetric key.
+# Plays it / displays it / offers download, depending on the declared media type.
+
+----
+
+= PART 3 — THE HARD SUB-PROBLEMS =
+
+== 3.1 Running a Kubo node ==
+
+This is the biggest "this isn't free" piece. The sender's v4call server needs an IPFS node alongside it. Options:
+
+* '''Co-located Kubo (Go-IPFS) in docker-compose.''' Simplest, most sovereign. Adds a service to <code>docker-compose.yml</code>, a healthcheck, a disk quota, and ongoing peering / gc maintenance. Disk fills up if TTL sweep isn't reliable; peering breaks occasionally; <code>ipfs repo gc</code> has to run regularly.
+* '''Partner pinning service (Pinata, Web3.Storage, Filebase, Lighthouse).''' Almost zero ops — the partner runs Kubo. Server makes API calls to pin/unpin. Adds a per-MB cost that gets passed through to senders. Most operators will probably start here.
+* '''Filecoin-backed cold tier.''' For paid long-retention storage. Partners like Lighthouse and web3.storage wrap Filecoin deals as an API call. Slower first-byte retrieval; much cheaper per GB-month. Probably a v2 tier, not a v1 default.
+
+'''Architect the upload path so the pinning destination is pluggable.''' One function: <code>pinToStorage(encryptedBlob)</code> returns a CID. Implementation is local Kubo OR a partner API, selected by env config or by tier. Do not hard-code Kubo HTTP RPC calls scattered through server.js.
+
+== 3.2 Quota and abuse ==
+
+Even with Hive-signature gating, a registered user can still spam-upload to themselves (or to a willing accomplice) to burn the server's free-tier storage. Mitigations:
+
+* '''Per-user quota.''' Free tier capped at some MB total live storage (e.g. 100MB) plus per-file TTL (e.g. 3 days). Stored uploads count against the quota; expired uploads return their bytes to the pool. Make the quota an env var from day one so operators can tune.
+* '''Per-recipient quota too (optional).''' Cap inbound files from any one sender at some MB per day per recipient. Stops one sender from bombing one recipient with garbage. Most operators probably won't need this for v1.
+* '''Total server-wide cap.''' Operator-set ceiling on the Kubo node's disk usage. When approached, refuse new uploads with a clear error. Stops a runaway from filling the host.
+* '''Per-IP rate limit on the upload endpoint.''' Standard hygiene; same backlog item as the wider rate-limiting work in the security assessment.
+
+== 3.3 Format compatibility ==
+
+* '''Voice notes:''' <code>audio/webm; codecs=opus</code> works in Chrome, Firefox, desktop Safari. iOS Safari has historically been iffy. Two options:
+** Detect via <code>MediaRecorder.isTypeSupported</code> and fall back to <code>audio/mp4</code> on iOS (Safari supports it natively).
+** Or transcode server-side to a common format. Adds CPU cost; probably overkill for v1.
+* '''Video notes:''' similar story — <code>video/webm</code> works on Chrome/Firefox, <code>video/mp4</code> on Safari. Browser support for MediaRecorder video varies more than audio. Probably ship voice notes first, video notes after.
+* '''Arbitrary files via <code>&lt;input type="file"&gt;</code>:''' works everywhere including iOS. No format issue. This subset of the feature is iOS-compatible even where MediaRecorder is not.
+* '''iOS Hive Keychain caveat:''' already documented in Known Gotchas. Paid uploads (where the sender needs to sign a Hive transfer for storage credit) will fall over on iOS the same way other paid actions do today. Free-tier uploads work fine because signing is just posting-key sign of the envelope, which can happen via the stored posting key (entered separately in the lobby unlock panel — same flow as encrypted DMs).
+
+== 3.4 CID privacy ==
+
+IPFS CIDs are publicly observable. Anyone watching the IPFS network can see "this CID exists, it is N bytes." The contents are encrypted, but the existence of the file is not hidden. For most voice notes / image shares this is fine. For something where '''the fact of sending'''  is sensitive (whistleblowing, journalism), this is worth knowing about.
+
+'''Action:''' document the property clearly. Don't oversell as "fully private." For genuinely sensitive transfers, the user is better served by a private channel (encrypted DM with the file inline, on a server they trust), not IPFS.
+
+== 3.5 The "this file has expired" UX ==
+
+When the TTL sweep unpins an expired upload, the CID is no longer guaranteed to resolve from the sender's server. Recipient clicks play, gets a hang or an error.
+
+Better UX: the v4call server keeps the metadata row in <code>ipfs_uploads</code> even after unpin, with <code>expired = true</code>. When the recipient's client renders an old message, the server returns the expired flag in the history fetch, and the client shows "this file has expired" instead of a broken link with a confusing error.
+
+Even better: the CID might still resolve from other nodes that cached it. The client tries the sender's gateway first, then falls back to public gateways (ipfs.io, dweb.link, cloudflare-ipfs.com) before giving up. Often the file is still available somewhere for a while after the sender's server stopped pinning.
+
+== 3.6 The signature-then-CID ordering problem ==
+
+The envelope includes the CID. But the CID is the hash of the encrypted blob, which the sender doesn't know until they've encrypted. So the order is:
+
+# Sender encrypts the blob locally.
+# Sender computes the CID locally (same hash function IPFS uses — <code>multihash sha256</code> wrapped in a CIDv1).
+# Sender constructs the envelope with the CID + size + recipient + media type.
+# Sender signs the envelope with their posting private key.
+# Sender POSTs blob + envelope to <code>/ipfs-upload</code>.
+# Server pins the blob, verifies that the pin produced the CID the envelope claims (sanity check — should always match for honest senders, but worth verifying).
+
+If the server's CID doesn't match the envelope's, the upload is rejected. Defends against a sender signing one envelope and uploading a different blob.
+
+----
+
+= PART 4 — PAYMENT MODEL: FREE TIER AND SENDER-PAYS STORAGE CREDITS =
+
+== Free tier ==
+
+Every v4call account on a server gets some free storage:
+
+* '''Total live storage:''' e.g. 100MB.
+* '''Per-file TTL:''' e.g. 3 days.
+* '''Per-file size cap:''' e.g. 10MB (keeps the free tier usable for voice notes / images but not for long videos).
+
+These are env vars on the server, so each operator tunes them. The numbers above are first-draft defaults — they're picked to be generous enough for normal "send a voice note to a friend" use, while bounded enough that a server with 1000 active users has a predictable worst-case storage budget (100MB × 1000 × 3 days × turnover factor).
+
+'''No payment needed for free-tier uploads.''' Sender signs the envelope with their posting key (proving they're a registered v4call user, gating the free tier), server checks the quota, pins, delivers. Done.
+
+== Paid tier ==
+
+If a sender wants to send a file bigger than the free-tier cap, or wants to keep a file pinned longer than the free TTL, they top up an '''IPFS storage credit''':
+
+# Sender opens the storage panel ("My storage: 47MB used / 100MB free + 0MB paid credit").
+# Clicks "Top up" → picks an amount (e.g. 1 HBD buys X MB-days of paid storage at the server's posted rate).
+# Hive transfer fires to the server's existing <code>SERVER_HIVE_ACCOUNT</code> (platform fee account) with a memo identifying the user.
+# Server's existing payment-watcher sees the transfer, credits the user's <code>ipfs_credits</code> row.
+# Future uploads from this sender draw from paid credit when free tier is exhausted, or when the file exceeds the free per-file cap, or when the sender requests a longer retention than the free default.
+
+'''Crucially, this doesn't introduce a new escrow account.''' Storage credits accumulate in the same account that already receives platform fees today. The <code>ipfs_credits</code> table is a virtual ledger — when a sender uploads and draws from paid credit, the server records the consumption; the funds were already received and don't need to move again. This aligns with the existing v4call principle of minimum custody (Design Decision #13 — escrow only holds funds for active calls; persistent balances are not v4call's pattern).
+
+== Recipient rate cards (optional v2 polish) ==
+
+Some recipients may want to set incoming-file rules: max size, accepted media types, "charge senders X HBD per MB to send me video files." This is the symmetric pattern of paid DMs — the recipient publishes preferences, the sender's client reads them and quotes the cost before sending.
+
+Recipient adds an <code>[IPFS-RATES]</code> section to their existing <code>v4call-rates</code> Hive post:
+
+  [V4CALL-RATES-V2]
+  ...
+  [IPFS-RATES]
+  MAX-INCOMING-MB:50
+  INCOMING-RATE:0.001-HBD-per-MB
+  BLOCK-MEDIA:video
+  [/IPFS-RATES]
+  ...
+
+Sender's client fetches the recipient's rates, calculates total cost from blob size, shows "this will cost 0.05 HBD to send (50 MB × 0.001/MB)", sender confirms.
+
+Reuses the existing <code>computePaymentOptions</code> helper from v0.16.6 (extended with a new <code>'ipfs'</code> callType) so the picker and validator stay in sync — same lesson from the v0.16.6 multi-currency bug: '''the picker and the validator MUST share the same option-building code'''.
+
+== TTL-based expiry ==
+
+Cron job runs hourly, mirroring the existing <code>DM_RETENTION_DAYS</code> cleanup pattern:
+
+# Find pins past their TTL (free tier) or past their paid retention window (paid tier).
+# Unpin from Kubo (or call partner's unpin API).
+# Run <code>ipfs repo gc</code> periodically to actually reclaim disk.
+# Decrement sender's <code>ipfs_uploads</code> rows toward <code>expired = true</code>; release their counted bytes back to the user's free-tier quota.
+# CID may still resolve from other IPFS nodes that cached it — that's fine, sender's server is no longer obliged to serve.
+
+----
+
+= PART 5 — FEDERATION: THE SENDER'S SERVER IS THE PINNING HOST =
+
+== Core principle ==
+
+File lives on the '''sender's''' home server's IPFS node. Recipient's server doesn't need to pin anything.
+
+This mirrors Design Decision #13 ("caller's server is verifier and router; callee's server is treasurer") — except for file transfer, the sender's server is doing the actual storage work (because they're the one paying for it), and the recipient's server is the policy enforcer (Design Decision #15).
+
+== The federation envelope ==
+
+New federation message type <code>ipfs-message</code>:
+
+  \{
+    type: 'ipfs-message',
+    msg_id: '&lt;uuid&gt;',
+    from_user: '&lt;sender&gt;',
+    from_server: '&lt;sender's domain&gt;',
+    to_user: '&lt;recipient&gt;',
+    cid: '&lt;ipfs CID&gt;',
+    size_bytes: &lt;int&gt;,
+    media_type: 'voice'|'video'|'image'|'file',
+    ciphertext_hash: '&lt;sha256 of encrypted blob&gt;',
+    encrypted_key_envelope: '&lt;hivecrypt-encrypted symmetric key&gt;',
+    signature: '&lt;sender's posting-key sig over the envelope&gt;',
+    paid_currency: 'HBD'|'&lt;TOKEN&gt;'|null,
+    paid_amount: &lt;number&gt;|null,
+    payment_tx_id: '&lt;hive tx id&gt;'|null,
+    sent_at_iso: '&lt;ISO timestamp&gt;'
+  \}
+
+Recipient's server:
+
+# Validates the signature against the sender's posting pubkey from Hive.
+# Validates <code>ciphertext_hash</code> matches the CID (defense against a malicious sender's server serving a different blob than what was signed).
+# Runs recipient-side policy check (see Part 6).
+# If accepted: delivers <code>ipfs-message-arrived</code> to the recipient's socket.
+# If rejected: emits <code>ipfs-message-failed</code> back over federation with a clear reason; sender sees the rejection in their UI.
+
+The recipient's client then fetches the encrypted blob from the sender's server's IPFS gateway (or any public gateway resolving the CID), verifies the hash, decrypts, displays.
+
+== Federation protocol bump ==
+
+The <code>ipfs-message</code> envelope is a new wire-format type. Bumps federation protocol to '''v0.6''' (v0.5 is allocated for v0.17 paid expert invites). Slot behind a <code>protocol_version</code> gate like <code>room-invite</code> did in v0.16 — older peers ignore unknown message types, new feature only activates when both ends advertise v0.6+.
+
+== Cross-server delivery path summary ==
+
+  Foo on call.completenoobs.com → Bar on hive-book.com
+
+  1. Foo's browser encrypts the file, computes CID, signs envelope.
+  2. Foo's browser POSTs blob + envelope to call.completenoobs.com/ipfs-upload.
+  3. call.completenoobs.com pins to its local Kubo (or partner pinning service).
+  4. call.completenoobs.com sends federation 'ipfs-message' envelope to hive-book.com.
+  5. hive-book.com validates signature, validates hash, runs recipient-policy check.
+  6. hive-book.com delivers 'ipfs-message-arrived' to Bar's socket.
+  7. Bar's browser fetches encrypted blob from call.completenoobs.com's IPFS gateway
+     (or any public gateway resolving the CID).
+  8. Bar's browser verifies hash matches CID, decrypts with Bar's posting key, plays.
+
+  hive-book.com never pins a byte. call.completenoobs.com unpins when TTL expires.
+
+== What if the sender's server goes down ==
+
+The CID might still be reachable from any IPFS node that cached it (peering does this naturally for popular content). Public gateways like ipfs.io, dweb.link, cloudflare-ipfs.com are reasonable fallbacks. The recipient's client tries the sender's gateway first, falls back to a list of public gateways, then surfaces "file unreachable" if nothing resolves.
+
+This is one of the genuinely nice properties of content-addressed storage — outages don't immediately destroy the file the way they would with location-addressed storage.
+
+----
+
+= PART 6 — RECIPIENT-SIDE ENFORCEMENT (DESIGN DECISION #15) =
+
+The recipient's server is the only server fully trusted to enforce the recipient's policies. This applies to file transfer exactly the way it applies to paid DMs and paid calls.
+
+== What the recipient's server re-validates ==
+
+When an <code>ipfs-message</code> envelope arrives over federation:
+
+# '''Block-list check:''' is the sender on the recipient's block-list? Reject.
+# '''Size cap:''' does <code>size_bytes</code> exceed the recipient's <code>MAX-INCOMING-MB</code>? Reject.
+# '''Media-type filter:''' does the recipient have <code>BLOCK-MEDIA:video</code> set and the sender claims <code>media_type:'video'</code>? Reject.
+# '''Paid-tier check:''' if recipient has <code>INCOMING-RATE</code> set, does the on-chain payment cover <code>size_bytes × rate</code> in the currency the sender chose? Reject if under-paid.
+# '''Token-gate / contact-allowlist:''' same recipient-side rules as paid DMs — if recipient only accepts files from certain Hive accounts or token holders, check here.
+
+On reject:
+
+* Recipient's server sends <code>ipfs-message-failed</code> envelope back to sender's server with a clear reason.
+* Recipient's server does NOT deliver the notification to the recipient.
+* Sender's server surfaces the rejection in the sender's UI via the existing <code>lobby-dm-error</code> pattern.
+
+'''Crucially, the sender's storage credit is NOT refunded on reject.''' The sender paid for storage (bytes on Kubo, pinning service costs), and the server delivered storage. The failure is at the application/policy layer, not at the storage layer. This is the same answer as the rest of v4call's payment model — "server delivers what was paid for, even if the application-layer outcome was an error."
+
+For paid DMs the situation is different (recipient's escrow takes the payment, so refund-on-reject makes sense — v0.16.6 ships this). For IPFS uploads the situation is "sender pays sender's server for storage on sender's server," so the payment flow doesn't involve the recipient's escrow at all. The sender's storage credit drains; if they want to retry with a different recipient (or talk to the original recipient about why they bounced it), the file is already pinned and they can re-send with no additional storage cost — only the envelope/notification needs to fire again.
+
+== Why this is consistent with the rest of v4call ==
+
+Same lesson as v0.16.6: caller-side server is not trusted as the sole policy enforcer. Sender's server may pre-check (it knows the recipient's published rate card from federation hello + Hive lookups) and refuse to even attempt the upload if it knows the file will be rejected. But that's UX, not security — the authoritative reject happens at the recipient's server.
+
+----
+
+= PART 7 — OPEN QUESTIONS AND DECISIONS TO MAKE AT BUILD TIME =
+
+# '''Posting key or memo key for encryption.''' v4call's existing encrypted DMs use posting keys via hivecrypt. Memo keys exist specifically for "encrypt a payload to a recipient" use cases (they're what Hive memo encryption uses on HBD transfers). For consistency with existing DM encryption, probably posting key. For best-practice key-class separation, probably memo key. Decision shouldn't be made in isolation — whatever <code>local-recording-bitrate.wiki</code> Phase 7 ends up doing should match (currently it specifies memo key). Probably worth standardising on memo key across the wider IPFS integration. Migration cost is low because both keys are derivable from the same master and both are exposed via Keychain.
+# '''Default free-tier values.''' 100MB total / 3-day TTL / 10MB-per-file is a first-draft guess. Tune based on early traffic. Make them env vars so operators can tune without code changes.
+# '''Default paid-tier pricing.''' What's "X MB-days per HBD"? Needs to cover the operator's actual storage cost (Kubo disk, or partner pinning fees, plus margin). For Pinata as of 2026, ~1 HBD per GB-month is in the right neighbourhood. Different operators will pick different numbers; ship a sensible default and let operators override.
+# '''Pinning destination choice.''' Local Kubo, partner pinning service, or hybrid (hot tier local, cold tier on Filecoin-backed partner)? Probably ship with two implementations behind the <code>pinToStorage</code> interface — local Kubo (default for self-hosters) and Pinata (default for operators who don't want IPFS ops work). Operator picks via env var. Filecoin cold tier is a v2.
+# '''Recipient delivery on offline recipient.''' If Bar is offline when Foo uploads, the file sits pinned on Foo's server with a pending notification. When Bar logs in, the recipient's server delivers <code>ipfs-message-arrived</code> as part of the same "unread message" sweep that already happens for DMs. No change to Bar's flow.
+# '''Multi-recipient files (room file transfer).''' Out of scope for v1 (DMs only). For v2, the encryption pattern is "fresh symmetric key, encrypted-once-per-recipient" — same as the paid-recording design in <code>local-recording-bitrate.wiki</code>. Same encrypted blob, multiple key envelopes. Worth keeping in mind so the v1 schema doesn't make v2 painful.
+# '''Voice/video format on iOS.''' Detect MediaRecorder support, fall back to <code>audio/mp4</code> on iOS, or transcode server-side? Probably detect + fall back for v1; server-side transcode is a polish item if format fragmentation becomes a real problem.
+# '''Free-tier abuse.''' Per-user quota + TTL contains the worst case, but a malicious user can still burn their full quota every 3 days, every 3 days, forever. Mitigation: refuse uploads from accounts younger than N days, or from accounts without minimum staked HP (same gate machinery as the lobby anti-spam from v0.13). Make optional via env var.
+# '''Money transmitter regulation on stored credits.''' The platform-fee account is already accepting funds today (for platform fees on paid calls/DMs), so this isn't net-new exposure. But credits-as-balance is closer to "holding user funds for future spending" than escrow-for-an-active-call is. Worth a legal sanity check before paid tier ships in any jurisdiction where this matters. Possibly easier to model the top-up as "prepaid storage at posted rate, non-refundable" rather than "credit balance" — same UX, different legal posture.
+# '''Per-server vs federation-wide rate cards.''' If Bar publishes <code>INCOMING-RATE:0.001-HBD-per-MB</code>, does that apply uniformly across federation, or can Bar's home server override it? Probably federation-wide (it's in Bar's rates post, which is the source of truth) — same model as paid DMs and paid calls.
+# '''Receipt of payment after the fact.''' If sender's server credits a top-up but never processes the upload (server crash mid-flow), is the credit lost? Probably keep credits as a persistent table independent of any single upload; crash recovery means the credit is just still there next time the sender uploads. Same pattern as DM retention surviving restarts.
+# '''CID storage size.''' CIDv1 base32 is ~60 chars. 10k uploads = 600KB of CID strings in <code>ipfs_uploads</code>. Negligible.
+# '''Should the sender's server gateway be public or restricted.''' If <code>https://call.completenoobs.com/ipfs/&lt;cid&gt;</code> is open to the world, anyone with the CID can fetch the (encrypted) blob. That's fine — it's encrypted, and IPFS is designed for public retrieval. If the operator wants tighter control, they can require an auth token, but that breaks the "any gateway can serve it" property and isn't worth the friction.
+
+----
+
+= PART 8 — PHASED IMPLEMENTATION PLAN =
+
+Same discipline as the rest of v4call: each phase ships independently and is rollback-able.
+
+== Phase 1 — Kubo node alongside v4call, manual upload tool ==
+
+'''Duration:''' 1-2 weeks.
+
+* Add Kubo (Go-IPFS) as a service in <code>docker-compose.yml</code> with a healthcheck and a configured disk quota.
+* Write a <code>pinToStorage(buffer)</code> helper that talks to the local Kubo HTTP API (or a partner pinning API behind the same interface).
+* Operator-only command-line tool to upload a test file, get a CID back, fetch it via gateway, unpin it.
+* No user-facing UI yet.
+
+'''Exit criterion:''' operator can pin and unpin a file via the helper, and verify the Kubo node is healthy under restart.
+
+== Phase 2 — Free-tier voice notes in DMs ==
+
+'''Duration:''' 2-3 weeks.
+
+* "Hold to record" button in the DM panel.
+* Browser MediaRecorder → encrypt → POST to <code>/ipfs-upload</code>.
+* Server signature verification, quota check, pin, write <code>ipfs_uploads</code> row.
+* Recipient gets <code>ipfs-message-arrived</code> socket event with CID + envelope.
+* Recipient's browser fetches from sender's server's gateway, decrypts, plays.
+* <code>ipfs_uploads</code> retention sweep (TTL-based unpin).
+* No federation yet — same-server DMs only.
+
+'''Exit criterion:''' a user can record a 30-second voice note, send it to another user on the same server, the recipient plays it back. After 3 days, the file is unpinned and the recipient sees "file expired" instead of a broken link.
+
+== Phase 3 — Federation for IPFS messages ==
+
+'''Duration:''' 1-2 weeks.
+
+* Federation protocol bumped to v0.6 with the <code>ipfs-message</code> envelope.
+* Recipient-side enforcement re-validation on the recipient's server.
+* <code>ipfs-message-failed</code> on reject.
+* Federation hello announces v0.6 capability; v0.5 peers continue to federate fully for everything they could do at v0.5.
+
+'''Exit criterion:''' a user on server A sends a voice note to a user on server B; B's server validates, the recipient plays it back. Block-list / size / media-type rejects work as expected.
+
+== Phase 4 — Image and arbitrary-file attachments ==
+
+'''Duration:''' 1 week.
+
+* <code>&lt;input type="file"&gt;</code> picker in the DM panel.
+* Same encryption + upload path as voice notes.
+* Client renders inline preview for images, download link for arbitrary files.
+* Probably no video notes yet — leave for Phase 6.
+
+'''Exit criterion:''' a user can attach an image to a DM, the recipient sees it inline; can attach a PDF, recipient gets a download link.
+
+== Phase 5 — Paid tier with IPFS storage credits ==
+
+'''Duration:''' 2-3 weeks.
+
+* Top-up flow: user transfers HBD (or custom token) to <code>SERVER_HIVE_ACCOUNT</code> with a memo identifying themselves.
+* Payment watcher (same machinery as existing platform-fee tracking) credits <code>ipfs_credits</code>.
+* Storage panel UI showing free tier used / paid credit balance.
+* Per-file size cap raised for users with paid credit.
+* Per-file retention configurable by sender within their paid credit budget.
+
+'''Exit criterion:''' a user can top up storage credit, send a file bigger than the free per-file cap, and request 30-day retention instead of the free 3-day TTL. The credit drains correctly; refunds at TTL-expiry are not applicable (paid storage is paid storage).
+
+== Phase 6 — Video notes and recipient rate cards ==
+
+'''Duration:''' 1-2 weeks.
+
+* Video note recording with browser MediaRecorder.
+* iOS format detection and fallback.
+* <code>[IPFS-RATES]</code> section parsed from recipient's Hive rates post.
+* <code>computePaymentOptions</code> extended with a new <code>'ipfs'</code> callType for the picker/validator shared codepath.
+
+'''Exit criterion:''' a user can record a 30-second video note, send it to a recipient who has <code>INCOMING-RATE</code> set, the sender's client shows the cost, the sender pays via Keychain, the file is delivered. Recipient with <code>BLOCK-MEDIA:video</code> set correctly rejects.
+
+== Phase 7 — Partner pinning service backend ==
+
+'''Duration:''' 1 week.
+
+* Implement the <code>pinToStorage</code> interface against Pinata (or chosen partner).
+* Env var to switch between local Kubo and partner backend.
+* Document the trade-offs.
+
+'''Exit criterion:''' an operator who doesn't want to run Kubo can flip an env var, supply a Pinata API key, and have the same feature work transparently.
+
+== Phase 8 — Hardening and polish ==
+
+'''Duration:''' ongoing.
+
+* Public-gateway fallback list in the client when sender's server is unreachable.
+* "File expired" UX polish.
+* Per-recipient inbound quotas (if abuse warrants).
+* Filecoin cold tier integration (probably via Lighthouse or web3.storage).
+* Eventual room-scoped file transfer (multi-recipient envelopes) — likely as part of the wider IPFS integration covered also in <code>local-recording-bitrate.wiki</code>.
+
+----
+
+= PART 9 — REFERENCES AND GLOSSARY =
+
+== References ==
+
+* IPFS protocol overview: https://docs.ipfs.tech
+* IPFS CIDs (content identifiers): https://docs.ipfs.tech/concepts/content-addressing/
+* Kubo (Go-IPFS reference implementation): https://github.com/ipfs/kubo
+* Pinata (pinning service): https://www.pinata.cloud
+* Web3.Storage (pinning service, Protocol Labs): https://web3.storage
+* Filebase (S3-compatible IPFS): https://filebase.com
+* Lighthouse (Filecoin-backed permanent storage): https://lighthouse.storage
+* MediaRecorder API: https://developer.mozilla.org/en-US/docs/Web/API/MediaRecorder
+* AES-GCM authenticated encryption (WebCrypto): https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/encrypt#aes-gcm
+* <code>hivecrypt</code> (Hive memo-key encryption library): https://gitlab.syncad.com/hive/hivecrypt
+* v4call main repo: https://github.com/CompleteNoobs/v4call
+* Companion design — paid recording on IPFS (different recipient-set model): <code>local-recording-bitrate.wiki</code> Phase 7
+
+== Glossary ==
+
+; IPFS : InterPlanetary File System. A decentralised content-addressed storage network. Files are identified by CIDs (hashes of their content) rather than by location.
+; CID : Content Identifier. The cryptographic hash of a file's content, used as its address on IPFS. The same content always produces the same CID; different content always produces different CIDs. Makes the link itself a proof of what the file is.
+; Pinning : Telling an IPFS node "please keep this file available." Without pinning, files on IPFS may eventually be evicted from nodes that hold them.
+; Kubo : The reference IPFS implementation, written in Go. The thing v4call servers run alongside themselves to pin their users' uploads. Sometimes called "go-ipfs" in older documentation.
+; Pinning service : A paid service that pins IPFS content on the customer's behalf. Pinata, Web3.Storage, Filebase, Lighthouse are common examples. Pays for the customer's content to stay reachable on IPFS.
+; Gateway : An HTTPS endpoint that fetches IPFS content by CID and serves it over HTTP. Lets browsers and tools that don't speak IPFS natively still retrieve files. Examples: ipfs.io, dweb.link, cloudflare-ipfs.com, plus each pinning service's own gateway.
+; Filecoin : A blockchain-based market for long-term IPFS-style storage. Storage providers post bids; clients pay to have their content kept for years. Slower retrieval than hot IPFS pinning but much cheaper per GB-month. Used by Lighthouse and web3.storage as a cold-tier backend.
+; AES-GCM : Authenticated symmetric encryption. The bulk encryption used by v4call to encrypt files before upload. The symmetric key is then encrypted to the recipient's Hive key for delivery.
+; Key envelope : The encrypted-once-per-recipient symmetric key. A file has one encrypted blob + one envelope (or N envelopes if multi-recipient). Adding a recipient adds an envelope; the encrypted blob is unchanged.
+; Storage credit : Prepaid storage capacity bought by the sender. Drains as the sender uploads files past their free-tier quota or with longer-than-default retention. Held as a virtual ledger row in the v4call server's database; the funds themselves live in the existing platform-fee Hive account.
+; TTL : Time To Live. How long the v4call server pins an uploaded file before the cleanup sweep unpins it. Free tier has a short TTL (e.g. 3 days); paid tier extends it according to the sender's purchased credit.
+; Recipient-side enforcement : Design Decision #15. The recipient's home server is the only fully-trusted policy enforcer; sender-side servers are couriers and payment witnesses. Applied to paid DMs and paid calls in v0.16.6; applied to IPFS file transfer here.
+
+----
+
+= STATUS LOG =
+
+* '''2026-05-21 (initial)''' — Design captured from a Claude conversation. Not yet implemented. Slotted as post-v0.17 / post-v0.18 work — does not block the v0.17 paid-expert-invites critical path, and the operational complexity of running Kubo (or integrating a pinning partner) is best taken on after the v0.17 settlement flow has had time to stabilise. Key decisions:
+** File transfer is a separate feature category from chat DMs — blobs belong on IPFS, not in <code>v4call-chat.db</code>.
+** Sender's server is the pinning host; recipient's server is the policy enforcer (Design Decision #15). No cross-server storage replication needed.
+** Hive identity gates the free tier (signed envelopes prove the sender is a registered v4call user). Paid tier adds storage credits via the existing platform-fee account — no new escrow.
+** End-to-end encryption with a fresh symmetric key per file, key envelope encrypted to the recipient's Hive key. v4call server never sees plaintext.
+** Federation envelope <code>ipfs-message</code> requires a protocol bump to v0.6 (v0.5 is reserved for v0.17 paid expert invites). Gated behind <code>protocol_version</code> like <code>room-invite</code> was in v0.16.
+** Pluggable pinning backend (<code>pinToStorage(blob)</code> interface) — local Kubo for self-hosters, partner pinning service (Pinata / Web3.Storage / Filebase / Lighthouse) for operators who don't want IPFS ops. Filecoin cold tier as a v2.
+** Recipient rate cards via a new <code>[IPFS-RATES]</code> section in the existing <code>v4call-rates</code> post. Reuses the v0.16.6 <code>computePaymentOptions</code> helper so picker and validator share option-building code (lesson from the v0.16.6 multi-currency bug).
+** TTL-based expiry, mirroring <code>DM_RETENTION_DAYS</code> cleanup pattern. Expired files surface as "file expired" in the recipient's history rather than a broken link.
+** Sender's storage credit is NOT refunded when the recipient's server rejects on policy grounds. Paid for storage, server delivered storage; the failure is application-layer.
+** Coordinated with <code>local-recording-bitrate.wiki</code> Phase 7 (paid recording on IPFS) — both designs share the encrypt-before-upload pattern and may converge on a single shared IPFS subsystem once the wider integration shape settles.

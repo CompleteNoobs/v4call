@@ -571,6 +571,7 @@ function defaultWindow() {
     days: [...DAYS],          // all 7 days — 24/7 default
     timeStart: '00:00',
     timeEnd:   '23:59',
+    invite: '0',
     text: '0',      textSession: '0',
     voiceRing: '0', voiceConnect: '0', voiceRate: '0', voiceMinDeposit: '0',
     videoRing: '0', videoConnect: '0', videoRate: '0', videoMinDeposit: '0'
@@ -630,6 +631,15 @@ function renderTokens() {
         <label>TOKEN SYMBOL</label>
         <input type="text" value="${esc(tok.symbol)}" placeholder="e.g. PIZZA" style="text-transform:uppercase;"
           oninput="tokens[${ti}].symbol=this.value.toUpperCase();document.getElementById('tok-badge-${ti}').textContent='⬡ '+(this.value.toUpperCase()||'TOKEN');saveState();"/>
+      </div>
+      <div class="slabel">ROOM INVITE
+        <span style="font-weight:400;font-size:0.65rem;color:var(--subtext);"> — fee someone pays to invite you to a private room/group · 0 = FREE</span>
+      </div>
+      <div class="rg2" style="margin-bottom:6px;">
+        <div class="rc"><label>PER INVITE (tokens, 0=FREE)</label>
+          <input type="number" value="${tok.invite || '0'}" min="0" step="0.001"
+            oninput="tokens[${ti}].invite=this.value;saveState();"/></div>
+        <div class="rc"></div>
       </div>
       <div class="slabel">TEXT MESSAGE</div>
       <div class="rg2" style="margin-bottom:6px;">
@@ -741,6 +751,16 @@ function renderWindows(list, li) {
         </div>
       </div>
 
+      <div class="slabel">ROOM INVITE — HBD · 0 = FREE
+        <span style="font-weight:400;font-size:0.65rem;color:var(--subtext);"> — fee someone pays to invite you to a private room/group</span>
+      </div>
+      <div class="rg2" style="margin-bottom:6px;">
+        <div class="rc"><label>PER INVITE (HBD)</label>
+          <input type="number" value="${w.invite || '0'}" min="0" step="0.001"
+            oninput="lists[${li}].windows[${wi}].invite=this.value;saveState();"/></div>
+        <div class="rc"></div>
+      </div>
+
       <div class="slabel">TEXT MESSAGE — HBD · 0 = FREE</div>
       <div class="rg2" style="margin-bottom:6px;">
         <div class="rc"><label>PER MESSAGE (HBD)</label>
@@ -798,6 +818,7 @@ function esc(s) {
 function addToken() {
   tokens.push({
     id: 'tok'+(nextId++), symbol: '',
+    invite:'0',
     text:'0', textSession:'0',
     voiceRing:'0', voiceConnect:'0', voiceRate:'0',
     videoRing:'0', videoConnect:'0', videoRate:'0',
@@ -894,6 +915,7 @@ function generateOutput() {
   for (const tok of tokens) {
     if (!tok.symbol) continue;
     out += `\n[TOKEN:${tok.symbol}]\n`;
+    out += `INVITE:${fmtTok(tok.invite || '0')}\n`;
     out += `TEXT:${fmtTok(tok.text)}\n`;
     out += `TEXT-SESSION:${fmtTok(tok.textSession)}/hr\n`;
     out += `VOICE:RING:${fmtTok(tok.voiceRing)};CONNECT:${fmtTok(tok.voiceConnect)};RATE:${fmtTok(tok.voiceRate)}/hr\n`;
@@ -920,6 +942,7 @@ function generateOutput() {
         : w.days.map(d => d.toLowerCase()).join(',');
 
       out += `[DAYS:${daysStr}][TIME:${w.timeStart}-${w.timeEnd}]\n`;
+      out += `INVITE:${fmtHbd(w.invite || '0')}\n`;
       out += `TEXT:${fmtHbd(w.text)}\n`;
       out += `TEXT-SESSION:${fmtHbd(w.textSession)}/hr\n`;
 
@@ -1192,6 +1215,7 @@ function parseAndApplyRates(body) {
     else if (line.startsWith('[TOKEN:')) {
       section = 'token';
       curToken = { id:'tok'+(nextId++), symbol: line.slice(7,-1),
+        invite:'0',
         text:'0', textSession:'0',
         voiceRing:'0', voiceConnect:'0', voiceRate:'0',
         videoRing:'0', videoConnect:'0', videoRate:'0',
@@ -1224,7 +1248,8 @@ function parseAndApplyRates(body) {
     // ── Token content ─────────────────────────────────────
     else if (section === 'token' && curToken) {
       // Check TEXT-SESSION before TEXT to avoid prefix collision
-      if      (line.startsWith('TEXT-SESSION:'))  curToken.textSession  = parseVal(line.slice(13));
+      if      (line.startsWith('INVITE:'))        curToken.invite       = parseVal(line.slice(7));
+      else if (line.startsWith('TEXT-SESSION:'))  curToken.textSession  = parseVal(line.slice(13));
       else if (line.startsWith('TEXT:'))          curToken.text         = parseVal(line.slice(5));
       else if (line.startsWith('VOICE:')) {
         line.slice(6).split(';').forEach(p => {
@@ -1259,6 +1284,7 @@ function parseAndApplyRates(body) {
           days,
           timeStart: timeM ? timeM[1] : '00:00',
           timeEnd:   timeM ? timeM[2] : '23:59',
+          invite:'0',
           text:'0', textSession:'0',
           voiceRing:'0', voiceConnect:'0', voiceRate:'0', voiceMinDeposit:'0',
           videoRing:'0', videoConnect:'0', videoRate:'0', videoMinDeposit:'0'
@@ -1270,7 +1296,8 @@ function parseAndApplyRates(body) {
       }
       else if (curWindow) {
         // TEXT-SESSION must be checked before TEXT
-        if      (line.startsWith('TEXT-SESSION:')) curWindow.textSession    = parseVal(line.slice(13));
+        if      (line.startsWith('INVITE:'))       curWindow.invite         = parseVal(line.slice(7));
+        else if (line.startsWith('TEXT-SESSION:')) curWindow.textSession    = parseVal(line.slice(13));
         else if (line.startsWith('TEXT:'))         curWindow.text           = parseVal(line.slice(5));
         else if (line.startsWith('VOICE:')) {
           line.slice(6).split(';').forEach(p => {

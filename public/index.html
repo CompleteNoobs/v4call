@@ -772,6 +772,25 @@
   </div>
 </div>
 
+<!-- INVITE PAYMENT MODAL (v0.16.10 — paid room-invite gate) -->
+<div id="invite-payment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="border-color:var(--purple);">
+    <h3 style="color:var(--purple);">📨 Paid Room Invite</h3>
+    <p id="invite-payment-desc" style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">This user charges a fee to be invited to a private room.</p>
+    <div>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">PAY WITH:</div>
+      <div id="invite-payment-options" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
+    </div>
+    <div class="payment-total"><span class="label">Total — one payment</span><span class="amount" id="invite-payment-total" style="color:var(--purple);">0.000 HBD</span></div>
+    <div class="payment-note">If the user declines or doesn't respond within 15 min, the fee is auto-refunded to your wallet.</div>
+    <div class="keychain-required">⚡ Requires Hive Keychain</div>
+    <div class="payment-btn-row">
+      <button id="invite-pay-confirm-btn" style="background:var(--purple);color:#0a0c0f;">Pay &amp; Invite →</button>
+      <button id="invite-pay-cancel-btn"  style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- INVITE POPUP -->
 <div id="invite-popup">
   <h4>📞 Room Invite</h4>
@@ -2148,6 +2167,96 @@ socket.on('allowlist-info', ({ room, message }) => {
   showInviteMsg(`${message}${room ? ` (#${room})` : ''}`);
 });
 
+// ── v0.16.10 — Paid room-invite gate ──────────────────────────────────────
+// Server-emitted when the inviter (current user) needs to pay an invite fee
+// before the invite can be sent. We render a Keychain-style picker mirroring
+// the call/DM modals; on success we re-emit allowlist-add with the payment
+// fields attached so the server can verify on-chain and proceed.
+let _ipPending = null; // { room, invitee, inviteId, escrow, options, selectedIdx }
+socket.on('invite-payment-required', ({ room, invitee, inviteId, escrow, options, belowFloor }) => {
+  if (!options || options.length === 0) {
+    showInviteMsg(`⚠ @${invitee}'s invite rate is unprocessable on this server${belowFloor ? ' (below 0.001 floor)' : ''}. Try again later.`);
+    return;
+  }
+  _ipPending = { room, invitee, inviteId, escrow, options, selectedIdx: 0 };
+  document.getElementById('invite-payment-desc').textContent = `@${invitee} requires payment to be invited to #${room}.`;
+  renderInvitePaymentOptions();
+  document.getElementById('invite-payment-modal').style.display = 'flex';
+});
+
+function renderInvitePaymentOptions() {
+  const wrap = document.getElementById('invite-payment-options');
+  wrap.innerHTML = '';
+  _ipPending.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'pm-cur-btn' + (i === _ipPending.selectedIdx ? ' active' : '');
+    const bal = (opt.balance != null) ? ` <span class="bal">bal ${parseFloat(opt.balance).toFixed(3)}</span>` : '';
+    btn.innerHTML = `${opt.flat.toFixed(3)} ${escapeHtml(opt.currency)}${bal}`;
+    btn.addEventListener('click', () => {
+      _ipPending.selectedIdx = i;
+      renderInvitePaymentOptions();
+    });
+    wrap.appendChild(btn);
+  });
+  const sel = _ipPending.options[_ipPending.selectedIdx];
+  document.getElementById('invite-payment-total').textContent = `${sel.flat.toFixed(3)} ${sel.currency}`;
+}
+
+document.getElementById('invite-pay-cancel-btn').addEventListener('click', () => {
+  document.getElementById('invite-payment-modal').style.display = 'none';
+  _ipPending = null;
+});
+
+document.getElementById('invite-pay-confirm-btn').addEventListener('click', async () => {
+  if (!_ipPending) return;
+  const { room, invitee, inviteId, escrow, options, selectedIdx } = _ipPending;
+  const opt    = options[selectedIdx];
+  const cur    = opt.currency;
+  const amount = opt.flat;
+  const memo   = `v4call:invite:${inviteId}`;
+  const btn    = document.getElementById('invite-pay-confirm-btn');
+
+  if (!window.hive_keychain) {
+    showInviteMsg('⚠ Hive Keychain is required to pay an invite fee.');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Opening Keychain…';
+
+  const isToken = (cur !== 'HBD' && cur !== 'HIVE');
+  let paid = false;
+  if (isToken) {
+    const json = JSON.stringify({
+      contractName: 'tokens', contractAction: 'transfer',
+      contractPayload: { symbol: cur, to: escrow, quantity: amount.toFixed(3), memo }
+    });
+    paid = await new Promise(resolve =>
+      window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Pay ${amount.toFixed(3)} ${cur} invite fee`, r => resolve(r.success))
+    );
+  } else {
+    paid = await new Promise(resolve =>
+      window.hive_keychain.requestTransfer(myUsername, escrow, amount.toFixed(3), memo, cur, r => resolve(r.success))
+    );
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Pay & Invite →';
+  if (!paid) {
+    showInviteMsg('Payment cancelled — invite not sent.');
+    return;
+  }
+
+  document.getElementById('invite-payment-modal').style.display = 'none';
+  showInviteMsg(`✓ ${amount.toFixed(3)} ${cur} submitted — verifying & sending invite to @${invitee}…`);
+
+  socket.emit('allowlist-add', {
+    room,
+    username: invitee,
+    payment:  { inviteId, currency: cur, paid: amount, memo }
+  });
+  _ipPending = null;
+});
+
 // ── Room creation ───────────────────────────────────────
 let nameCheckTimer = null;
 function checkRoomName() {
@@ -2198,8 +2307,15 @@ function showInviteMsg(text) {
   if (currentRoom) addSystemMsg(text);
   else             addLobbyMsg({ type: 'system', text });
 }
-socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id }) => {
-  pendingInvite = { roomName, from, from_server: from_server || null, invite_id: invite_id || null };
+socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id, paid_invite_id, paid_amount, paid_currency }) => {
+  pendingInvite = {
+    roomName, from,
+    from_server:    from_server || null,
+    invite_id:      invite_id || null,
+    paid_invite_id: paid_invite_id || null,
+    paid_amount:    paid_amount || 0,
+    paid_currency:  paid_currency || null
+  };
   const others  = (invitees || []).filter(u => u !== from && u !== myUsername);
   const fromLabel = from_server
     ? `<strong>@${from}</strong> <span style="color:var(--accent);font-size:0.7rem;">@${from_server}</span>`
@@ -2207,18 +2323,26 @@ socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id }) 
   const fedNote = from_server
     ? `<br><span style="color:var(--subtext);font-size:0.7rem;">Cross-server invite from ${from_server}.</span>`
     : '';
+  const paidNote = paid_invite_id
+    ? `<br><span style="color:var(--purple);font-size:0.72rem;">💜 Paid invite — @${from} sent ${parseFloat(paid_amount).toFixed(3)} ${escapeHtml(paid_currency)}. Accept = you keep the fee (minus platform). Decline = refund to inviter.</span>`
+    : '';
   document.getElementById('invite-popup-text').innerHTML =
     `${fromLabel} invites you to <strong>#${roomName}</strong>` +
     (others.length ? `<br>Others: ${others.map(u=>'@'+u).join(', ')}` : '') +
-    fedNote;
+    fedNote + paidNote;
   document.getElementById('invite-popup').style.display = 'block';
   const sysFrom = from_server ? `@${from}@${from_server}` : `@${from}`;
-  showInviteMsg(`📞 ${sysFrom} invited you to #${roomName}`);
+  const paidTag = paid_invite_id ? ` 💜 ${parseFloat(paid_amount).toFixed(3)} ${paid_currency}` : '';
+  showInviteMsg(`📞 ${sysFrom} invited you to #${roomName}${paidTag}`);
 });
 let pendingInvite = null;
 function acceptInvite() {
   if (!pendingInvite) return;
   document.getElementById('invite-popup').style.display = 'none';
+  // v0.16.10 — local paid invite: tell server we accepted so it disburses.
+  if (pendingInvite.paid_invite_id) {
+    socket.emit('paid-invite-respond', { paid_invite_id: pendingInvite.paid_invite_id, response: 'accepted' });
+  }
   if (pendingInvite.from_server && pendingInvite.invite_id) {
     // v0.16 Part B — federated invite. Acknowledge over federation, auto-leave
     // any current local room (per design call 5(a) — no grace period for
@@ -2242,6 +2366,10 @@ function acceptInvite() {
 }
 function declineInvite() {
   document.getElementById('invite-popup').style.display = 'none';
+  // v0.16.10 — local paid invite: tell server we declined so it refunds.
+  if (pendingInvite?.paid_invite_id) {
+    socket.emit('paid-invite-respond', { paid_invite_id: pendingInvite.paid_invite_id, response: 'declined' });
+  }
   if (pendingInvite?.from_server && pendingInvite?.invite_id) {
     socket.emit('room-invite-respond', { invite_id: pendingInvite.invite_id, response: 'declined' });
   }
