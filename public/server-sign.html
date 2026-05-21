@@ -808,19 +808,32 @@ document.getElementById('nostr-hex').addEventListener('input', (e) => {
   }
 });
 
-// Detect Keychain presence
-setTimeout(() => {
+// Detect Keychain presence — poll, because the module-script + esm.sh import
+// on this page delays document_idle past Keychain's injection window. A one-shot
+// 400ms check raced ahead and left detection stuck on "not detected" even when
+// the extension was installed.
+(() => {
   const el = document.getElementById('keychain-status');
   const btn = document.getElementById('sign-keychain-btn');
-  if (window.hive_keychain) {
+  const markFound = () => {
     el.textContent = '✓ Hive Keychain detected — recommended (no key paste needed).';
     el.style.color = 'var(--green)';
-  } else {
+    btn.disabled = false;
+  };
+  const markMissing = () => {
     el.textContent = '⚠ Hive Keychain not detected. Install from hive-keychain.com, or use the posting-key paste option below.';
     el.style.color = 'var(--accent)';
     btn.disabled = true;
-  }
-}, 400);
+  };
+  if (window.hive_keychain) { markFound(); return; }
+  let elapsed = 0;
+  const POLL_MS = 100, TIMEOUT_MS = 3000;
+  const iv = setInterval(() => {
+    elapsed += POLL_MS;
+    if (window.hive_keychain) { clearInterval(iv); markFound(); }
+    else if (elapsed >= TIMEOUT_MS) { clearInterval(iv); markMissing(); }
+  }, POLL_MS);
+})();
 
 // Detect NIP-07 (browser-side Nostr signer)
 setTimeout(() => {

@@ -259,6 +259,27 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-21** — **Phase C DONE & proven on all 3 production servers**
+  (hive-book.com, v4call.com, call.completenoobs.com — the latter joined as a
+  brand-new third server during this verification, an ideal test). Subscribe
+  + dedupe + own-pubkey/own-domain skip + newest-per-domain logic in
+  `nostr-fed.mjs` (`startSubscribe`); new `discoverPeerViaNostr()` in
+  `server.js` reuses the existing Hive-anchored `verifyPeer()` (Option C —
+  trust nothing in the event payload, only the domain as a "poke"); new knobs
+  `NOSTR_HIVE_FALLBACK` (default true) + `NOSTR_SUBSCRIBE_ENABLED` + computed
+  `HIVE_SCAN_ENABLED`; 2h Hive scan gated accordingly so pure
+  `nostr` + `NOSTR_HIVE_FALLBACK=false` test mode works. **Hive-scan
+  precedence rule** keeps Nostr from degrading richer Hive-discovered entries
+  (Nostr just refreshes `last_seen`). Belt-and-braces 30-min subscription
+  re-open — cheap, gentle, traffic to public relays is <5 events/hour per
+  server. New-peer discovery latency: **seconds** (vs up to 2h). Federation
+  remained green throughout; no regressions to DMs/calls/payments;
+  `verifyPeer` canonical untouched; `index.html` untouched; no new federation
+  envelopes; no protocol bump. Phase C wiki section written with real
+  production log output. **Phase C is the v0.19-class shippable milestone.**
+  Measure-in-prod checkpoint informally passed (3-server federation works as
+  designed; UNREACHABLE blips on public relays handled gracefully by multi-
+  relay redundancy as planned).
 - **2026-05-19** — **Phase B DONE & proven on production servers.** `nostr-fed.mjs`
   (ESM, isolated), ~20 lines in `server.js` (config consts + non-blocking dynamic
   `import()` after the unchanged federation block), `nostr-tools` added to
