@@ -527,6 +527,14 @@
     #messages::-webkit-scrollbar{width:3px;}
     #messages::-webkit-scrollbar-thumb{background:var(--border);}
     .msg-system{align-self:center;text-align:center;font-size:0.72rem;color:var(--subtext);font-family:'IBM Plex Mono',monospace;background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.18);border-radius:6px;padding:5px 10px;max-width:90%;}
+    /* v0.16.12 — deferred-paid-invite in-room notice */
+    .msg-deferred-notice{align-self:stretch;margin:6px 4px;background:rgba(167,139,250,0.10);border:1px solid var(--purple);border-radius:8px;padding:10px 12px;font-family:'IBM Plex Mono',monospace;}
+    .dpn-title{font-size:0.74rem;color:var(--purple);font-weight:600;margin-bottom:8px;}
+    .dpn-row{display:flex;align-items:center;gap:8px;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;margin-top:4px;cursor:pointer;transition:border-color 0.15s,background 0.15s;}
+    .dpn-row:hover{border-color:var(--purple);background:rgba(167,139,250,0.08);}
+    .dpn-user{color:var(--text);font-size:0.78rem;font-weight:600;}
+    .dpn-reason{color:var(--subtext);font-size:0.68rem;flex:1;}
+    .dpn-btn{padding:4px 10px;background:var(--purple);color:#0a0c0f;border:none;border-radius:5px;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.7rem;cursor:pointer;}
     .msg-bubble{display:flex;flex-direction:column;gap:2px;max-width:82%;}
     .msg-bubble.self{align-self:flex-end;align-items:flex-end;}
     .msg-bubble.other{align-self:flex-start;}
@@ -2286,13 +2294,57 @@ function createRoom() {
     banlistVisibility: document.getElementById('banlist-public')?.checked ? 'all' : 'admin'
   });
 }
-socket.on('room-created', ({ roomName }) => {
+socket.on('room-created', async ({ roomName, deferred }) => {
   document.getElementById('room-name-input').value = '';
   document.getElementById('room-name-status').textContent = '';
   document.getElementById('create-btn').disabled = true;
   // Rooms enter in text-only mode; user clicks Enable Mic / Enable Cam to opt in.
-  amCreator = true; pendingCallType = 'text'; enterRoom(roomName);
+  amCreator = true; pendingCallType = 'text';
+  await enterRoom(roomName);
+  // v0.16.12 — paid invitees were silently dropped from the allowlist at
+  // creation time (no automatic Keychain pop during room-create). Surface a
+  // prominent in-room notice with a one-click "invite & pay" pointer instead
+  // of the easy-to-miss lobby-info notice that was used before.
+  if (Array.isArray(deferred) && deferred.length > 0) {
+    renderDeferredPaidNotice(deferred);
+  }
 });
+
+function renderDeferredPaidNotice(deferred) {
+  const c = document.getElementById('messages');
+  if (!c) return;
+  const box = document.createElement('div');
+  box.className = 'msg-deferred-notice';
+  let html = `<div class="dpn-title">⚠ Paid invites pending — click each user to invite & pay:</div>`;
+  for (const d of deferred) {
+    html += `<div class="dpn-row" data-user="${escapeHtml(d.user)}">` +
+            `<span class="dpn-user">@${escapeHtml(d.user)}</span>` +
+            `<span class="dpn-reason">${escapeHtml(d.reason)}</span>` +
+            `<button class="dpn-btn">Invite →</button>` +
+            `</div>`;
+  }
+  box.innerHTML = html;
+  box.querySelectorAll('.dpn-row').forEach(row => {
+    const user = row.dataset.user;
+    const trigger = () => prefillAllowlistInvite(user);
+    row.addEventListener('click', trigger);
+    const btn = row.querySelector('.dpn-btn');
+    if (btn) btn.addEventListener('click', (ev) => { ev.stopPropagation(); trigger(); });
+  });
+  c.appendChild(box);
+  c.scrollTop = c.scrollHeight;
+}
+
+function prefillAllowlistInvite(username) {
+  const panel = document.getElementById('allowlist-panel');
+  const input = document.getElementById('al-add-input');
+  if (panel) panel.style.display = 'flex';
+  if (input) {
+    input.value = '@' + username;
+    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    input.focus();
+  }
+}
 socket.on('room-create-error', (msg) => {
   document.getElementById('room-name-status').textContent = msg;
   document.getElementById('room-name-status').className   = 'bad';
