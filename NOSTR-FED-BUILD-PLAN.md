@@ -259,6 +259,37 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-22** — **🟢 NOSTR FEDERATION ARC — COMPLETE.** Phases A
+  (throwaway spike) → B (publish own announce) → C (subscribe + Hive-anchored
+  discovery, the shippable v0.19-class milestone) → D (cross-server presence,
+  WS-wins-Nostr-additive) all in production on three federated servers
+  (hive-book.com, v4call.com, call.completenoobs.com). Cross-server users
+  appear in lobbies near-realtime instead of taking up to 2 hours via the
+  Hive scan window — the original "users sometimes don't show across
+  servers" pain solved.
+  Plus three latent-bug closes surfaced by Phase D testing — each generalised
+  into a meta-rule for future work:
+  (1) **Canonical mismatch** (v0.16.13) — signer + verifier must stay
+  byte-for-byte in lockstep when an optional trailer can grow the signed
+  shape.
+  (2) **Paid-invite bypass class** (v0.16.14) — every paid flow that
+  crosses the federation MUST re-validate on the recipient side; never
+  trust the source's enforcement. Third instance of the recipient-enforces
+  rule #15 class (after lobby-encrypted DM and paid DM).
+  (3) **Visibility = approval** (v0.16.15) — Phase D's additive visibility
+  was independent of approvedPeers, opening a small spam/social-eng surface
+  for any Hive-account-owning party. Fixed; persisted approvals now also
+  load on every boot regardless of FEDERATION_PEERS in .env. Approval is
+  the single switch.
+  All four phases + the three fixes have proper sections in
+  `noob-docs/nostr-fed-walkthrough.wiki` with real production log output
+  and Common Problems entries. The wiki ends with a "Words explained"
+  glossary that grew with the work.
+  **Next:** the IPFS file-attachments arc (v0.19+ per CLAUDE.md "Planned
+  Features"). Builds on top of the proven federation foundation; doesn't
+  need to redo any of it. The federation, the paid-flow plumbing, the
+  recipient-enforces rule, and the Hive-anchored Nostr binding are all
+  available for the IPFS work to compose with.
 - **2026-05-22** — **Phase D visibility/approval coherence FIXED (v0.16.15)
   + persisted-approvals always-load FIXED in the same patch.** Operator
   during Phase D production testing observed cross-server users appearing
