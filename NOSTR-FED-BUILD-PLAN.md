@@ -259,6 +259,49 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-22** — **Federated paid-invite BYPASS-CLASS bug FIXED (v0.16.14).**
+  Phase D production testing surfaced a long-latent bypass: the federated
+  `room-invite` recipient handler only re-validated when the source claimed
+  a payment. If the source sent `payload: {}` (its own `getInviteOptions`
+  returned free — stale cache, wrong parse, or malicious peer), the
+  recipient blindly delivered the invite popup. This is the **third** time
+  we've hit this bypass class (after lobby-encrypted DM in v0.16.5 and
+  federated paid DM in v0.16.6) and the same violation of locked design
+  rule #15 ("Recipients enforce their own rules").
+  **Why Phase D surfaced it:** before Phase D, cross-server invites were a
+  rare admin-typed allowlist edit. Phase D made cross-server presence
+  ubiquitous — toggling a federated user and clicking Create Room became a
+  one-click flow. The bypass had always been there; it just wasn't a daily
+  workflow.
+  **Fix:** recipient `room-invite` handler now ALWAYS re-fetches
+  `getInviteOptions(target, from_user)`, regardless of source claim. Three
+  recipient-side responses: `blocked`, `fee_rejected`, `fee_required`. On
+  `fee_required` the recipient includes the rate options in the response;
+  the source's `room-response` handler routes them into the existing
+  `invite-payment-required` picker so the admin pays and re-invites
+  (self-healing UX). Source-side `allowlist-add` restructured so
+  payment-provided wins over source's `isPaid` (handles the fee_required
+  cycle when source rates are cached-stale).
+  **No federation protocol bump.** Reuses existing `room-response` envelope
+  with the existing `reason:'paid_rejected'` and a new `detail:'fee_required'`
+  string + optional `required` field carrying the rate options. Pre-fix
+  peers (v0.4 wire-compat) keep working — they just don't get the
+  picker-pop UX, fall back to a clear info message.
+  **Meta-lesson captured in wiki Common Problem #2c:** "do not trust the
+  source's enforcement, ever — every paid flow that crosses the federation
+  must re-validate on the recipient side." Forward-applicable to v0.17
+  Paid Expert Invites, v0.18+ file attachments, and anything else paid
+  that crosses servers.
+- **2026-05-22** — **Phase D shipped & proven on 3 production servers** —
+  WS-wins-Nostr-additive presence. Cross-server lobby visibility
+  near-realtime. No `index.html` change needed (cleaner architecture than
+  the design doc proposed: extended `lobbySnapshot()` so existing
+  federated-user render handles Nostr-additive users identically).
+  Feature-gated by `FED_PRESENCE_VIA_NOSTR` (default false; flipped to
+  true on all 3 servers for testing). Federation-discovery + presence
+  pipelines now run side-by-side cleanly. THIS is the v0.19-class
+  shippable milestone the build plan pointed at. Phase A spike removed
+  (`scripts/` deleted) per the doc convention.
 - **2026-05-22** — **Canonical-mismatch latent bug FIXED (server.js
   `_verifyPayloadString`).** `public/server-sign.html`'s `buildPayload` was
   updated to nGate "Option B" 2026-05-13 (conditional 12-field canonical
