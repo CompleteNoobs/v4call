@@ -585,12 +585,25 @@ For callers to be charged when they ring you, publish your rates on the Hive blo
 # Go to <code>https://call.yourdomain.com/rate-editor.html</code>
 # Enter your Hive username
 # Set your rates — ring fee, connect fee, duration rate per hour, minimum credit deposit
+# '''(v0.16.10+)''' Optionally set a '''ROOM INVITE''' fee per named list / token / default window — the per-invite fee anyone has to pay to invite you to a private room. Tucked above '''TEXT MESSAGE''' in both the token cards and the rate-list windows. <code>0</code> = free (room invites stay free as in earlier versions). A typical "stop random strangers inviting me" value is <code>0.001 HBD</code> or higher. Friends + family go in a free-priced named list so they can still invite you for nothing.
 # Set <code>PLATFORM-FEE</code> to at least your server's <code>DEFAULT_PLATFORM_FEE</code> percentage (e.g. <code>10</code> for 10%). If you set it lower, paid contacts to your account will be rejected on this server.
 # Optionally add custom token sections (e.g. <code>[TOKEN:CNOOBS]</code>) to offer discounted rates for callers who hold your token
 # Click '''Generate''' to preview the rates block
 # Click '''Post to Hive''' — Keychain will ask you to approve the post
 
 This creates a post titled <code>v4call-rates</code> on your Hive blog. Your server reads this post automatically.
+
+'''Common Problems — rate-editor "Post failed: unknown error":'''
+* '''Hive enforces a ~5 minute gap between posts from the same account.''' If you've posted recently (rate update, regular blog post, anything) and re-try too soon, the broadcast fails. Wait 5+ minutes and try again. The error message is sometimes empty in Hive Keychain — open browser DevTools Console for the full Keychain response object (rate-editor logs it as of v0.16.10).
+* '''Low Resource Credits (RC).''' A fresh Hive account with no staked Hive Power can run out of RC and fail to broadcast. Check at <code>https://hivestats.io/@yourusername</code>. If RC is below ~30%, either wait (RC regenerates over 5 days) or have a friend delegate ~50 HP to you temporarily.
+* '''Wrong title / permlink.''' The rate-editor handles both — don't change the defaults.
+
+'''Paid room invites — how the flow looks in practice (v0.16.10–v0.16.13):'''
+* When someone tries to invite you to a private room (allowlist-add panel or via the lobby user-picker + Create Room), your server checks your rate post's <code>INVITE:</code> rate against them.
+* If you're on their free-friend list (or your rate doesn't have <code>INVITE:</code> set, or it's <code>0</code>) → invite goes through free, you get the normal popup.
+* If you're not on a free list and your <code>INVITE:</code> rate applies → inviter sees a Keychain payment modal. They pay into the server's escrow on Hive (or their own server's escrow for federated invites — inviter-holds-funds model).
+* Once payment lands, you get the invite popup with a '''💜 Paid invite — @inviter sent X CURRENCY''' badge. Accept = you keep the net (gross minus the server's platform fee, paid out on-chain at accept). Decline = inviter auto-refunded the gross. Don't respond within 15 minutes = inviter auto-refunded.
+* If the inviter uses '''Create Room''' with you ticked in the user-picker, your name is silently dropped from the room's initial allowlist (no surprise mid-flow Keychain pop). The room is created, the inviter enters it, and they see a '''purple "Paid invites pending"''' box at the top of the room chat listing you with the price. They click '''Invite →''' and the allowlist panel pre-fills with your name — they click <code>+</code> and the payment modal pops.
 
 To verify your server read the rates correctly:
 
@@ -1038,6 +1051,18 @@ If <code>/admin-peers.html</code> shows "No v4call-server posts discovered yet" 
 * Expected: <code>[discovery] Hive returned N post(s) under v4call-server tag</code>
 * If N = 0, no Hive posts exist with that tag yet — publish your own via <code>/server-announce.html</code>
 * If you see <code>[discovery] No response from Hive tag query</code>, the Hive API is unreachable from inside the container. Test container DNS / outbound HTTPS by hitting any external HTTPS URL from the container.
+
+=== rate-editor "Post failed: unknown error" when clicking Post to Hive ===
+
+Almost always a Hive-side issue, not a v4call bug:
+
+* '''Wait at least 5 minutes between Hive posts from the same account.''' Hive enforces a ~5-minute gap between top-level posts. If you just posted (rate update, regular blog post, anything) the broadcast fails. The error message in Keychain is often empty — open browser DevTools Console (F12) for the full response object (the rate-editor logs it as of v0.16.10).
+* '''Low Resource Credits (RC) on the posting account.''' Fresh accounts with no staked Hive Power can run out of RC quickly. Check at <code>https://hivestats.io/@yourusername</code>. If RC is below ~30% wait it out (RC regenerates over 5 days) or have a friend delegate ~50 HP temporarily.
+* '''Wrong Hive Keychain account selected.''' Make sure the username in the rate-editor matches the active Keychain account.
+
+=== "Appear offline" still receives invites / DMs ===
+
+By design. The invisible / appear-offline toggle only hides you from the lobby user-list and federation presence broadcasts. It does '''not''' block deliverability — room invites, paid invites, and DMs still reach you and fire the popup / notification. Presence privacy ("don't show me online") and deliverability ("don't ring my phone") are different concerns. If you truly don't want to be reached, log out.
 
 == Quick Reference ==
 

@@ -259,6 +259,35 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-22** — **Canonical-mismatch latent bug FIXED (server.js
+  `_verifyPayloadString`).** `public/server-sign.html`'s `buildPayload` was
+  updated to nGate "Option B" 2026-05-13 (conditional 12-field canonical
+  appending `nostr_npub|nostr_hex|relays_csv` when any Nostr field is set).
+  `server.js`'s verifier was never updated to match — it stayed at the
+  9-field shape. The bug was latent because none of the deployed verify
+  files had Nostr fields populated until call.completenoobs.com became the
+  first. From then on, every other v4call server rejected its file with
+  "signature does not match posting key" — misleading message; the
+  signature was valid, the canonicals differed.
+  **Fix:** mirrored `buildPayload` in `_verifyPayloadString` byte-for-byte
+  (conditional Nostr trailer). Cross-checked against the LIVE files of all
+  3 servers + their Hive posting keys: Option B verifies completenoobs ✓,
+  9-field rejects (the bug); both canonicals verify hive-book + v4call
+  (backward compatible — no Nostr fields → no trailer). **No re-sign
+  needed on any server.**
+  **Bonus for Phase D:** when the 12-field canonical verifies, `nostr_hex`
+  is Hive-signature-anchored. `verifyPeer` now exposes
+  `verified_nostr_hex` / `verified_nostr_npub` on success; threaded into
+  `discoveredPeers` from both `scanV4CallDirectory` and
+  `discoverPeerViaNostr`. **Option (a) (Hive-anchored npub↔domain
+  binding) is now free for Phase D** — presence events can be checked as
+  `event.pubkey === peer.verified_nostr_hex` directly, without depending
+  on the Phase C "poke" indirection. Phase D design doc updated to use
+  this binding. Lesson captured in
+  `noob-docs/nostr-fed-walkthrough.wiki` Phase B Common Problems #2b: when
+  a signed canonical can conditionally grow, signer and verifier MUST
+  stay byte-for-byte in lockstep — cross-reference each other with
+  comments, and (ideally) a shared helper.
 - **2026-05-21** — **Phase C DONE & proven on all 3 production servers**
   (hive-book.com, v4call.com, call.completenoobs.com — the latter joined as a
   brand-new third server during this verification, an ideal test). Subscribe

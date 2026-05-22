@@ -132,18 +132,24 @@ re-open. Same own-pubkey skip (we don't process our own publishes).
 For each incoming event:
 1. Extract `domain` from the `d` tag (`<domain>:users` → strip `:users`).
 2. Cross-check `content.domain === domain` (mismatch → drop, no log spam).
-3. **Look up the expected pubkey for `domain` in Phase C's `discoveredPeers`.**
-   That entry's `nostr_pubkey` is what the domain has self-asserted via its
-   Hive-anchored discovery announce. If `event.pubkey !== expected`, drop.
+3. **Look up the expected pubkey for `domain` in `discoveredPeers`.**
+   Prefer the **Hive-signature-anchored** binding (`verified_nostr_hex`)
+   from `verifyPeer`'s 12-field "Option B" canonical — available since the
+   2026-05-22 canonical-mismatch fix. If absent (peer hasn't re-signed
+   with Nostr fields yet), fall back to Phase C's `nostr_pubkey` from the
+   discovery event (untrusted "poke" binding). If `event.pubkey` matches
+   neither, drop.
 4. If the peer is **not in `discoveredPeers` at all yet**, drop and queue the
    event for re-check after the next discovery cycle. (Don't trust a
    presence event for a domain we've never Hive-verified.)
 
-This is the same "Hive is the only trust gate" rule from Phase C, extended:
-discovery binds npub↔domain (already Hive-verified), and presence rides on
-that binding. A forged presence event for a known peer has the wrong
-pubkey → dropped. A forged presence event from a key claiming an unknown
-domain → dropped (no discovery entry).
+This is the same "Hive is the only trust gate" rule from Phase C, but
+*upgraded* — when a peer's verify file uses Option B (Nostr fields signed
+into the Hive canonical), the npub↔domain binding has the same Hive
+posting-key signature backing it as the domain itself. A forged presence
+event for an Option-B peer cannot pass even if the relay layer is
+compromised. The Phase C "poke" binding stays as a fallback for peers
+still on the 9-field canonical until they re-sign.
 
 ### State
 
@@ -339,6 +345,12 @@ covering both isolated + 3-server live tests.
 
 ## 14. Status log
 
+- **2026-05-22** — Trust gate (§5) upgraded to **prefer Hive-anchored
+  `verified_nostr_hex`** from the Option B 12-field canonical (free thanks
+  to the canonical-mismatch fix landed today). Phase C "poke" binding
+  retained as a fallback for peers still on the 9-field canonical.
+  Strictly stronger than the original Phase D design — same code shape,
+  cleaner trust story.
 - **2026-05-21** — Design captured immediately after Phase C shipped to all
   3 production servers. Build deferred until Phase C has baked ~3–7 days in
   production. Locked: WS-wins-Nostr-additive reconciliation, server-side
