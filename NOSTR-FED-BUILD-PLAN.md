@@ -259,6 +259,35 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-05-22** — **Phase D visibility/approval coherence FIXED (v0.16.15)
+  + persisted-approvals always-load FIXED in the same patch.** Operator
+  during Phase D production testing observed cross-server users appearing
+  in lobbies of servers that hadn't approved each other and asked the
+  security question. Threat model analysed: not a real federation bypass
+  (WS transport still gated on `approvedPeers`, so no calls/DMs/payments
+  to unapproved peers, no impersonation possible without forging Hive
+  signatures), but a small spam / social-engineering surface — a bad actor
+  with a real Hive account + Nostr key + domain + signed `v4call-server.json`
+  could publish fake usernames into every v4call server's lobby. Capability
+  was low-cost (~$3-5 in Hive RC) so worth closing rather than noting.
+  **Fix part 1:** `nostrAdditivePresenceSnapshot()` skips any domain not
+  in `approvedPeers`. The write side (`recordNostrPresence`) is unchanged
+  so approving a previously-rejected peer surfaces their users on the
+  next `broadcastLobby` without waiting for a heartbeat. Phase C's
+  `discoveredPeers` population stays independent of approval — that's
+  what `/admin-peers.html` reviews.
+  **Fix part 2:** `loadApprovedPeers()` moved OUT of `if (FEDERATION_ENABLED)`
+  so disk-persisted approvals load on every boot regardless of whether
+  `.env` has seed peers. Matches the data/ bind-mount persistence pattern
+  used everywhere else; closes the surprise where commenting out
+  `FEDERATION_PEERS` silently dropped all prior approvals from in-memory
+  state on next boot.
+  **Meta-rule captured in wiki Common Problem #2d:** "approval is the
+  operator's *I want to interact with this server* signal — every channel
+  that surfaces in front of users (lobby presence, callable handles,
+  badge rendering) must gate on it. Discovery stays independent because
+  that's what discovery is for." Forward-applicable to anything new that
+  bridges discovery → user-facing presence.
 - **2026-05-22** — **Federated paid-invite BYPASS-CLASS bug FIXED (v0.16.14).**
   Phase D production testing surfaced a long-latent bypass: the federated
   `room-invite` recipient handler only re-validated when the source claimed
