@@ -220,6 +220,18 @@ let signedAttestation = null;
 
 // ── Utilities ─────────────────────────────────────────────
 function nowIsoUtc() { return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+
+// Unicode-safe base64 of a UTF-8 string. Plain btoa() throws on any code
+// point > 0xFF — today the Nostr event content is ASCII-only (Hive account
+// chars + ISO timestamp), but if a future field carries any non-ASCII we'd
+// get a silent "InvalidCharacterError" on post instead of a clean Hive
+// broadcast. Same encoding class as the "wrong hex/sign" bugs surfaced
+// during nGate testing — fail loudly at the source or fail invisibly at
+// the verifier. nGate-side atob + JSON.parse round-trip is preserved
+// because we TextDecoder back to UTF-8 the same way on decode.
+function b64EncodeUtf8(s) {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+}
 function permlinkFor(tsMs) { return `nostr-announce-${Math.floor(tsMs / 1000)}`; }
 function showErr(msg) { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
 function showOk(msg)  { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
@@ -334,7 +346,7 @@ function buildBody(f, issued) {
   if (f.attestation) {
     const challenge = (f.attestation.tags.find(t => t[0] === 'challenge') || [])[1] || '';
     if (challenge) lines.push(`CHALLENGE: ${challenge}`);
-    const b64 = btoa(JSON.stringify(f.attestation));
+    const b64 = b64EncodeUtf8(JSON.stringify(f.attestation));
     lines.push(`NOSTR-ATTESTATION: ${b64}`);
   }
   lines.push(`DECLARED: ${issued}`);
@@ -559,18 +571,32 @@ window.downloadBody    = downloadBody;
 updatePreview();
 
 // ── Keychain presence indicator ───────────────────────────
-setTimeout(() => {
+// Poll, because the module-script + esm.sh import on this page delays
+// document_idle past Keychain's injection window. A one-shot 400ms check
+// raced ahead and left detection stuck on "not detected" even when the
+// extension was installed. Same pattern as server-sign.html:828.
+(() => {
   const el  = document.getElementById('keychain-status');
   const btn = document.getElementById('post-btn');
-  if (window.hive_keychain) {
+  const markFound = () => {
     el.textContent = '✓ Keychain detected — ready to post.';
     el.style.color = 'var(--green)';
-  } else {
+    btn.disabled = false;
+  };
+  const markMissing = () => {
     el.textContent = '⚠ Keychain not detected. Paste your Hive posting key below to broadcast directly, OR copy/download the body for manual posting.';
     el.style.color = 'var(--accent)';
     btn.disabled = true;
-  }
-}, 400);
+  };
+  if (window.hive_keychain) { markFound(); return; }
+  let elapsed = 0;
+  const POLL_MS = 100, TIMEOUT_MS = 3000;
+  const iv = setInterval(() => {
+    elapsed += POLL_MS;
+    if (window.hive_keychain) { clearInterval(iv); markFound(); }
+    else if (elapsed >= TIMEOUT_MS) { clearInterval(iv); markMissing(); }
+  }, POLL_MS);
+})();
 </script>
 </body>
 </html>
