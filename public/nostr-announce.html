@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>v4call — Announce Nostr Identity on Hive</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:#0a0c0f;--surface:#12151a;--surface2:#1a1e26;--border:#222730;
+      --accent:#f5a623;--green:#4ade80;--blue:#38bdf8;--danger:#f87171;
+      --muted:#3d4555;--text:#dde3ed;--subtext:#7a869a;--purple:#a78bfa;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:24px;line-height:1.6;}
+    .subtitle a{color:var(--blue);}
+    .layout{display:grid;grid-template-columns:1fr 520px;gap:20px;max-width:1300px;}
+    @media(max-width:880px){.layout{grid-template-columns:1fr;}}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+    input[readonly]{color:var(--subtext);background:var(--surface2);}
+    .field{margin-bottom:12px;}
+    .row{display:flex;gap:10px;}
+    .row>.field{flex:1;}
+    .field-hint{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--muted);margin-top:4px;line-height:1.5;}
+
+    button.primary{padding:10px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.primary:hover{opacity:0.85;}
+    button.primary:disabled{opacity:0.4;cursor:not-allowed;}
+    button.secondary{padding:8px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+    button.post-btn{padding:12px 18px;background:var(--green);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.86rem;transition:opacity 0.2s;}
+    button.post-btn:hover{opacity:0.85;}
+    button.post-btn:disabled{opacity:0.4;cursor:not-allowed;}
+    button.sign-btn{padding:10px 16px;background:var(--purple);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.sign-btn:hover{opacity:0.85;}
+    button.sign-btn:disabled{opacity:0.4;cursor:not-allowed;}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.2);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--blue);line-height:1.6;margin-bottom:14px;}
+    .warn-box{background:rgba(245,166,35,0.06);border:1px solid rgba(245,166,35,0.25);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--accent);line-height:1.6;margin-bottom:14px;}
+    .err-box{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--danger);line-height:1.6;margin-bottom:14px;display:none;}
+    .ok-box{background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--green);line-height:1.6;margin-bottom:14px;display:none;}
+    .purple-box{background:rgba(167,139,250,0.06);border:1px solid rgba(167,139,250,0.25);border-radius:7px;padding:10px 13px;font-size:0.78rem;color:var(--text);line-height:1.6;margin-bottom:14px;}
+
+    #output-panel{position:sticky;top:20px;}
+    #preview-area{width:100%;height:380px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;padding:10px;resize:vertical;white-space:pre-wrap;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.67rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+    .slabel{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.07em;margin:10px 0 5px;border-left:2px solid var(--border);padding-left:6px;}
+
+    .wiki-link{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.69rem;color:var(--muted);text-align:center;text-decoration:none;padding:10px;transition:color 0.2s;}
+    .wiki-link:hover{color:var(--accent);}
+    .chain-link{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--purple);text-decoration:none;padding:6px 10px;border:1px solid rgba(167,139,250,0.3);border-radius:5px;transition:background 0.2s;margin-top:6px;}
+    .chain-link:hover{background:rgba(167,139,250,0.1);}
+
+    code{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;background:var(--bg);padding:1px 5px;border-radius:3px;color:var(--accent);}
+
+    .meta-row{display:flex;gap:14px;font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--subtext);margin-bottom:12px;flex-wrap:wrap;}
+    .meta-row span strong{color:var(--accent);}
+
+    .sig-status{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;margin-top:10px;padding:8px 10px;border-radius:5px;border:1px dashed var(--border);color:var(--subtext);}
+    .sig-status.signed{border-style:solid;border-color:var(--green);color:var(--green);background:rgba(74,222,128,0.06);}
+    .sig-status.error{border-style:solid;border-color:var(--danger);color:var(--danger);background:rgba(248,113,113,0.06);}
+  </style>
+</head>
+<body>
+
+<h1>v4call — Announce Nostr Identity on Hive</h1>
+<div class="subtitle">
+  Publish a <code>nostr-announce</code> post to Hive that binds your <strong>Nostr npub</strong> to your <strong>Hive account</strong> with a cryptographic proof you control the matching nsec.
+  <br>nGate scanners read these posts to whitelist users on Nostr relays — the Hive post is the trust root, the signed attestation inside it is the proof.
+</div>
+
+<div class="info-box">
+  <strong>What this does:</strong> you paste your Nostr <code>nsec</code> → the page builds a kind-30078 attestation event with your Hive account in a tag → signs it with the nsec entirely in your browser → embeds it (base64) in a Hive post titled <code>nostr-announce</code>. The nsec never leaves this tab.
+  <br>Don't have an nsec yet? Generate one in <a href="/nostr-gen.html" class="chain-link">↺ nostr-gen.html</a> (browser-only, keys never leave your machine).
+</div>
+
+<div class="layout">
+
+  <!-- ═══════════════ LEFT: FORM ═══════════════ -->
+  <div id="editor">
+
+    <div class="card">
+      <div class="card-title">IDENTITY</div>
+      <div class="field">
+        <label>HIVE ACCOUNT (poster)</label>
+        <input id="hive-account" type="text" placeholder="completenoober" autocapitalize="none" spellcheck="false"/>
+        <div class="field-hint">The Hive account that will author this post AND be bound to your Nostr key. The signed attestation will reference this exact name — change it and you must re-sign.</div>
+      </div>
+    </div>
+
+    <div class="card" style="border-color:rgba(167,139,250,0.4);">
+      <div class="card-title" style="color:var(--purple);">NOSTR KEY · PASTE NSEC TO SIGN</div>
+      <div class="purple-box">
+        Your <code>nsec</code> stays in this browser tab — it's used once to sign the attestation event and is wiped from memory after the Hive post broadcasts successfully. The page never sends it anywhere over the network.
+      </div>
+      <div class="field">
+        <label>NOSTR PRIVATE KEY (nsec1…)</label>
+        <input id="nsec" type="password" placeholder="nsec1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint">Required to produce the signed attestation. Wiped after a successful Hive broadcast.</div>
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (npub) — auto-derived from nsec</label>
+        <input id="npub" type="text" readonly placeholder="npub1… (fills in after you sign)"/>
+      </div>
+      <div class="field">
+        <label>NOSTR PUBKEY (hex) — auto-derived from nsec</label>
+        <input id="hex" type="text" readonly placeholder="64-char lowercase hex (fills in after you sign)"/>
+        <div class="field-hint">Hex form. Most relay configs (e.g. <code>nostr-rs-relay</code> / <code>strfry</code> policy plugins) need the hex.</div>
+      </div>
+      <div class="btn-row">
+        <button class="sign-btn" id="sign-btn" onclick="signAttestation()">🔏 Sign attestation</button>
+        <button class="secondary" onclick="clearSig()">Clear</button>
+      </div>
+      <div id="sig-status" class="sig-status">No attestation signed yet. Fill HIVE ACCOUNT + NSEC then click <strong>Sign attestation</strong>.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">POST OPTIONS</div>
+      <div class="field">
+        <label>POST TAGS (comma separated)</label>
+        <input id="tags" type="text" value="nostr-announce, v4call" spellcheck="false"/>
+        <div class="field-hint">First tag becomes the post category. <code>nostr-announce</code> must stay first — that's what nGate scanners search for.</div>
+      </div>
+      <div class="field">
+        <label>INTRO PARAGRAPH (optional)</label>
+        <textarea id="intro" rows="3" placeholder="Optional human-readable description. Shown above the machine-readable block." spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">PUBLISH</div>
+      <div class="err-box" id="err-box"></div>
+      <div class="ok-box"  id="ok-box"></div>
+
+      <div class="slabel">PREFERRED · KEYCHAIN (Hive posting key stays in your browser)</div>
+      <button class="post-btn" id="post-btn" onclick="postToHive()">📡 Post to Hive</button>
+      <div class="keychain-note" id="keychain-status">Detecting Keychain…</div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
+
+      <div class="slabel">FALLBACK · HIVE POSTING KEY PASTE (signs + broadcasts via dhive)</div>
+      <div class="field-hint" style="margin-bottom:10px;">
+        Use this if Keychain isn't installed or is misbehaving. The page constructs the post operation locally, signs it with your pasted Hive posting key, and broadcasts directly to a Hive node. The key never leaves your browser.
+      </div>
+      <div class="field">
+        <label>HIVE POSTING PRIVATE KEY (starts with <code>5J</code>)</label>
+        <input id="posting-key" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
+        <div class="field-hint">In memory only until this tab closes. Wiped after a successful broadcast.</div>
+      </div>
+      <button class="secondary" id="post-key-btn" onclick="postWithKey()">Post to Hive with Posting Key →</button>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:16px 0;"/>
+
+      <div class="slabel">FALLBACK · MANUAL POST (copy + paste into peakd / hive.blog)</div>
+      <div class="field-hint" style="margin-bottom:10px;">
+        Last-resort fallback: copy or download the body below and paste it into peakd.com / hive.blog with the title <code>nostr-announce</code> and the tags shown above.
+      </div>
+      <div class="btn-row">
+        <button class="secondary" onclick="copyBody()">📋 Copy body</button>
+        <button class="secondary" onclick="downloadBody()">⬇ Download .md</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════ RIGHT: PREVIEW ═══════════════ -->
+  <div id="output-panel">
+    <div class="card">
+      <div class="card-title">
+        <span>POST PREVIEW</span>
+        <span style="font-size:0.65rem;color:var(--subtext);" id="preview-status">unsigned</span>
+      </div>
+      <div class="meta-row">
+        <span>title: <strong id="meta-title">nostr-announce</strong></span>
+        <span>permlink: <strong id="meta-permlink">—</strong></span>
+      </div>
+      <textarea id="preview-area" readonly placeholder="Fill the form + sign the attestation — a live preview of the Hive post body will appear here."></textarea>
+      <div class="warn-box" style="margin-top:12px;">
+        <strong>Note:</strong> posting to Hive costs Resource Credits. Make sure <code>@your-account</code> has some Hive Power staked (or delegated). A new post consumes roughly the same RC as a comment — usually fine if the account has 10+ HP. Hive also rate-limits to roughly one post per 5 minutes per account.
+      </div>
+    </div>
+
+    <a href="/info.html" class="wiki-link">← back to v4call info</a>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@hiveio/dhive@1.3.2/dist/dhive.js"></script>
+<script type="module">
+// ── nostr-tools loader — used for nip19 (nsec/npub bech32) + getPublicKey + finalizeEvent + verifyEvent.
+import {
+  finalizeEvent,
+  verifyEvent,
+  getPublicKey,
+  nip19
+} from 'https://esm.sh/nostr-tools@2.7.2';
+window.nGate = { finalizeEvent, verifyEvent, getPublicKey, nip19, ready: true };
+document.dispatchEvent(new CustomEvent('nGate-ready'));
+</script>
+<script>
+// ── Constants ─────────────────────────────────────────────
+const FIXED_TITLE       = 'nostr-announce';
+const APP_NAME          = 'v4call-nostr-announce/0.1';
+const ATTESTATION_D_TAG = 'v4call-nostr-binding';
+const ATTESTATION_KIND  = 30078; // parameterized replaceable — same family used by server-sign cross-attestation
+
+// ── State ─────────────────────────────────────────────────
+// Holds the signed kind-30078 attestation event. null when not yet signed.
+let signedAttestation = null;
+
+// ── Utilities ─────────────────────────────────────────────
+function nowIsoUtc() { return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'); }
+function permlinkFor(tsMs) { return `nostr-announce-${Math.floor(tsMs / 1000)}`; }
+function showErr(msg) { const b=document.getElementById('err-box'); b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('ok-box').style.display='none'; }
+function showOk(msg)  { const b=document.getElementById('ok-box');  b.textContent=msg; b.style.display=msg?'block':'none'; document.getElementById('err-box').style.display='none'; }
+
+function setSigStatus(text, cls) {
+  const el = document.getElementById('sig-status');
+  el.classList.remove('signed', 'error');
+  if (cls) el.classList.add(cls);
+  el.innerHTML = text;
+}
+
+// ── Collect ───────────────────────────────────────────────
+function collect() {
+  return {
+    account: document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, ''),
+    intro:   document.getElementById('intro').value.trim(),
+    tags:    document.getElementById('tags').value.split(',').map(t => t.trim().toLowerCase()).filter(Boolean),
+    npub:    document.getElementById('npub').value.trim(),
+    hex:     document.getElementById('hex').value.trim().toLowerCase(),
+    attestation: signedAttestation
+  };
+}
+
+function validateForPost(f) {
+  const missing = [];
+  if (!f.account) missing.push('hive account');
+  if (f.tags.length === 0) missing.push('at least one tag');
+  if (!f.attestation) missing.push('signed attestation (click "Sign attestation" first)');
+  if (missing.length) return `Missing: ${missing.join(', ')}`;
+  if (f.tags[0] !== 'nostr-announce') return 'First tag must be "nostr-announce" — that\'s what nGate scanners search for.';
+  // Re-check the attestation binds the CURRENT hive account (in case user edited after signing).
+  const tagVal = (n) => (f.attestation.tags.find(t => t[0] === n) || [])[1];
+  if (tagVal('v4call_hive_account') !== f.account) {
+    return `Attestation was signed for hive account "${tagVal('v4call_hive_account')}" but the field now says "${f.account}". Click "Sign attestation" again.`;
+  }
+  return null;
+}
+
+// ── Sign attestation ──────────────────────────────────────
+async function signAttestation() {
+  showErr(''); showOk('');
+  if (!window.nGate || !window.nGate.ready) {
+    setSigStatus('⚠ nostr-tools not loaded yet — try again in a moment.', 'error');
+    return;
+  }
+  const account = document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, '');
+  const nsec    = document.getElementById('nsec').value.trim();
+  if (!account) { setSigStatus('✗ Fill HIVE ACCOUNT first.', 'error'); return; }
+  if (!nsec)    { setSigStatus('✗ Paste your nsec first.', 'error'); return; }
+  if (!nsec.startsWith('nsec1')) { setSigStatus('✗ Nostr private key must start with "nsec1".', 'error'); return; }
+
+  let privBytes, pubHex, npub;
+  try {
+    const dec = window.nGate.nip19.decode(nsec);
+    if (dec.type !== 'nsec') throw new Error(`expected nsec, got ${dec.type}`);
+    privBytes = dec.data; // Uint8Array(32)
+    pubHex    = window.nGate.getPublicKey(privBytes);
+    npub      = window.nGate.nip19.npubEncode(pubHex);
+  } catch (e) {
+    setSigStatus('✗ Invalid nsec: ' + e.message, 'error');
+    return;
+  }
+
+  const declared = nowIsoUtc();
+  const challenge = `${ATTESTATION_D_TAG}|${account}|${declared}`;
+
+  const template = {
+    kind: ATTESTATION_KIND,
+    created_at: Math.floor(Date.now() / 1000),
+    tags: [
+      ['d', ATTESTATION_D_TAG],
+      ['v4call_hive_account', account],
+      ['challenge', challenge]
+    ],
+    content: JSON.stringify({ hive_account: account, declared })
+  };
+
+  let signed;
+  try {
+    signed = window.nGate.finalizeEvent(template, privBytes);
+    if (!window.nGate.verifyEvent(signed)) throw new Error('event failed verifyEvent right after signing');
+  } catch (e) {
+    setSigStatus('✗ Signing failed: ' + e.message, 'error');
+    return;
+  }
+
+  // Populate readonly npub + hex fields and stash the signed event.
+  document.getElementById('npub').value = npub;
+  document.getElementById('hex').value  = pubHex;
+  signedAttestation = signed;
+
+  setSigStatus(`✓ Signed by <code>${pubHex.slice(0,16)}…</code> · bound to <code>@${account}</code> · ${declared}. Ready to post.`, 'signed');
+  updatePreview();
+}
+
+function clearSig() {
+  signedAttestation = null;
+  document.getElementById('npub').value = '';
+  document.getElementById('hex').value  = '';
+  setSigStatus('Cleared. Fill HIVE ACCOUNT + NSEC then click <strong>Sign attestation</strong>.', '');
+  updatePreview();
+}
+
+// ── Post body builder ────────────────────────────────────
+function buildBody(f, issued) {
+  const intro = f.intro || `This post binds the Nostr identity \`${f.npub || '(unsigned)'}\` to the Hive account \`@${f.account}\`. The signed attestation block below proves control of the matching Nostr private key at the time of posting. nGate scanners on Nostr relays use these announcements to whitelist Nostr users that have a verified Hive identity.`;
+
+  const lines = ['[V4CALL-NOSTR-BINDING-V1]'];
+  lines.push(`HIVE-ACCOUNT: ${f.account}`);
+  if (f.npub) lines.push(`NOSTR-PUBKEY: ${f.npub}`);
+  if (f.hex)  lines.push(`NOSTR-PUBKEY-HEX: ${f.hex}`);
+  if (f.attestation) {
+    const challenge = (f.attestation.tags.find(t => t[0] === 'challenge') || [])[1] || '';
+    if (challenge) lines.push(`CHALLENGE: ${challenge}`);
+    const b64 = btoa(JSON.stringify(f.attestation));
+    lines.push(`NOSTR-ATTESTATION: ${b64}`);
+  }
+  lines.push(`DECLARED: ${issued}`);
+  lines.push('[/V4CALL-NOSTR-BINDING-V1]');
+  const block = lines.join('\n');
+  const blockIndented = block.split('\n').map(l => '    ' + l).join('\n');
+
+  return [
+    `# Nostr identity binding — @${f.account}`,
+    '',
+    intro,
+    '',
+    f.npub ? `**Nostr npub**: \`${f.npub}\`` : '',
+    f.hex  ? `**Nostr hex** : \`${f.hex}\``  : '',
+    '',
+    '---',
+    '',
+    '## Binding block (machine-readable)',
+    '',
+    blockIndented,
+    '',
+    '---',
+    '',
+    '*The `NOSTR-ATTESTATION` line is a base64-encoded Nostr event of kind 30078, signed by the npub above. Scanners base64-decode it, verify the Nostr signature, check the `v4call_hive_account` tag matches the author of this Hive post, and only then whitelist the npub.*',
+    '',
+    `*Posted via v4call nostr-announce tool*`
+  ].filter(Boolean).join('\n');
+}
+
+function updatePreview() {
+  const f = collect();
+  const issued   = nowIsoUtc();
+  const body     = buildBody(f, issued);
+  const permlink = permlinkFor(Date.now());
+  document.getElementById('preview-area').value = body;
+  document.getElementById('meta-title').textContent    = FIXED_TITLE;
+  document.getElementById('meta-permlink').textContent = permlink;
+}
+
+// ── Keychain post ─────────────────────────────────────────
+function postToHive() {
+  showErr(''); showOk('');
+  const f = collect();
+  const err = validateForPost(f);
+  if (err) return showErr(err);
+
+  if (!window.hive_keychain) {
+    return showErr('Hive Keychain not detected. Install from https://hive-keychain.com or use the Posting Key paste / Copy / Download fallbacks below.');
+  }
+
+  const issued    = nowIsoUtc();
+  const body      = buildBody(f, issued);
+  const permlink  = permlinkFor(Date.now());
+  const parentTag = f.tags[0];
+
+  const jsonMeta = {
+    tags:   f.tags,
+    app:    APP_NAME,
+    format: 'markdown',
+    v4call_nostr: {
+      hive_account: f.account,
+      pubkey:       f.npub,
+      pubkey_hex:   f.hex,
+      attestation:  f.attestation,
+      declared:     issued
+    }
+  };
+
+  const btn = document.getElementById('post-btn');
+  btn.disabled = true; btn.textContent = 'Opening Keychain…';
+
+  window.hive_keychain.requestPost(
+    f.account,
+    FIXED_TITLE,
+    body,
+    parentTag,
+    '',
+    JSON.stringify(jsonMeta),
+    permlink,
+    '',
+    (response) => {
+      btn.disabled = false; btn.textContent = '📡 Post to Hive';
+      if (!response.success) {
+        return showErr(`Keychain: ${response.message || 'cancelled'}`);
+      }
+      // Wipe the nsec on success — its job is done.
+      document.getElementById('nsec').value = '';
+      showOk(`✓ Posted to Hive as @${f.account}/${permlink} — transaction ${response.result?.id || 'broadcast'}. The nsec field has been cleared.`);
+      document.getElementById('preview-status').textContent = 'posted';
+      document.getElementById('preview-status').style.color = 'var(--green)';
+    }
+  );
+}
+
+// ── Posting key paste fallback ────────────────────────────
+async function postWithKey() {
+  showErr(''); showOk('');
+  const f = collect();
+  const err = validateForPost(f);
+  if (err) return showErr(err);
+
+  const keyStr = document.getElementById('posting-key').value.trim();
+  if (!keyStr) return showErr('Paste your Hive posting private key first.');
+
+  if (typeof dhive === 'undefined') {
+    return showErr('dhive library failed to load — check internet / CDN.');
+  }
+
+  let priv;
+  try { priv = dhive.PrivateKey.fromString(keyStr); }
+  catch (e) { return showErr(`Invalid Hive posting key: ${e.message}`); }
+
+  const issued    = nowIsoUtc();
+  const body      = buildBody(f, issued);
+  const permlink  = permlinkFor(Date.now());
+  const parentTag = f.tags[0];
+
+  const jsonMeta = {
+    tags:   f.tags,
+    app:    APP_NAME,
+    format: 'markdown',
+    v4call_nostr: {
+      hive_account: f.account,
+      pubkey:       f.npub,
+      pubkey_hex:   f.hex,
+      attestation:  f.attestation,
+      declared:     issued
+    }
+  };
+
+  const btn = document.getElementById('post-key-btn');
+  btn.disabled = true; btn.textContent = 'Broadcasting…';
+
+  const NODES = [
+    'https://api.hive.blog',
+    'https://api.deathwing.me',
+    'https://hive-api.arcange.eu',
+    'https://api.openhive.network'
+  ];
+
+  let lastErr = null;
+  for (const node of NODES) {
+    try {
+      const client = new dhive.Client(node);
+      const op = ['comment', {
+        parent_author:   '',
+        parent_permlink: parentTag,
+        author:          f.account,
+        permlink:        permlink,
+        title:           FIXED_TITLE,
+        body:            body,
+        json_metadata:   JSON.stringify(jsonMeta)
+      }];
+      const result = await client.broadcast.sendOperations([op], priv);
+      document.getElementById('posting-key').value = '';
+      document.getElementById('nsec').value = '';
+      btn.disabled = false; btn.textContent = 'Post to Hive with Posting Key →';
+      showOk(`✓ Posted to Hive as @${f.account}/${permlink} via ${node} — tx ${result.id}. The nsec + posting-key fields have been cleared.`);
+      document.getElementById('preview-status').textContent = 'posted';
+      document.getElementById('preview-status').style.color = 'var(--green)';
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.warn(`broadcast via ${node} failed:`, e.message);
+    }
+  }
+
+  btn.disabled = false; btn.textContent = 'Post to Hive with Posting Key →';
+  showErr(`Broadcast failed on all Hive nodes. Last error: ${lastErr ? lastErr.message : 'unknown'}. Common Hive-side causes: posted within the last ~5 minutes (rate-limit), low Resource Credits, or a network blip — see DevTools console for per-node details.`);
+}
+
+// ── Copy / Download fallback ─────────────────────────────
+function copyBody() {
+  const text = document.getElementById('preview-area').value;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    () => { const el=document.getElementById('preview-status'); const old=el.textContent; el.textContent='copied!'; setTimeout(()=>el.textContent=old,1200); },
+    () => alert('Copy failed — select the text manually.')
+  );
+}
+function downloadBody() {
+  const text = document.getElementById('preview-area').value;
+  if (!text) return;
+  const blob = new Blob([text], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'nostr-announce-post.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// ── URL querystring prefill (chain from other tools) ─
+(() => {
+  const p = new URLSearchParams(location.search);
+  const set = (id, key) => { const v = p.get(key); if (v) document.getElementById(id).value = v; };
+  set('hive-account', 'account');
+})();
+
+// ── Live preview as the user types ────────────────────────
+['hive-account', 'intro', 'tags'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updatePreview);
+});
+
+// Editing the HIVE ACCOUNT after signing invalidates the attestation binding.
+document.getElementById('hive-account').addEventListener('input', () => {
+  if (!signedAttestation) return;
+  const tagVal = (n) => (signedAttestation.tags.find(t => t[0] === n) || [])[1];
+  const cur = document.getElementById('hive-account').value.trim().toLowerCase().replace(/^@/, '');
+  if (tagVal('v4call_hive_account') !== cur) {
+    setSigStatus(`⚠ HIVE ACCOUNT changed since signing (was <code>@${tagVal('v4call_hive_account')}</code>, now <code>@${cur}</code>). Click <strong>Sign attestation</strong> again before posting.`, 'error');
+  }
+});
+
+// Expose for inline onclick handlers
+window.signAttestation = signAttestation;
+window.clearSig        = clearSig;
+window.postToHive      = postToHive;
+window.postWithKey     = postWithKey;
+window.copyBody        = copyBody;
+window.downloadBody    = downloadBody;
+
+updatePreview();
+
+// ── Keychain presence indicator ───────────────────────────
+setTimeout(() => {
+  const el  = document.getElementById('keychain-status');
+  const btn = document.getElementById('post-btn');
+  if (window.hive_keychain) {
+    el.textContent = '✓ Keychain detected — ready to post.';
+    el.style.color = 'var(--green)';
+  } else {
+    el.textContent = '⚠ Keychain not detected. Paste your Hive posting key below to broadcast directly, OR copy/download the body for manual posting.';
+    el.style.color = 'var(--accent)';
+    btn.disabled = true;
+  }
+}, 400);
+</script>
+</body>
+</html>
