@@ -194,7 +194,7 @@
         <button class="secondary" onclick="addToken()">+ Add Token</button>
       </div>
       <div class="info-box">
-        Accept Hive-Engine tokens (PIZZA, HIVE, your own token…) in addition to HBD.
+        Accept Hive-Engine tokens (CNOOBS, HIVE, SWAP.BTC, SWAP.DOGE, your own token…) in addition to HBD.
         Add one section per token. Enter <strong>0</strong> for FREE.
         Token holders can optionally bypass your blocklist.
       </div>
@@ -629,7 +629,7 @@ function renderTokens() {
       </div>
       <div class="field">
         <label>TOKEN SYMBOL</label>
-        <input type="text" value="${esc(tok.symbol)}" placeholder="e.g. PIZZA" style="text-transform:uppercase;"
+        <input type="text" value="${esc(tok.symbol)}" placeholder="e.g. CNOOBS" style="text-transform:uppercase;"
           oninput="tokens[${ti}].symbol=this.value.toUpperCase();document.getElementById('tok-badge-${ti}').textContent='⬡ '+(this.value.toUpperCase()||'TOKEN');saveState();"/>
       </div>
       <div class="slabel">ROOM INVITE
