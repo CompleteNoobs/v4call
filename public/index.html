@@ -3748,7 +3748,13 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
   const upJson = await upRes.json();
   const cid = upJson.cid;
   const expires_at = upJson.expires_at;
-  const gateway_url = upJson.gateway_url;
+  // Safety net: if the gate was misconfigured (PUBLIC_GATEWAY_BASE unset → falls
+  // back to https://ipfs.localhost), substitute the URL the user actually uploaded
+  // to. End-users in the room can still fetch via the same gate they paid.
+  let gateway_url = upJson.gateway_url || '';
+  if (!gateway_url || /\/\/ipfs\.localhost(\/|$|:)/i.test(gateway_url) || /\/\/localhost(\/|$|:)/i.test(gateway_url)) {
+    gateway_url = `${gatewayUrl}/ipfs/${cid}`;
+  }
 
   // 7) Per-recipient key wrapping (always include self so sender can re-read)
   setAttachStatus('Wrapping keys for recipients…');
