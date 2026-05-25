@@ -3555,18 +3555,54 @@ async function keychainTransferCnoobs({ to, amount, memo }) {
   });
 }
 
+function getRememberedGateway() {
+  try { return localStorage.getItem('v4call:ipfs-gate') || 'https://ipfs.completenoobs.com'; }
+  catch (_) { return 'https://ipfs.completenoobs.com'; }
+}
+function rememberGateway(url) {
+  try { localStorage.setItem('v4call:ipfs-gate', url); } catch (_) {}
+}
+async function refreshAttachCostLine(gatewayUrl) {
+  const line = document.getElementById('att-cost-line');
+  line.textContent = '… checking gate';
+  try {
+    const r = await fetch(`${gatewayUrl}/`, { method: 'GET' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const p = j.payment || {};
+    const amount = p.amount ?? '?';
+    const cur = p.currency || '?';
+    const days = p.ttl_days ?? '?';
+    line.textContent = `≈ ${amount} ${cur} for ${days} day${days === 1 ? '' : 's'}`;
+  } catch (e) {
+    line.textContent = `⚠ could not reach ${gatewayUrl}`;
+  }
+}
 function openAttachModal() {
   if (!currentRoom) return;
   if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }
-  attachState = { file: null, gatewayUrl: 'https://ipfs.completenoobs.com', recipients: new Set() };
+  const remembered = getRememberedGateway();
+  attachState = { file: null, gatewayUrl: remembered, recipients: new Set() };
   document.getElementById('att-file-input').value = '';
   document.getElementById('att-file-meta').textContent = '';
-  document.getElementById('att-gateway-select').value = 'https://ipfs.completenoobs.com';
-  document.getElementById('att-gateway-custom').style.display = 'none';
+  const sel = document.getElementById('att-gateway-select');
+  // Preserve remembered choice across modal opens. If the remembered URL isn't
+  // one of the preset options, switch to Custom mode and seed the custom input.
+  const opts = Array.from(sel.options).map(o => o.value);
+  if (opts.includes(remembered)) {
+    sel.value = remembered;
+    document.getElementById('att-gateway-custom').style.display = 'none';
+  } else {
+    sel.value = '__custom__';
+    const custom = document.getElementById('att-gateway-custom');
+    custom.value = remembered;
+    custom.style.display = 'block';
+  }
   document.getElementById('att-status-note').textContent = 'Ready.';
   document.getElementById('att-upload-btn').disabled = false;
   populateAttachRecipients();
   document.getElementById('attachment-modal').style.display = 'flex';
+  refreshAttachCostLine(remembered);
 }
 function closeAttachModal() {
   document.getElementById('attachment-modal').style.display = 'none';
@@ -3608,11 +3644,23 @@ document.addEventListener('change', (e) => {
   if (e.target?.id === 'att-gateway-select') {
     const v = e.target.value;
     const custom = document.getElementById('att-gateway-custom');
-    if (v === '__custom__') { custom.style.display = 'block'; custom.focus(); }
-    else { custom.style.display = 'none'; if (attachState) attachState.gatewayUrl = v; }
+    if (v === '__custom__') {
+      custom.style.display = 'block';
+      custom.focus();
+    } else {
+      custom.style.display = 'none';
+      if (attachState) attachState.gatewayUrl = v;
+      rememberGateway(v);
+      refreshAttachCostLine(v);
+    }
   }
   if (e.target?.id === 'att-gateway-custom') {
-    if (attachState) attachState.gatewayUrl = e.target.value.trim().replace(/\/+$/, '');
+    const v = e.target.value.trim().replace(/\/+$/, '');
+    if (attachState) attachState.gatewayUrl = v;
+    if (/^https?:\/\/.+/.test(v)) {
+      rememberGateway(v);
+      refreshAttachCostLine(v);
+    }
   }
 });
 function setAttachStatus(text, isError) {
