@@ -544,6 +544,27 @@
     .msg-bubble.self .msg-text{background:var(--self-msg);border:1px solid rgba(245,166,35,0.2);border-bottom-right-radius:2px;}
     .msg-bubble.other .msg-text{background:var(--other-msg);border:1px solid var(--border);border-bottom-left-radius:2px;}
     .msg-text a{color:var(--accent);text-decoration:underline;word-break:break-all;}
+    .att-bubble{padding:9px 12px;border-radius:11px;border:1px solid var(--border);background:var(--other-msg);display:flex;flex-direction:column;gap:7px;min-width:220px;max-width:340px;}
+    .msg-bubble.self .att-bubble{background:var(--self-msg);border-color:rgba(245,166,35,0.2);}
+    .att-bubble.locked{opacity:0.78;border-style:dashed;}
+    .att-row{display:flex;gap:8px;align-items:center;}
+    .att-icon{font-size:1.1rem;flex-shrink:0;}
+    .att-filename{font-size:0.82rem;font-weight:600;color:var(--text);word-break:break-all;flex:1;}
+    .att-meta-line{font-size:0.66rem;color:var(--subtext);font-family:'IBM Plex Mono',monospace;display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    .att-thumb-wrap{position:relative;background:var(--bg);border-radius:7px;overflow:hidden;min-height:32px;}
+    .att-thumb-wrap img{max-width:100%;max-height:280px;display:block;border-radius:7px;cursor:zoom-in;}
+    .att-thumb-loading{padding:18px;font-size:0.72rem;color:var(--muted);text-align:center;font-family:'IBM Plex Mono',monospace;}
+    .att-actions{display:flex;gap:6px;flex-wrap:wrap;}
+    .att-btn{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);cursor:pointer;transition:border-color 0.15s,color 0.15s;}
+    .att-btn:hover{border-color:var(--accent);color:var(--accent);}
+    .att-btn:disabled{opacity:0.4;cursor:not-allowed;}
+    .att-chip{font-size:0.58rem;padding:1px 5px;border-radius:3px;border:1px solid;}
+    .att-chip.ok{color:var(--green);background:rgba(74,222,128,0.1);border-color:rgba(74,222,128,0.2);}
+    .att-chip.bad{color:var(--danger);background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.2);}
+    .att-chip.warn{color:var(--accent);background:rgba(245,166,35,0.1);border-color:rgba(245,166,35,0.2);}
+    .att-chip.muted{color:var(--muted);background:rgba(255,255,255,0.02);border-color:var(--border);}
+    .att-recipients{font-size:0.62rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
+    .att-error{font-size:0.7rem;color:var(--danger);padding:6px 8px;background:rgba(248,113,113,0.06);border-radius:6px;border:1px solid rgba(248,113,113,0.2);}
     #input-bar{display:flex;gap:7px;padding:10px 12px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;align-items:flex-end;}
     #msg-input{flex:1;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:0.86rem;outline:none;resize:none;height:40px;max-height:100px;transition:border-color 0.2s;line-height:1.4;}
     #msg-input:focus{border-color:var(--accent);}
@@ -3495,6 +3516,47 @@ async function aesGcmEncrypt(plaintextBytes) {
   const rawKeyBuf = await crypto.subtle.exportKey('raw', key);
   return { ciphertext: new Uint8Array(ctBuf), nonce, rawKey: new Uint8Array(rawKeyBuf) };
 }
+async function aesGcmDecrypt(rawKeyBytes, nonceBytes, ciphertextBytes) {
+  const key = await crypto.subtle.importKey('raw', rawKeyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+  const ptBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonceBytes }, key, ciphertextBytes);
+  return new Uint8Array(ptBuf);
+}
+function parseInnerBlob(blobBytes, rawKeyBytes) {
+  // Mirror of buildInnerBlob: [12B nonce][AES-GCM( [4B BE len][header JSON][file bytes] )]
+  // Returns a Promise<{ header, fileBytes }>.
+  if (blobBytes.length < 12 + 16) throw new Error('blob too small');
+  const nonce = blobBytes.subarray(0, 12);
+  const ct = blobBytes.subarray(12);
+  return aesGcmDecrypt(rawKeyBytes, nonce, ct).then(pt => {
+    if (pt.length < 4) throw new Error('plaintext too small');
+    const len = (pt[0] << 24) | (pt[1] << 16) | (pt[2] << 8) | pt[3];
+    if (len < 0 || 4 + len > pt.length) throw new Error('bad header length');
+    const headerStr = new TextDecoder().decode(pt.subarray(4, 4 + len));
+    const header = JSON.parse(headerStr);
+    const fileBytes = pt.subarray(4 + len);
+    return { header, fileBytes };
+  });
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+async function verifyEnvelopeSig(env) {
+  // Returns true / false / null (unable to verify). Mirrors verifySignature pattern.
+  try {
+    if (!env.envelope_sig || !env.sender) return null;
+    const pubKeyStr = await fetchPubKey(env.sender);
+    if (!pubKeyStr) return null;
+    const message = buildEnvelopeSigInput(env);
+    const hashBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+    if (!dhive.Signature || typeof dhive.Signature.fromString !== 'function') return null;
+    const sig = dhive.Signature.fromString(env.envelope_sig);
+    const recovered = sig.recover(Buffer.from ? Buffer.from(new Uint8Array(hashBytes)) : new Uint8Array(hashBytes));
+    return recovered.toString() === pubKeyStr;
+  } catch (e) { console.warn('[attach] envelope sig verify failed:', e.message); return null; }
+}
 async function buildInnerBlob({ file, sender }) {
   const fileBytes = new Uint8Array(await file.arrayBuffer());
   const header = JSON.stringify({
@@ -3790,19 +3852,190 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
   rsock().emit('room-attachment', envelope);
 }
 
-// Chunk-1 placeholder recipient bubble — full 3-audience rendering lands in chunk 2.
-socket.on('room-attachment', (env) => {
-  try {
-    const isSelf = env.sender === myUsername;
-    const audience = env.per_recipient ? Object.keys(env.per_recipient) : [];
-    const iAmRecipient = audience.includes(myUsername);
-    const kb = (env.size_bytes / 1024).toFixed(1);
-    const tag = iAmRecipient ? '📎 (you can decrypt)' : '📎 (locked — not addressed to you)';
-    const text = `${tag} ${env.original_filename || env.cid} — ${kb} KB · cid:${env.cid.slice(0, 12)}… · gateway: ${env.gateway_hint}`;
-    addRoomBubble(env.sender, text, isSelf, audience.map(a => '@' + a).join(', '), false, null);
-  } catch (e) {
-    console.error('[room-attachment] render failed:', e);
+// Full 3-audience attachment bubble: recipient (auto-decrypt + thumbnail + save),
+// sender-self (same as recipient — sender included themselves in per_recipient),
+// bystander (locked card with metadata only).
+//
+// Verification steps for recipients:
+//   1. Verify envelope_sig against sender's posting pubkey from Hive
+//   2. Decrypt per_recipient[myUsername] with own posting key (yields raw AES key)
+//   3. Fetch ciphertext from gateway_hint
+//   4. AES-GCM decrypt + parse inner blob
+//   5. Render thumbnail + save-to-device button
+
+function bytesToHuman(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+}
+function timeUntilExpiry(isoExpires) {
+  if (!isoExpires) return null;
+  const ms = new Date(isoExpires).getTime() - Date.now();
+  if (!isFinite(ms)) return null;
+  if (ms <= 0) return 'expired';
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  const mins = Math.floor((ms % 3600000) / 60000);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  if (mins > 0) return `${mins}m`;
+  return '<1m';
+}
+function addAttachmentBubble(env) {
+  const c = document.getElementById('messages');
+  if (!c) return;
+  const isSelf = env.sender === myUsername;
+  const audience = env.per_recipient ? Object.keys(env.per_recipient) : [];
+  const iAmRecipient = audience.includes(myUsername);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-bubble ' + (isSelf ? 'self' : 'other');
+
+  const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const recipientLabel = audience.map(a => '@' + escapeHtml(a)).join(', ');
+
+  const sigSlotId = 'att-sig-' + env.cid.slice(0, 16);
+  const expSlotId = 'att-exp-' + env.cid.slice(0, 16);
+  const bodyId    = 'att-body-' + env.cid.slice(0, 16);
+
+  wrap.innerHTML = `
+    <div class="msg-meta">
+      <strong>@${escapeHtml(env.sender)}</strong>
+      <span class="att-chip warn">📎 attachment</span>
+      <span id="${sigSlotId}" class="att-chip muted">~ verifying sig</span>
+      ${(isSelf && recipientLabel) ? `<span style="font-size:0.62rem;color:var(--muted);">→ ${recipientLabel}</span>` : ''}
+      <span style="margin-left:auto;font-size:0.62rem;color:var(--muted);">${now}</span>
+    </div>
+    <div class="att-bubble${iAmRecipient ? '' : ' locked'}">
+      <div class="att-row">
+        <span class="att-icon">${iAmRecipient ? '📷' : '🔒'}</span>
+        <span class="att-filename">${escapeHtml(env.original_filename || env.cid)}</span>
+      </div>
+      <div class="att-meta-line">
+        <span>${bytesToHuman(env.size_bytes || 0)}</span>
+        <span title="${escapeHtml(env.cid)}">cid:${escapeHtml(env.cid.slice(0, 10))}…</span>
+        <span id="${expSlotId}">${env.expires_at ? 'expires in ' + (timeUntilExpiry(env.expires_at) || '?') : ''}</span>
+      </div>
+      ${!iAmRecipient && audience.length ? `<div class="att-recipients">addressed to: ${recipientLabel}</div>` : ''}
+      <div id="${bodyId}">${iAmRecipient
+        ? '<div class="att-thumb-loading">… verifying + decrypting</div>'
+        : '<div class="att-thumb-loading">🔒 not addressed to you — bystander view</div>'}</div>
+    </div>
+  `;
+  c.appendChild(wrap);
+  c.scrollTop = c.scrollHeight;
+
+  // Expiry countdown: tick every minute. Self-removing when the bubble is GC'd
+  // by being detached (defensive — v4call only clears messages on room exit).
+  if (env.expires_at) {
+    const expSpan = document.getElementById(expSlotId);
+    const tick = () => {
+      if (!document.body.contains(wrap)) { clearInterval(intv); return; }
+      const txt = timeUntilExpiry(env.expires_at);
+      if (expSpan) expSpan.textContent = txt === 'expired' ? '⚠ expired' : `expires in ${txt}`;
+    };
+    const intv = setInterval(tick, 60000);
   }
+
+  // Async verify + decrypt — fire-and-forget; updates the DOM in place.
+  (async () => {
+    const sigSlot = document.getElementById(sigSlotId);
+    const body    = document.getElementById(bodyId);
+
+    // 1. Envelope signature
+    const sigOk = await verifyEnvelopeSig(env);
+    if (sigSlot) {
+      sigSlot.className = sigOk === true ? 'att-chip ok' : sigOk === false ? 'att-chip bad' : 'att-chip muted';
+      sigSlot.textContent = sigOk === true ? '✓ signed' : sigOk === false ? '⚠ bad sig' : '~ unverified';
+    }
+    if (sigOk === false) {
+      if (body) body.innerHTML = '<div class="att-error">⚠ envelope signature failed — file not trusted. Refusing to fetch.</div>';
+      return;
+    }
+    if (!iAmRecipient) return;  // bystander stops here
+
+    // 2. Unwrap AES key
+    let rawKeyBytes;
+    try {
+      const rawKeyB64 = decryptMsg(env.per_recipient[myUsername]);
+      if (!rawKeyB64 || /^\[.*\]$/.test(rawKeyB64)) throw new Error('could not unwrap key');
+      rawKeyBytes = b64ToBytes(rawKeyB64);
+      if (rawKeyBytes.length !== 32) throw new Error('unwrapped key wrong length');
+    } catch (e) {
+      if (body) body.innerHTML = `<div class="att-error">⚠ could not unwrap your encryption key — ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+
+    // 3. Fetch ciphertext
+    let ciphertextBytes;
+    try {
+      if (body) body.innerHTML = '<div class="att-thumb-loading">… fetching ciphertext</div>';
+      const resp = await fetch(env.gateway_hint, { method: 'GET' });
+      if (resp.status === 404) {
+        if (body) body.innerHTML = '<div class="att-error">⚠ 404 — pin expired or never landed at this gateway.</div>';
+        return;
+      }
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      ciphertextBytes = new Uint8Array(await resp.arrayBuffer());
+    } catch (e) {
+      if (body) body.innerHTML = `<div class="att-error">⚠ fetch failed: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+
+    // 4. Decrypt + parse
+    let header, fileBytes;
+    try {
+      ({ header, fileBytes } = await parseInnerBlob(ciphertextBytes, rawKeyBytes));
+    } catch (e) {
+      if (body) body.innerHTML = `<div class="att-error">⚠ decrypt failed — ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+
+    // 5. Render thumbnail + save button
+    const mime = header.mime || 'application/octet-stream';
+    const filename = header.filename || 'attachment';
+    const blob = new Blob([fileBytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const isImage = /^image\//.test(mime);
+    if (body) {
+      body.innerHTML = '';
+      const thumbWrap = document.createElement('div');
+      thumbWrap.className = 'att-thumb-wrap';
+      if (isImage) {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = filename;
+        img.title = `${filename} — click to open full size`;
+        img.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+        thumbWrap.appendChild(img);
+      } else {
+        thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — non-image; save to view</div>`;
+      }
+      body.appendChild(thumbWrap);
+      const actions = document.createElement('div');
+      actions.className = 'att-actions';
+      const dl = document.createElement('button');
+      dl.className = 'att-btn';
+      dl.textContent = '💾 Save';
+      dl.onclick = () => {
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+      };
+      actions.appendChild(dl);
+      const op = document.createElement('button');
+      op.className = 'att-btn';
+      op.textContent = '↗ Open';
+      op.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
+      actions.appendChild(op);
+      body.appendChild(actions);
+    }
+  })().catch(e => { console.error('[attach] render pipeline error:', e); });
+}
+
+socket.on('room-attachment', (env) => {
+  try { addAttachmentBubble(env); }
+  catch (e) { console.error('[room-attachment] handler error:', e); }
 });
 
 // ── Room chat ────────────────────────────────────────────
