@@ -799,6 +799,42 @@
   </div>
 </div>
 
+<!-- ATTACHMENT UPLOAD MODAL (ipfs-gate v0.1) -->
+<div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
+    <h3 style="color:var(--accent);">📎 Send Attachment</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.1: jpeg only, ≤10MB, 7-day TTL.</p>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image/jpeg)</div>
+      <input id="att-file-input" type="file" accept="image/jpeg" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div id="att-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">RECIPIENTS (room members)</div>
+      <div id="att-recipients" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px;background:var(--bg);"></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">IPFS-GATE</div>
+      <select id="att-gateway-select" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;">
+        <option value="https://ipfs.completenoobs.com">ipfs.completenoobs.com (default)</option>
+        <option value="__custom__">Custom…</option>
+      </select>
+      <input id="att-gateway-custom" type="url" placeholder="https://your-ipfs-gate.example" style="display:none;margin-top:5px;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+    </div>
+
+    <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="att-cost-line" style="color:var(--accent);">≈ 1 CNOOBS for 7 days</span></div>
+    <div class="payment-note" id="att-status-note" style="min-height:18px;">Ready.</div>
+    <div class="keychain-required">⚡ Requires Hive Keychain (Posting + Active)</div>
+    <div class="payment-btn-row">
+      <button id="att-upload-btn" onclick="confirmSendAttachment()" style="background:var(--accent);color:#0a0c0f;">🔒 Encrypt &amp; Upload</button>
+      <button id="att-cancel-btn" onclick="closeAttachModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- INVITE POPUP -->
 <div id="invite-popup">
   <h4>📞 Room Invite</h4>
@@ -883,6 +919,7 @@
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
       <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
       <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
+      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.1: jpeg, ≤10MB)">📎 Attach</button>
       <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
@@ -3423,6 +3460,296 @@ function decryptMsg(ciphertext) {
   try { const d = hivecrypt.decode(myPrivKeyStr, ciphertext); return d.startsWith('#') ? d.slice(1) : d; }
   catch(e) { return '[could not decrypt — not addressed to you]'; }
 }
+
+// ── Attachments (ipfs-gate v0.1) ─────────────────────────
+// Wire format mirrors ipfs-gate/envelope.js:
+//   upload-proof: ipfs-gate:upload-proof:v1:<sha256hex>:<reservation_id>:<uploader>
+//   envelope-sig: <cid>|<size>|<sender>|<created>|<expires>|<room>|<kind>|<recipients_sorted_csv>
+// Inner blob: [12-byte nonce][AES-GCM( [4-byte BE len][JSON header][file bytes] )]
+const ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+let attachState = null;  // { file, gatewayUrl, recipients: Set<username> }
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function u8concat(...parts) {
+  const total = parts.reduce((n, p) => n + p.length, 0);
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const p of parts) { out.set(p, off); off += p.length; }
+  return out;
+}
+function u32be(n) {
+  const b = new Uint8Array(4);
+  b[0] = (n >>> 24) & 0xff; b[1] = (n >>> 16) & 0xff; b[2] = (n >>> 8) & 0xff; b[3] = n & 0xff;
+  return b;
+}
+async function sha256HexBytes(bytes) {
+  const buf = await crypto.subtle.digest('SHA-256', bytes);
+  return bytesToHex(new Uint8Array(buf));
+}
+async function aesGcmEncrypt(plaintextBytes) {
+  const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
+  const nonce = crypto.getRandomValues(new Uint8Array(12));
+  const ctBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: nonce }, key, plaintextBytes);
+  const rawKeyBuf = await crypto.subtle.exportKey('raw', key);
+  return { ciphertext: new Uint8Array(ctBuf), nonce, rawKey: new Uint8Array(rawKeyBuf) };
+}
+async function buildInnerBlob({ file, sender }) {
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  const header = JSON.stringify({
+    v: 1, filename: file.name, mime: file.type || 'image/jpeg',
+    original_size: fileBytes.length, sender
+  });
+  const headerBytes = new TextEncoder().encode(header);
+  const plaintext = u8concat(u32be(headerBytes.length), headerBytes, fileBytes);
+  const { ciphertext, nonce, rawKey } = await aesGcmEncrypt(plaintext);
+  const blob = u8concat(nonce, ciphertext);
+  return { blob, rawKey, plaintextSize: fileBytes.length };
+}
+function buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader }) {
+  if (!/^[a-f0-9]{64}$/.test(ciphertextSha256Hex)) throw new Error('bad ciphertext sha256');
+  if (!/^[a-f0-9]{16}$/.test(reservationId)) throw new Error('bad reservation id');
+  const u = String(uploader || '').toLowerCase();
+  if (!/^[a-z0-9][a-z0-9.\-]*$/.test(u)) throw new Error('bad uploader');
+  return `ipfs-gate:upload-proof:v1:${ciphertextSha256Hex}:${reservationId}:${u}`;
+}
+function buildEnvelopeSigInput({ cid, size_bytes, sender, created_at, expires_at, room, kind_hint, per_recipient }) {
+  const recipients = Object.keys(per_recipient || {}).map(s => s.toLowerCase()).sort();
+  return `${cid}|${size_bytes}|${sender}|${created_at}|${expires_at}|${room}|${kind_hint}|${recipients.join(',')}`;
+}
+async function signRaw(payload) {
+  // Sign a raw payload string. Returns hex signature compatible with
+  // dhive.Signature.fromString / Buffer.from(hex). Mirrors signMessage but
+  // without the `|timestamp` suffix that signMessage adds.
+  if (useKeychain && window.hive_keychain) {
+    return new Promise((resolve) => {
+      window.hive_keychain.requestSignBuffer(myUsername, payload, 'Posting', (r) => {
+        resolve(r.success ? r.result : '');
+      });
+    });
+  }
+  if (!myPrivKey) return '';
+  const hash = (dhive.cryptoUtils && dhive.cryptoUtils.sha256)
+    ? dhive.cryptoUtils.sha256(payload)
+    : (typeof Buffer !== 'undefined' ? Buffer.from(await sha256Subtle(payload)) : await sha256Subtle(payload));
+  return myPrivKey.sign(hash).toString();
+}
+async function keychainTransferCnoobs({ to, amount, memo }) {
+  // Returns the Hive tx_id of the broadcast custom_json on success, or null.
+  if (!window.hive_keychain) throw new Error('Hive Keychain not installed');
+  const payload = JSON.stringify({
+    contractName: 'tokens', contractAction: 'transfer',
+    contractPayload: { to, symbol: 'CNOOBS', quantity: String(amount), memo }
+  });
+  return new Promise((resolve) => {
+    window.hive_keychain.requestCustomJson(
+      myUsername, 'ssc-mainnet-hive', 'Active', payload,
+      `Pay ${amount} CNOOBS to ipfs-gate`,
+      (r) => {
+        if (!r.success) { resolve(null); return; }
+        // Keychain returns the broadcast tx id on result.id (or result.tx_id depending on version)
+        resolve(r.result?.id || r.result?.tx_id || null);
+      }
+    );
+  });
+}
+
+function openAttachModal() {
+  if (!currentRoom) return;
+  if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }
+  attachState = { file: null, gatewayUrl: 'https://ipfs.completenoobs.com', recipients: new Set() };
+  document.getElementById('att-file-input').value = '';
+  document.getElementById('att-file-meta').textContent = '';
+  document.getElementById('att-gateway-select').value = 'https://ipfs.completenoobs.com';
+  document.getElementById('att-gateway-custom').style.display = 'none';
+  document.getElementById('att-status-note').textContent = 'Ready.';
+  document.getElementById('att-upload-btn').disabled = false;
+  populateAttachRecipients();
+  document.getElementById('attachment-modal').style.display = 'flex';
+}
+function closeAttachModal() {
+  document.getElementById('attachment-modal').style.display = 'none';
+  attachState = null;
+}
+function populateAttachRecipients() {
+  const c = document.getElementById('att-recipients');
+  c.innerHTML = '';
+  const others = Object.values(roomUsers).filter(u => u.username && u.username !== myUsername);
+  if (!others.length) {
+    c.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);padding:4px;">No other members in this room — only you will be able to decrypt.</div>';
+    return;
+  }
+  for (const u of others) {
+    const id = 'att-recip-' + escapeHtml(u.username);
+    const fed = u.homeServer ? ` <span style="color:var(--accent);font-size:0.65rem;">@${escapeHtml(u.homeServer)}</span>` : '';
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text);cursor:pointer;';
+    row.innerHTML = `<input type="checkbox" id="${id}" checked data-user="${escapeHtml(u.username)}"/><span>@${escapeHtml(u.username)}${fed}</span>`;
+    c.appendChild(row);
+  }
+}
+document.addEventListener('change', (e) => {
+  if (e.target?.id === 'att-file-input') {
+    const f = e.target.files?.[0];
+    const meta = document.getElementById('att-file-meta');
+    if (!f) { meta.textContent = ''; return; }
+    if (f.type !== 'image/jpeg' && !/\.jpe?g$/i.test(f.name)) {
+      meta.textContent = '⚠ v0.1 supports image/jpeg only.'; meta.style.color = 'var(--danger)';
+      return;
+    }
+    if (f.size > ATTACH_MAX_BYTES) {
+      meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds 10 MB cap.`; meta.style.color = 'var(--danger)';
+      return;
+    }
+    meta.textContent = `${f.name} — ${(f.size / 1024).toFixed(1)} KB`; meta.style.color = 'var(--subtext)';
+    if (attachState) attachState.file = f;
+  }
+  if (e.target?.id === 'att-gateway-select') {
+    const v = e.target.value;
+    const custom = document.getElementById('att-gateway-custom');
+    if (v === '__custom__') { custom.style.display = 'block'; custom.focus(); }
+    else { custom.style.display = 'none'; if (attachState) attachState.gatewayUrl = v; }
+  }
+  if (e.target?.id === 'att-gateway-custom') {
+    if (attachState) attachState.gatewayUrl = e.target.value.trim().replace(/\/+$/, '');
+  }
+});
+function setAttachStatus(text, isError) {
+  const n = document.getElementById('att-status-note');
+  n.textContent = text;
+  n.style.color = isError ? 'var(--danger)' : 'var(--subtext)';
+}
+async function confirmSendAttachment() {
+  if (!attachState) return;
+  const file = attachState.file || document.getElementById('att-file-input').files?.[0];
+  if (!file) { setAttachStatus('⚠ Pick a file first.', true); return; }
+  if (file.type !== 'image/jpeg' && !/\.jpe?g$/i.test(file.name)) { setAttachStatus('⚠ jpeg only.', true); return; }
+  if (file.size > ATTACH_MAX_BYTES) { setAttachStatus('⚠ Over 10 MB.', true); return; }
+  attachState.file = file;
+  const selSel = document.getElementById('att-gateway-select').value;
+  const gwRaw = (selSel === '__custom__')
+    ? document.getElementById('att-gateway-custom').value.trim().replace(/\/+$/, '')
+    : selSel;
+  if (!/^https?:\/\//.test(gwRaw)) { setAttachStatus('⚠ Gateway URL must start with https://', true); return; }
+  attachState.gatewayUrl = gwRaw;
+  const recipients = Array.from(document.querySelectorAll('#att-recipients input[type=checkbox]'))
+    .filter(cb => cb.checked).map(cb => cb.dataset.user);
+  document.getElementById('att-upload-btn').disabled = true;
+  try {
+    await sendAttachment({ file, gatewayUrl: gwRaw, recipientUsernames: recipients });
+    setAttachStatus('✓ Sent.', false);
+    setTimeout(closeAttachModal, 700);
+  } catch (e) {
+    console.error('[attach] send failed:', e);
+    setAttachStatus('✗ ' + (e.message || 'failed'), true);
+    document.getElementById('att-upload-btn').disabled = false;
+  }
+}
+async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
+  // 1) Encrypt
+  setAttachStatus('Encrypting…');
+  const { blob, rawKey, plaintextSize } = await buildInnerBlob({ file, sender: myUsername });
+  const ciphertextSha256Hex = await sha256HexBytes(blob);
+
+  // 2) Reserve
+  setAttachStatus('Reserving quota…');
+  const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length })
+  });
+  if (!reserveRes.ok) {
+    const j = await reserveRes.json().catch(() => ({}));
+    throw new Error(`reserve failed: ${j.message || reserveRes.status}`);
+  }
+  const reserve = await reserveRes.json();
+  const reservationId = reserve.reservation_id;
+  const escrowAccount = reserve.payment.escrow_account;
+  const memo = reserve.payment.memo;
+  const payAmount = reserve.payment.amount;
+
+  // 3) Sign upload proof
+  setAttachStatus('Signing upload proof (Keychain)…');
+  const proofMsg = buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader: myUsername });
+  const uploadProofSig = await signRaw(proofMsg);
+  if (!uploadProofSig) throw new Error('upload proof signature cancelled');
+
+  // 4) Pay
+  setAttachStatus(`Paying ${payAmount} CNOOBS (Keychain)…`);
+  const txId = await keychainTransferCnoobs({ to: escrowAccount, amount: payAmount, memo });
+  if (!txId) throw new Error('payment cancelled or failed');
+
+  // 5) Brief settle delay so the tx is indexed before /upload checks
+  setAttachStatus('Waiting for tx to index (3s)…');
+  await new Promise(r => setTimeout(r, 3000));
+
+  // 6) Upload
+  setAttachStatus('Uploading ciphertext…');
+  const form = new FormData();
+  form.append('reservation_id', reservationId);
+  form.append('tx_id', txId);
+  form.append('uploader_pubkey', myPubKey);
+  form.append('upload_proof_sig', uploadProofSig);
+  form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
+  const upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+  if (!upRes.ok) {
+    const j = await upRes.json().catch(() => ({}));
+    throw new Error(`upload failed: ${j.message || upRes.status}`);
+  }
+  const upJson = await upRes.json();
+  const cid = upJson.cid;
+  const expires_at = upJson.expires_at;
+  const gateway_url = upJson.gateway_url;
+
+  // 7) Per-recipient key wrapping (always include self so sender can re-read)
+  setAttachStatus('Wrapping keys for recipients…');
+  const rawKeyB64 = btoa(String.fromCharCode(...rawKey));
+  const audience = new Set([myUsername, ...recipientUsernames]);
+  const per_recipient = {};
+  for (const u of audience) {
+    const recip = (u === myUsername) ? { pubKey: myPubKey } : Object.values(roomUsers).find(x => x.username === u);
+    if (!recip || !recip.pubKey) { console.warn(`[attach] no pubkey for @${u}; skipping`); continue; }
+    try {
+      per_recipient[u] = encryptMsg(rawKeyB64, recip.pubKey);
+    } catch (e) {
+      console.warn(`[attach] encrypt for @${u} failed:`, e.message);
+    }
+  }
+  if (!Object.keys(per_recipient).length) throw new Error('no recipients could be encrypted to');
+
+  // 8) Build + sign envelope
+  const created_at = new Date().toISOString();
+  const envelope = {
+    v: 1, type: 'room-attachment', room: currentRoom, cid,
+    size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
+    created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
+    kind_hint: 'image', per_recipient,
+    original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
+  };
+  setAttachStatus('Signing envelope (Keychain)…');
+  envelope.envelope_sig = await signRaw(buildEnvelopeSigInput(envelope));
+  if (!envelope.envelope_sig) throw new Error('envelope signature cancelled');
+
+  // 9) Emit
+  setAttachStatus('Broadcasting to room…');
+  rsock().emit('room-attachment', envelope);
+}
+
+// Chunk-1 placeholder recipient bubble — full 3-audience rendering lands in chunk 2.
+socket.on('room-attachment', (env) => {
+  try {
+    const isSelf = env.sender === myUsername;
+    const audience = env.per_recipient ? Object.keys(env.per_recipient) : [];
+    const iAmRecipient = audience.includes(myUsername);
+    const kb = (env.size_bytes / 1024).toFixed(1);
+    const tag = iAmRecipient ? '📎 (you can decrypt)' : '📎 (locked — not addressed to you)';
+    const text = `${tag} ${env.original_filename || env.cid} — ${kb} KB · cid:${env.cid.slice(0, 12)}… · gateway: ${env.gateway_hint}`;
+    addRoomBubble(env.sender, text, isSelf, audience.map(a => '@' + a).join(', '), false, null);
+  } catch (e) {
+    console.error('[room-attachment] render failed:', e);
+  }
+});
 
 // ── Room chat ────────────────────────────────────────────
 async function sendMessage() {
