@@ -4038,6 +4038,16 @@ socket.on('room-attachment', (env) => {
   catch (e) { console.error('[room-attachment] handler error:', e); }
 });
 
+// Replay persisted attachment envelopes on room join. Server only sends rows
+// where this user is the sender or in per_recipient (mirrors chat history).
+socket.on('room-attachments-history', (envelopes) => {
+  if (!Array.isArray(envelopes) || !envelopes.length) return;
+  for (const env of envelopes) {
+    try { addAttachmentBubble(env); }
+    catch (e) { console.error('[room-attachments-history] render error:', e); }
+  }
+});
+
 // ── Room chat ────────────────────────────────────────────
 async function sendMessage() {
   const input = document.getElementById('msg-input');
