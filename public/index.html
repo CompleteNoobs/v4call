@@ -166,6 +166,8 @@
     .lobby-tab{flex:1;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);text-align:center;cursor:pointer;border-bottom:2px solid transparent;transition:color 0.2s,border-color 0.2s;background:none;border-top:none;border-left:none;border-right:none;}
     .lobby-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
     .lobby-tab.has-unread:not(.active)::after{content:' •';color:var(--accent);font-size:1rem;line-height:0;vertical-align:middle;margin-left:3px;}
+    .room-card.has-unread-attachment{border-color:var(--accent);box-shadow:0 0 0 1px rgba(245,166,35,0.18);}
+    .room-card.has-unread-attachment .room-card-name::after{content:' 📎';font-size:0.78rem;}
     .lobby-tab-content{display:none;flex:1;flex-direction:column;overflow:hidden;}
     .lobby-tab-content.active{display:flex;}
     #lobby-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
@@ -2136,7 +2138,63 @@ document.getElementById('lobby-msg-input').addEventListener('keydown', e => { if
 document.getElementById('lobby-msg-input').addEventListener('input', function() { this.style.height='38px'; this.style.height=Math.min(this.scrollHeight,100)+'px'; });
 
 // ── Rooms list ──────────────────────────────────────────
-socket.on('lobby-rooms', (roomsData) => {
+// v0.16.14 — Per-session unread-attachment tracking. Server pushes
+// `attachment-notification { room, sender, cid }` to addressed recipients who
+// aren't currently in that room's socket. We hold the set in memory, render
+// dots on room cards + relevant lobby tab, and clear on join.
+const roomsWithUnreadAttachment = new Set();
+function markRoomUnreadAttachment(room) {
+  if (!room || room === currentRoom) return;  // currently viewing — no point flagging
+  roomsWithUnreadAttachment.add(room);
+  refreshUnreadAttachmentAffordance();
+  // Re-render the rooms list to update card border (the data is cached on the
+  // server side and pushed via lobby-rooms regularly; we just need a re-paint).
+  if (window.__lastLobbyRoomsData) renderLobbyRooms(window.__lastLobbyRoomsData);
+}
+function clearRoomUnreadAttachment(room) {
+  if (roomsWithUnreadAttachment.delete(room)) {
+    refreshUnreadAttachmentAffordance();
+    if (window.__lastLobbyRoomsData) renderLobbyRooms(window.__lastLobbyRoomsData);
+  }
+}
+function refreshUnreadAttachmentAffordance() {
+  // Tab-level dots: figure out which tab the unread rooms live in based on
+  // the cached lobby-rooms payload. Active = rooms with members. Included =
+  // rooms where I'm allowlisted but not currently in.
+  const data = window.__lastLobbyRoomsData || [];
+  let activeHasUnread = false, includedHasUnread = false;
+  for (const r of data) {
+    if (!roomsWithUnreadAttachment.has(r.name)) continue;
+    const inActive = r.memberCount > 0;
+    const inIncluded = r.allowlist.some(u => u.username === myUsername) && r.name !== currentRoom;
+    if (inActive) activeHasUnread = true;
+    if (inIncluded) includedHasUnread = true;
+  }
+  // Tabs: keep the dot off the currently-active tab (matches existing
+  // .lobby-tab.has-unread:not(.active)::after CSS rule).
+  document.querySelectorAll('#lobby-tabs .lobby-tab').forEach(btn => {
+    const isActiveTab = btn.classList.contains('active');
+    const onclickAttr = btn.getAttribute('onclick') || '';
+    const isActiveRoomsTab = onclickAttr.includes("'active'");
+    const isIncludedTab    = onclickAttr.includes("'included'");
+    let shouldDot = false;
+    if (isActiveRoomsTab) shouldDot = activeHasUnread;
+    if (isIncludedTab)    shouldDot = includedHasUnread;
+    btn.classList.toggle('has-unread', shouldDot && !isActiveTab);
+  });
+}
+
+socket.on('attachment-notification', ({ room, sender }) => {
+  markRoomUnreadAttachment(room);
+  // Subtle system message in the lobby/DM/system stream so the user knows
+  // *why* the dot appeared the next time they look. Routes through the same
+  // helper as other DM-context notices; lands wherever the user is right now.
+  try {
+    addLobbyMsg({ type: 'system', text: `📎 @${sender} sent an attachment in #${room}` });
+  } catch (_) {}
+});
+
+function renderLobbyRooms(roomsData) {
   // Active rooms: memberCount > 0 (or user has membership — match existing logic via canJoin)
   const activeList = document.getElementById('rooms-list');
   const noActive = document.getElementById('no-rooms-msg');
@@ -2148,7 +2206,7 @@ socket.on('lobby-rooms', (roomsData) => {
     activeRooms.forEach(r => {
       const canJoin = r.allowlist.some(u => u.username === myUsername) || !!r.tokenGate;
       const card = document.createElement('div');
-      card.className = 'room-card';
+      card.className = 'room-card' + (roomsWithUnreadAttachment.has(r.name) ? ' has-unread-attachment' : '');
       const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
       const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
       const safeName = escapeHtml(r.name);
@@ -2179,7 +2237,7 @@ socket.on('lobby-rooms', (roomsData) => {
   } else {
     includedRooms.forEach(r => {
       const card = document.createElement('div');
-      card.className = 'room-card';
+      card.className = 'room-card' + (roomsWithUnreadAttachment.has(r.name) ? ' has-unread-attachment' : '');
       const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
       const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
       const safeName = escapeHtml(r.name);
@@ -2195,6 +2253,12 @@ socket.on('lobby-rooms', (roomsData) => {
       incList.appendChild(card);
     });
   }
+  refreshUnreadAttachmentAffordance();
+}
+
+socket.on('lobby-rooms', (roomsData) => {
+  window.__lastLobbyRoomsData = roomsData;
+  renderLobbyRooms(roomsData);
 });
 
 socket.on('lobby-config', ({ notice, requirementsText }) => {
@@ -2918,6 +2982,7 @@ function hideIncomingOverlay() {
 // ── Enter / Leave Room ──────────────────────────────────
 async function enterRoom(roomName) {
   currentRoom = roomName;
+  clearRoomUnreadAttachment(roomName);  // v0.16.14 — drop the 📎 badge on enter
   return new Promise(async (resolve) => {
   // Always show the three media-control buttons in-room. Their labels track
   // current state; the Share Screen button is a v0.13 placeholder until v0.15.
