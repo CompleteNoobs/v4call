@@ -3078,6 +3078,7 @@ function leaveRoom() {
   document.getElementById('allowlist-panel').style.display = 'none';
   document.getElementById('allowlist-members').innerHTML   = '';
   currentRoom = ''; amCreator = false; socket._room = null;
+  renderedAttachmentCids.clear();  // v0.16.16 — next room-entry's history-replay should re-render
   // v0.15 — reset spotlight state so the next room entry starts clean.
   roomSpotlightTarget = null; localSpotlightOverride = false;
   document.getElementById('room-users-list').classList.remove('am-creator');
@@ -3895,7 +3896,10 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
   setAttachStatus('Waiting for tx to index (3s)…');
   await new Promise(r => setTimeout(r, 3000));
 
-  // 6) Upload
+  // 6) Upload. v0.16.16 — if the fetch itself throws (network drop after the
+  // CNOOBS transfer already broadcast), the payment is in escrow with no pin
+  // attached. Surface this explicitly so the user knows their funds went out
+  // and can ask the operator for a manual refund via /admin/orphan-payments.
   setAttachStatus('Uploading ciphertext…');
   const form = new FormData();
   form.append('reservation_id', reservationId);
@@ -3903,10 +3907,15 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
   form.append('uploader_pubkey', myPubKey);
   form.append('upload_proof_sig', uploadProofSig);
   form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
-  const upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+  let upRes;
+  try {
+    upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+  } catch (e) {
+    throw new Error(`upload failed (${e.message}) — your ${payAmount} CNOOBS payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments for a manual refund.`);
+  }
   if (!upRes.ok) {
     const j = await upRes.json().catch(() => ({}));
-    throw new Error(`upload failed: ${j.message || upRes.status}`);
+    throw new Error(`upload failed: ${j.message || upRes.status} — payment tx ${txId} may need operator review (orphan-payments).`);
   }
   const upJson = await upRes.json();
   const cid = upJson.cid;
@@ -4008,9 +4017,17 @@ function timeUntilExpiry(isoExpires) {
   if (mins > 0) return `${mins}m`;
   return '<1m';
 }
+// v0.16.16 — dedupe by CID. Socket.io reconnects (e.g. after a laptop
+// wake-from-sleep) re-trigger room-attachments-history, which re-emits every
+// envelope. Without this guard the bubble was being appended N times for N
+// reconnects. CIDs are unique per encryption (fresh AES key → unique
+// ciphertext → unique CID) so they're a safe dedup key. Cleared on leaveRoom.
+const renderedAttachmentCids = new Set();
 function addAttachmentBubble(env) {
   const c = document.getElementById('messages');
   if (!c) return;
+  if (env && env.cid && renderedAttachmentCids.has(env.cid)) return;
+  if (env && env.cid) renderedAttachmentCids.add(env.cid);
   const isSelf = env.sender === myUsername;
   const audience = env.per_recipient ? Object.keys(env.per_recipient) : [];
   const iAmRecipient = audience.includes(myUsername);
