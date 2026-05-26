@@ -2515,6 +2515,20 @@ socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id, pa
   const paidTag = paid_invite_id ? ` 💜 ${parseFloat(paid_amount).toFixed(3)} ${paid_currency}` : '';
   showInviteMsg(`📞 ${sysFrom} invited you to #${roomName}${paidTag}`);
 });
+
+// v0.16.17 — server cancels a pending invite when the room's admin ends the
+// room before the invitee responds. Close the popup if it's for this room
+// (or close any open popup as a defensive default) and surface a clear notice.
+socket.on('invite-cancelled', ({ room, reason }) => {
+  if (pendingInvite && (pendingInvite.roomName === room || !room)) {
+    pendingInvite = null;
+    document.getElementById('invite-popup').style.display = 'none';
+  }
+  const reasonText = reason === 'room_ended'
+    ? 'admin ended the room'
+    : (reason || 'cancelled');
+  showInviteMsg(`🚫 Invite to #${room} cancelled — ${reasonText}.`);
+});
 let pendingInvite = null;
 function acceptInvite() {
   if (!pendingInvite) return;
@@ -2571,6 +2585,17 @@ socket.on('join-rejected', ({ room, reason }) => {
   document.getElementById('enc-badge').style.display      = 'none';
 });
 socket.on('kicked', ({ reason }) => { alert(reason); leaveRoom(); });
+
+// v0.16.17 — server tells this tab it was displaced by the same user joining
+// from another tab/device. Server has already removed this tab's membership
+// from r.members. Reset the local UI without re-emitting leave-room (which
+// would mark the user as not-in-room and break the other tab's state).
+socket.on('displaced', ({ room, reason }) => {
+  if (currentRoom === room) {
+    leaveRoom({ skipServerEmit: true });
+    addLobbyMsg({ type: 'system', text: `↪ ${reason || 'Switched to your other tab/device — this tab returned to the lobby.'}` });
+  }
+});
 
 // ── Payment gate ─────────────────────────────────────────
 let paymentPending = null; // { callee, callType, rates, callId }
@@ -3036,12 +3061,16 @@ async function enterRoom(roomName) {
   resolve();
   }); // end Promise
 }
-function leaveRoom() {
+function leaveRoom(opts) {
   // Tell the server we're leaving so it can update room membership and notify
   // other room members immediately. Without this, the server only learned via
   // socket disconnect (potentially much later) and other members would see
   // stale user-list entries until then.
-  if (currentRoom) {
+  // v0.16.17 — opts.skipServerEmit lets the `displaced` handler tear down the
+  // local UI without re-emitting leave-room (server has already dropped this
+  // socket's membership; another tab/device is still legitimately in the room).
+  const skipServerEmit = !!(opts && opts.skipServerEmit);
+  if (currentRoom && !skipServerEmit) {
     try { rsock().emit('leave-room'); } catch(_) {}
   }
   stopCallTicker();
