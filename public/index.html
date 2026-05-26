@@ -1164,6 +1164,7 @@ window._callStarted  = 0;
 // Room state
 let currentRoom = '', localStream;
 let currentRoomTokenGate = null; // v0.14 — { symbol, amount } | null, used by the via-TOKEN badge
+let currentRoomAllowlist = [];   // v0.16.15 — canonical entries from room-info; used by the attachment recipient picker
 let currentScreenStream = null;  // v0.15 — getDisplayMedia stream while sharing (null when not)
 const peers = {}, roomUsers = {}, selectedRecipients = new Set();
 let amCreator = false;
@@ -1351,7 +1352,12 @@ function checkPendingRoom() {
   if (pending && myUsername) {
     sessionStorage.removeItem('pending_room');
     amCreator = false;
-    pendingCallType = 'video';
+    // v0.16.15 — popout enters text-only, matching the v0.12 default ("rooms
+    // default to text-only; user opts into mic/cam via the in-room buttons").
+    // Previously hardcoded 'video' here forced a webcam permission prompt the
+    // instant a popout window finished logging in — even when the user just
+    // wanted a chat-only popout.
+    pendingCallType = 'text';
     setTimeout(() => enterRoom(pending), 800);
   }
 }
@@ -3378,6 +3384,9 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   // amCreator can both flip on (we just got promoted) AND flip off (admin
   // was transferred away from us) so set it to the truth, don't only OR it.
   amCreator = (creator === myUsername);
+  // v0.16.15 — cache the room allowlist so the attachment picker can include
+  // members who are allowlisted but not currently in the room socket.
+  currentRoomAllowlist = Array.isArray(allowlist) ? allowlist.slice() : [];
   // Reveal admin-only buttons whenever amCreator is true (covers the case
   // where it gets discovered after enterRoom — e.g. on auto-create-on-join).
   document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
@@ -3736,19 +3745,46 @@ function closeAttachModal() {
   attachState = null;
 }
 function populateAttachRecipients() {
+  // v0.16.15 — show the union of (live room members) ∪ (allowlist), so users
+  // can address an attachment to someone who's allowlisted but not currently in
+  // the room. The recipient picks it up from room history (chunk 2B) on next
+  // join, or from the away-notification dot (chunk 2C) if they're in lobby.
   const c = document.getElementById('att-recipients');
   c.innerHTML = '';
-  const others = Object.values(roomUsers).filter(u => u.username && u.username !== myUsername);
-  if (!others.length) {
-    c.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);padding:4px;">No other members in this room — only you will be able to decrypt.</div>';
+  const inRoomByName = new Map();
+  for (const u of Object.values(roomUsers)) {
+    if (u && u.username && u.username !== myUsername) inRoomByName.set(u.username, u);
+  }
+  // Allowlist entries: canonical form (`user` or `user@server`). Skip self.
+  const allowlistMembers = [];
+  for (const raw of (currentRoomAllowlist || [])) {
+    const entry = String(raw || '').toLowerCase();
+    const atIdx = entry.indexOf('@');
+    const bare = atIdx > 0 ? entry.slice(0, atIdx) : entry;
+    const server = atIdx > 0 ? entry.slice(atIdx + 1) : null;
+    if (!bare || bare === myUsername) continue;
+    allowlistMembers.push({ username: bare, homeServer: server, isOnline: inRoomByName.has(bare) });
+  }
+  // Augment with anyone in roomUsers who isn't already in the allowlist (e.g.
+  // joined via token-gate — joinedVia: 'token').
+  for (const u of inRoomByName.values()) {
+    if (!allowlistMembers.some(a => a.username === u.username)) {
+      allowlistMembers.push({ username: u.username, homeServer: u.homeServer || null, isOnline: true });
+    }
+  }
+  if (!allowlistMembers.length) {
+    c.innerHTML = '<div style="font-size:0.72rem;color:var(--muted);padding:4px;">No other recipients — only you will be able to decrypt.</div>';
     return;
   }
-  for (const u of others) {
+  for (const u of allowlistMembers) {
     const id = 'att-recip-' + escapeHtml(u.username);
     const fed = u.homeServer ? ` <span style="color:var(--accent);font-size:0.65rem;">@${escapeHtml(u.homeServer)}</span>` : '';
+    const dot = u.isOnline
+      ? '<span title="in room now" style="color:var(--green);font-size:0.7rem;">●</span>'
+      : '<span title="allowlisted — will see on next join" style="color:var(--muted);font-size:0.7rem;">○</span>';
     const row = document.createElement('label');
     row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text);cursor:pointer;';
-    row.innerHTML = `<input type="checkbox" id="${id}" checked data-user="${escapeHtml(u.username)}"/><span>@${escapeHtml(u.username)}${fed}</span>`;
+    row.innerHTML = `<input type="checkbox" id="${id}" checked data-user="${escapeHtml(u.username)}"/>${dot}<span>@${escapeHtml(u.username)}${fed}</span>`;
     c.appendChild(row);
   }
 }
@@ -3883,21 +3919,47 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
     gateway_url = `${gatewayUrl}/ipfs/${cid}`;
   }
 
-  // 7) Per-recipient key wrapping (always include self so sender can re-read)
+  // 7) Per-recipient key wrapping (always include self so sender can re-read).
+  // v0.16.15 — recipients may be allowlisted-but-not-in-room. For in-room users
+  // we use the pubKey we already have cached on roomUsers; for not-in-room users
+  // we fall back to Hive via fetchPubKey (cached). Federated allowlist entries
+  // (`user@server`) are handled the same — Hive accounts are server-agnostic.
   setAttachStatus('Wrapping keys for recipients…');
   const rawKeyB64 = btoa(String.fromCharCode(...rawKey));
   const audience = new Set([myUsername, ...recipientUsernames]);
   const per_recipient = {};
+  const skipped = [];
   for (const u of audience) {
-    const recip = (u === myUsername) ? { pubKey: myPubKey } : Object.values(roomUsers).find(x => x.username === u);
-    if (!recip || !recip.pubKey) { console.warn(`[attach] no pubkey for @${u}; skipping`); continue; }
+    let pubKey = null;
+    if (u === myUsername) {
+      pubKey = myPubKey;
+    } else {
+      const inRoom = Object.values(roomUsers).find(x => x.username === u);
+      if (inRoom && inRoom.pubKey) {
+        pubKey = inRoom.pubKey;
+      } else {
+        setAttachStatus(`Fetching @${u}'s posting key from Hive…`);
+        try { pubKey = await fetchPubKey(u); } catch (_) { pubKey = null; }
+      }
+    }
+    if (!pubKey) {
+      console.warn(`[attach] no pubkey for @${u}; skipping`);
+      skipped.push(u);
+      continue;
+    }
     try {
-      per_recipient[u] = encryptMsg(rawKeyB64, recip.pubKey);
+      per_recipient[u] = encryptMsg(rawKeyB64, pubKey);
     } catch (e) {
       console.warn(`[attach] encrypt for @${u} failed:`, e.message);
+      skipped.push(u);
     }
   }
-  if (!Object.keys(per_recipient).length) throw new Error('no recipients could be encrypted to');
+  if (!Object.keys(per_recipient).length) {
+    throw new Error('no recipients could be encrypted to' + (skipped.length ? ` (skipped: @${skipped.join(', @')})` : ''));
+  }
+  if (skipped.length) {
+    setAttachStatus(`⚠ couldn't reach pubkey for: @${skipped.join(', @')} — continuing with the rest`, false);
+  }
 
   // 8) Build + sign envelope
   const created_at = new Date().toISOString();
