@@ -1851,12 +1851,19 @@ async function openDmPanel(username) {
     if (!routing) return;
     if (dmPanelTarget !== username) return;  // user switched away
     if (routing.status === 'nostr-only') {
-      rateEl.textContent  = `⏳ Federation reconnecting (${routing.domain || 'peer'}) — wait ~30s`;
-      rateEl.className    = 'loading';
-      rateEl.title        = 'This user is shown online via Nostr presence, but the WS federation socket is still reconnecting. Send is disabled until WS is up — no payment will be charged.';
+      if (routing.federationEnabled === false) {
+        rateEl.textContent  = `⚠ Cross-server DM unavailable (WS fed disabled)`;
+        rateEl.className    = 'blocked';
+        rateEl.title        = `@${username} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — there's no transport to deliver DMs. Operator needs to enable FEDERATION_PEERS in .env.`;
+        inputEl.placeholder = `WS federation disabled — cross-server DMs not routable.`;
+      } else {
+        rateEl.textContent  = `⏳ Federation reconnecting (${routing.domain || 'peer'}) — wait ~30s`;
+        rateEl.className    = 'loading';
+        rateEl.title        = 'This user is shown online via Nostr presence, but the WS federation socket is still reconnecting. Send is disabled until WS is up — no payment will be charged.';
+        inputEl.placeholder = `Waiting for federation to reconnect…`;
+      }
       sendBtn.disabled    = true;
       inputEl.disabled    = true;
-      inputEl.placeholder = `Waiting for federation to reconnect…`;
       const attBtn = document.getElementById('dm-attach-btn');
       if (attBtn) attBtn.disabled = true;
     } else if (routing.status === 'offline') {
@@ -1927,11 +1934,10 @@ async function sendDmMessage() {
     return;
   }
   if (routing.status === 'nostr-only') {
-    addLobbyMsg({
-      type:'system',
-      text:`⏳ @${dmPanelTarget} is shown via Nostr presence (${routing.domain || 'peer'}) but WS federation hasn't reconnected yet. Try again in ~30s — no payment charged.`,
-      context:'dm'
-    });
+    const text = (routing.federationEnabled === false)
+      ? `@${dmPanelTarget} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — cross-server DMs aren't routable. No payment charged.`
+      : `⏳ @${dmPanelTarget} is shown via Nostr presence (${routing.domain || 'peer'}) but WS federation hasn't reconnected yet. Try again in ~30s — no payment charged.`;
+    addLobbyMsg({ type:'system', text, context:'dm' });
     return;
   }
 
@@ -4078,7 +4084,10 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
       throw new Error(`@${dmContext.target} is not online — no payment charged.`);
     }
     if (routing.status === 'nostr-only') {
-      throw new Error(`⏳ @${dmContext.target} is shown via Nostr (${routing.domain || 'peer'}) but WS federation is still reconnecting. Try again in ~30s — no payment charged.`);
+      const msg = (routing.federationEnabled === false)
+        ? `@${dmContext.target} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — cross-server attachments aren't routable. No payment charged.`
+        : `⏳ @${dmContext.target} is shown via Nostr (${routing.domain || 'peer'}) but WS federation is still reconnecting. Try again in ~30s — no payment charged.`;
+      throw new Error(msg);
     }
 
     if (dmContext.rate >= 0.001) {
