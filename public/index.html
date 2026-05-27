@@ -1670,6 +1670,26 @@ let dmPanelCurrency = 'HBD';
 // but suppressing the fetch entirely also avoids extra dividers/network.
 const dmHistoryLoaded = new Set();
 
+// v0.16.18 — Pre-flight routing check used before any paid action (paid-DM
+// rate Keychain, ipfs-gate CNOOBS/TEST transfer). Returns { status, domain? }
+// where status is 'local' | 'federated' | 'nostr-only' | 'offline'. The
+// 'nostr-only' case is the transient post-restart window where Phase D Nostr
+// presence has populated the lobby but WS federation hasn't reconnected yet.
+async function dmPrecheck(target) {
+  try {
+    return await new Promise((resolve) => {
+      let done = false;
+      socket.emit('dm-precheck', { to: target }, (resp) => {
+        if (done) return; done = true;
+        resolve(resp && resp.status ? resp : { status: 'offline' });
+      });
+      // Safety timeout — if the server doesn't ack within 5s, treat as offline
+      // rather than letting the user wait forever in the Keychain prompt path.
+      setTimeout(() => { if (!done) { done = true; resolve({ status: 'offline' }); } }, 5000);
+    });
+  } catch (_) { return { status: 'offline' }; }
+}
+
 async function openDmPanel(username) {
   if (dmPanelTarget === username && document.getElementById('dm-panel').classList.contains('active')) {
     closeDmPanel();
@@ -1821,6 +1841,34 @@ async function openDmPanel(username) {
   inputEl.placeholder = `Message @${username}…`;
   sendBtn.disabled    = false;
   inputEl.focus();
+
+  // v0.16.18 — Surface nostr-only routing state up-front so the user sees the
+  // "federation reconnecting" signal before they type a message or click 📎.
+  // Non-blocking: this runs after the panel is interactive; if it returns
+  // nostr-only/offline, we visually disable send but the actual send-path
+  // pre-flight check will catch it too as a defensive second gate.
+  dmPrecheck(username).then((routing) => {
+    if (!routing) return;
+    if (dmPanelTarget !== username) return;  // user switched away
+    if (routing.status === 'nostr-only') {
+      rateEl.textContent  = `⏳ Federation reconnecting (${routing.domain || 'peer'}) — wait ~30s`;
+      rateEl.className    = 'loading';
+      rateEl.title        = 'This user is shown online via Nostr presence, but the WS federation socket is still reconnecting. Send is disabled until WS is up — no payment will be charged.';
+      sendBtn.disabled    = true;
+      inputEl.disabled    = true;
+      inputEl.placeholder = `Waiting for federation to reconnect…`;
+      const attBtn = document.getElementById('dm-attach-btn');
+      if (attBtn) attBtn.disabled = true;
+    } else if (routing.status === 'offline') {
+      rateEl.textContent  = `⚠ @${username} is offline`;
+      rateEl.className    = 'blocked';
+      sendBtn.disabled    = true;
+      inputEl.disabled    = true;
+      inputEl.placeholder = `@${username} is not online.`;
+      const attBtn = document.getElementById('dm-attach-btn');
+      if (attBtn) attBtn.disabled = true;
+    }
+  });
 }
 
 function closeDmPanel() {
@@ -1835,6 +1883,9 @@ function closeDmPanel() {
   document.getElementById('dm-panel-send').disabled  = true;
   document.getElementById('dm-panel-rate').textContent = 'checking…';
   document.getElementById('dm-panel-rate').className   = 'loading';
+  // v0.16.18 — reset the attach button (may be disabled by nostr-only state)
+  const attBtn = document.getElementById('dm-attach-btn');
+  if (attBtn) attBtn.disabled = false;
 }
 
 function selectDmCurrency(idx) {
@@ -1866,6 +1917,23 @@ async function sendDmMessage() {
   const sendBtn = document.getElementById('dm-panel-send');
   const text    = inputEl.value.trim();
   if (!text) return;
+
+  // v0.16.18 — Routing pre-flight BEFORE any Keychain prompt. If the recipient
+  // is visible via Nostr but WS federation isn't reconnected yet, abort here
+  // with a clear message rather than charging the paid-DM rate into the void.
+  const routing = await dmPrecheck(dmPanelTarget);
+  if (routing.status === 'offline') {
+    addLobbyMsg({type:'system', text:`⚠ @${dmPanelTarget} is not online — message not sent.`, context:'dm'});
+    return;
+  }
+  if (routing.status === 'nostr-only') {
+    addLobbyMsg({
+      type:'system',
+      text:`⏳ @${dmPanelTarget} is shown via Nostr presence (${routing.domain || 'peer'}) but WS federation hasn't reconnected yet. Try again in ~30s — no payment charged.`,
+      context:'dm'
+    });
+    return;
+  }
 
   const targetPub = pubKeyCache[dmPanelTarget];
   if (!targetPub) {
@@ -3998,6 +4066,21 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   let msgId = null, textMemo = null, textPaid = 0, textCurrency = 'HBD';
   if (mode === 'dm') {
     if (!dmContext || !dmContext.target) throw new Error('DM target missing');
+
+    // v0.16.18 — Routing pre-flight BEFORE ANY payment. Critical for DM
+    // attachments because both the paid-DM rate AND the ipfs-gate fee are
+    // charged before the server's local dm-attachment handler can reject.
+    // Without this check, a Nostr-only-visible recipient (transient post-
+    // restart state) would mean the sender loses both fees with no delivery.
+    setAttachStatus('Checking recipient is reachable…');
+    const routing = await dmPrecheck(dmContext.target);
+    if (routing.status === 'offline') {
+      throw new Error(`@${dmContext.target} is not online — no payment charged.`);
+    }
+    if (routing.status === 'nostr-only') {
+      throw new Error(`⏳ @${dmContext.target} is shown via Nostr (${routing.domain || 'peer'}) but WS federation is still reconnecting. Try again in ~30s — no payment charged.`);
+    }
+
     if (dmContext.rate >= 0.001) {
       if (!window.hive_keychain) throw new Error('Hive Keychain required to pay the paid-DM rate.');
       msgId        = 'dma_' + Date.now();
