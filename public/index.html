@@ -852,7 +852,7 @@
       <input id="att-gateway-custom" type="url" placeholder="https://your-ipfs-gate.example" style="display:none;margin-top:5px;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
     </div>
 
-    <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="att-cost-line" style="color:var(--accent);">≈ 1 CNOOBS for 7 days</span></div>
+    <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="att-cost-line" style="color:var(--accent);">… checking gate</span></div>
     <div class="payment-note" id="att-status-note" style="min-height:18px;">Ready.</div>
     <div class="keychain-required">⚡ Requires Hive Keychain (Posting + Active)</div>
     <div class="payment-btn-row">
@@ -3727,17 +3727,21 @@ async function signRaw(payload) {
     : (typeof Buffer !== 'undefined' ? Buffer.from(await sha256Subtle(payload)) : await sha256Subtle(payload));
   return myPrivKey.sign(hash).toString();
 }
-async function keychainTransferCnoobs({ to, amount, memo }) {
+async function keychainTransferGateToken({ to, amount, memo, symbol }) {
+  // v0.16.18 — currency parametric (was hardcoded CNOOBS in v0.16.16/.17). The
+  // symbol comes from the gate's /reserve response so operators can switch the
+  // gate's accepted token via PAYMENT_CURRENCY without v4call code changes.
   // Returns the Hive tx_id of the broadcast custom_json on success, or null.
   if (!window.hive_keychain) throw new Error('Hive Keychain not installed');
+  const sym = String(symbol || 'CNOOBS').toUpperCase();
   const payload = JSON.stringify({
     contractName: 'tokens', contractAction: 'transfer',
-    contractPayload: { to, symbol: 'CNOOBS', quantity: String(amount), memo }
+    contractPayload: { to, symbol: sym, quantity: String(amount), memo }
   });
   return new Promise((resolve) => {
     window.hive_keychain.requestCustomJson(
       myUsername, 'ssc-mainnet-hive', 'Active', payload,
-      `Pay ${amount} CNOOBS to ipfs-gate`,
+      `Pay ${amount} ${sym} to ipfs-gate`,
       (r) => {
         if (!r.success) { resolve(null); return; }
         // Keychain returns the broadcast tx id on result.id (or result.tx_id depending on version)
@@ -4038,6 +4042,10 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   const escrowAccount = reserve.payment.escrow_account;
   const memo = reserve.payment.memo;
   const payAmount = reserve.payment.amount;
+  // v0.16.18 — read the gate's announced currency. Fallback to CNOOBS for
+  // backwards compat with v0.1.2 gates that didn't include `currency` in the
+  // reserve response. v0.1.3+ always returns it.
+  const payCurrency = (reserve.payment.currency || 'CNOOBS').toUpperCase();
 
   // 3) Sign upload proof
   setAttachStatus('Signing upload proof (Keychain)…');
@@ -4046,8 +4054,8 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   if (!uploadProofSig) throw new Error('upload proof signature cancelled');
 
   // 4) Pay
-  setAttachStatus(`Paying ${payAmount} CNOOBS (Keychain)…`);
-  const txId = await keychainTransferCnoobs({ to: escrowAccount, amount: payAmount, memo });
+  setAttachStatus(`Paying ${payAmount} ${payCurrency} (Keychain)…`);
+  const txId = await keychainTransferGateToken({ to: escrowAccount, amount: payAmount, memo, symbol: payCurrency });
   if (!txId) throw new Error('payment cancelled or failed');
 
   // 5) Brief settle delay so the tx is indexed before /upload checks
@@ -4069,7 +4077,7 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   try {
     upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
   } catch (e) {
-    throw new Error(`upload failed (${e.message}) — your ${payAmount} CNOOBS payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments for a manual refund.`);
+    throw new Error(`upload failed (${e.message}) — your ${payAmount} ${payCurrency} payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments for a manual refund.`);
   }
   if (!upRes.ok) {
     const j = await upRes.json().catch(() => ({}));
