@@ -1596,6 +1596,16 @@ socket.on('lobby-users', (users) => {
     el.className = 'lobby-user' + (isMe ? ' me' : '') + (isSel ? ' selected' : '') + (isFed ? ' federated' : '');
   });
   updateCreatePanel();
+  // v0.16.18 — DM tab user picker (`renderDmUserList`) was previously only
+  // refreshed on `switchLobbyTab('dm')` clicks. Result: if the user was sitting
+  // on the DM tab when a new federated user came online (e.g. after a slow
+  // fed reconnect), the picker chip row stayed empty until they re-clicked
+  // the tab. Now refresh whenever the lobby user list changes, but only if
+  // the DM tab is actually visible (cheap no-op otherwise).
+  const dmTabContent = document.getElementById('tab-dm');
+  if (dmTabContent && dmTabContent.classList.contains('active')) {
+    try { renderDmUserList(); } catch (_) {}
+  }
 });
 
 function updateCreatePanel() {
