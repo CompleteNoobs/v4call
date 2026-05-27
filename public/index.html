@@ -707,7 +707,10 @@
             <span id="dm-panel-to">Direct Message</span>
             <span id="dm-panel-rate" class="loading">checking…</span>
           </div>
-          <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.1: jpeg, ≤10MB)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
+            <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
+          </div>
         </div>
         <div id="dm-panel-body">
           <textarea id="dm-panel-input" placeholder="Type your message…" rows="1" disabled></textarea>
@@ -825,7 +828,7 @@
 <!-- ATTACHMENT UPLOAD MODAL (ipfs-gate v0.1) -->
 <div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
-    <h3 style="color:var(--accent);">📎 Send Attachment</h3>
+    <h3 id="att-modal-title" style="color:var(--accent);">📎 Send Attachment</h3>
     <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.1: jpeg only, ≤10MB, 7-day TTL.</p>
 
     <div style="margin-top:10px;">
@@ -835,8 +838,9 @@
     </div>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">RECIPIENTS (room members)</div>
+      <div id="att-recipients-label" style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">RECIPIENTS (room members)</div>
       <div id="att-recipients" style="display:flex;flex-direction:column;gap:4px;max-height:140px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:6px;background:var(--bg);"></div>
+      <div id="att-dm-rate-line" style="display:none;font-size:0.7rem;color:var(--accent);margin-top:6px;"></div>
     </div>
 
     <div style="margin-top:10px;">
@@ -1694,6 +1698,18 @@ async function openDmPanel(username) {
   // Subsequent opens are a no-op so the history doesn't re-append.
   // Live `lobby-dm` events still flow normally; the message-level dedup in
   // addLobbyMsg also prevents duplicates if both signals ever overlap.
+  // v0.16.17 — also fetch persisted dm-attachments for this conversation.
+  // CID-level dedup in addAttachmentBubble guards against reconnect replays.
+  if (!dmHistoryLoaded.has(username)) {
+    socket.emit('dm-attachments-history', { withUser: username }, (envs) => {
+      if (Array.isArray(envs)) {
+        for (const env of envs) {
+          try { addAttachmentBubble(env); }
+          catch (e) { console.error('[dm-attachments-history] render error:', e); }
+        }
+      }
+    });
+  }
   if (!dmHistoryLoaded.has(username)) socket.emit('dm-history', { withUser: username }, (history) => {
     dmHistoryLoaded.add(username);
     if (history && history.length > 0) {
@@ -3592,7 +3608,10 @@ function decryptMsg(ciphertext) {
 //   envelope-sig: <cid>|<size>|<sender>|<created>|<expires>|<room>|<kind>|<recipients_sorted_csv>
 // Inner blob: [12-byte nonce][AES-GCM( [4-byte BE len][JSON header][file bytes] )]
 const ATTACH_MAX_BYTES = 10 * 1024 * 1024;
-let attachState = null;  // { file, gatewayUrl, recipients: Set<username> }
+// v0.16.17 — `mode` is 'room' (existing) or 'dm' (new). dmTarget/dmRate/
+// dmCurrency/dmEscrow populated only in 'dm' mode and copied from the open
+// DM panel so the modal reflects the same paid-DM gate the panel sees.
+let attachState = null;  // { mode, file, gatewayUrl, recipients, dmTarget?, dmRate?, dmCurrency?, dmEscrow? }
 
 function bytesToHex(bytes) {
   return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -3680,9 +3699,16 @@ function buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader 
   if (!/^[a-z0-9][a-z0-9.\-]*$/.test(u)) throw new Error('bad uploader');
   return `ipfs-gate:upload-proof:v1:${ciphertextSha256Hex}:${reservationId}:${u}`;
 }
-function buildEnvelopeSigInput({ cid, size_bytes, sender, created_at, expires_at, room, kind_hint, per_recipient }) {
+function buildEnvelopeSigInput(env) {
+  const { cid, size_bytes, sender, created_at, expires_at, kind_hint, per_recipient } = env;
   const recipients = Object.keys(per_recipient || {}).map(s => s.toLowerCase()).sort();
-  return `${cid}|${size_bytes}|${sender}|${created_at}|${expires_at}|${room}|${kind_hint}|${recipients.join(',')}`;
+  // v0.16.17 — namespace the "context" slot so DM and room envelopes can never
+  // collide in signature space. Room envelopes keep their original sig form
+  // (raw room name) for backward compat with v0.16.16 persisted envelopes.
+  const context = (env.type === 'dm-attachment')
+    ? `dm:${(env.to_user || '').toLowerCase()}`
+    : env.room;
+  return `${cid}|${size_bytes}|${sender}|${created_at}|${expires_at}|${context}|${kind_hint}|${recipients.join(',')}`;
 }
 async function signRaw(payload) {
   // Sign a raw payload string. Returns hex signature compatible with
@@ -3748,7 +3774,11 @@ function openAttachModal() {
   if (!currentRoom) return;
   if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }
   const remembered = getRememberedGateway();
-  attachState = { file: null, gatewayUrl: remembered, recipients: new Set() };
+  attachState = { mode: 'room', file: null, gatewayUrl: remembered, recipients: new Set() };
+  // Reset modal chrome for room mode (in case it was previously opened in DM mode).
+  document.getElementById('att-modal-title').textContent = '📎 Send Attachment';
+  document.getElementById('att-recipients-label').textContent = 'RECIPIENTS (room members)';
+  document.getElementById('att-dm-rate-line').style.display = 'none';
   document.getElementById('att-file-input').value = '';
   document.getElementById('att-file-meta').textContent = '';
   const sel = document.getElementById('att-gateway-select');
@@ -3774,13 +3804,74 @@ function closeAttachModal() {
   document.getElementById('attachment-modal').style.display = 'none';
   attachState = null;
 }
+
+// v0.16.17 — DM attachment entry point. Reads the open DM panel's rate state
+// so the modal shows the combined cost (gate CNOOBS + paid-DM rate) before
+// the user commits. Refuses to open if encryption is locked or DM rates are
+// still loading / the user is blocked.
+function openDmAttachModal() {
+  if (!dmPanelTarget) { alert('Open a DM first — click the 💬 button on a user.'); return; }
+  if (dmPanelBlocked) { alert('You cannot send attachments to this user.'); return; }
+  if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }
+  const target = dmPanelTarget;
+  const rate   = dmPanelRate || 0;
+  const cur    = dmPanelCurrency || 'HBD';
+  const esc    = dmPanelEscrow || ESCROW_ACCOUNT;
+  const remembered = getRememberedGateway();
+  attachState = {
+    mode: 'dm', file: null, gatewayUrl: remembered, recipients: new Set([target]),
+    dmTarget: target, dmRate: rate, dmCurrency: cur, dmEscrow: esc
+  };
+  document.getElementById('att-modal-title').textContent = `📎 Send Attachment → @${target}`;
+  document.getElementById('att-recipients-label').textContent = 'RECIPIENT';
+  const rateLine = document.getElementById('att-dm-rate-line');
+  if (rate >= 0.001) {
+    rateLine.textContent = `+ ${rate.toFixed(3)} ${cur} to @${target} (paid-DM rate, separate Keychain prompt)`;
+    rateLine.style.color = 'var(--accent)';
+  } else {
+    rateLine.textContent = `Free DM to @${target} — only the ipfs-gate fee applies.`;
+    rateLine.style.color = 'var(--green)';
+  }
+  rateLine.style.display = 'block';
+
+  document.getElementById('att-file-input').value = '';
+  document.getElementById('att-file-meta').textContent = '';
+  const sel = document.getElementById('att-gateway-select');
+  const opts = Array.from(sel.options).map(o => o.value);
+  if (opts.includes(remembered)) {
+    sel.value = remembered;
+    document.getElementById('att-gateway-custom').style.display = 'none';
+  } else {
+    sel.value = '__custom__';
+    const custom = document.getElementById('att-gateway-custom');
+    custom.value = remembered;
+    custom.style.display = 'block';
+  }
+  document.getElementById('att-status-note').textContent = 'Ready.';
+  document.getElementById('att-upload-btn').disabled = false;
+  populateAttachRecipients();
+  document.getElementById('attachment-modal').style.display = 'flex';
+  refreshAttachCostLine(remembered);
+}
 function populateAttachRecipients() {
+  const c = document.getElementById('att-recipients');
+  c.innerHTML = '';
+
+  // v0.16.17 — DM mode: locked single-row showing the conversation target.
+  // The audience is always {sender, target}, both encrypted at upload time.
+  if (attachState && attachState.mode === 'dm') {
+    const target = attachState.dmTarget;
+    const row = document.createElement('label');
+    row.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.78rem;color:var(--text);';
+    row.innerHTML = `<input type="checkbox" checked disabled data-user="${escapeHtml(target)}"/><span style="color:var(--purple);font-size:0.7rem;">●</span><span>@${escapeHtml(target)}</span>`;
+    c.appendChild(row);
+    return;
+  }
+
   // v0.16.15 — show the union of (live room members) ∪ (allowlist), so users
   // can address an attachment to someone who's allowlisted but not currently in
   // the room. The recipient picks it up from room history (chunk 2B) on next
   // join, or from the away-notification dot (chunk 2C) if they're in lobby.
-  const c = document.getElementById('att-recipients');
-  c.innerHTML = '';
   const inRoomByName = new Map();
   for (const u of Object.values(roomUsers)) {
     if (u && u.username && u.username !== myUsername) inRoomByName.set(u.username, u);
@@ -3878,7 +3969,14 @@ async function confirmSendAttachment() {
     .filter(cb => cb.checked).map(cb => cb.dataset.user);
   document.getElementById('att-upload-btn').disabled = true;
   try {
-    await sendAttachment({ file, gatewayUrl: gwRaw, recipientUsernames: recipients });
+    const mode = attachState.mode || 'room';
+    const dmContext = mode === 'dm' ? {
+      target:   attachState.dmTarget,
+      rate:     attachState.dmRate || 0,
+      currency: attachState.dmCurrency || 'HBD',
+      escrow:   attachState.dmEscrow
+    } : null;
+    await sendAttachment({ file, gatewayUrl: gwRaw, recipientUsernames: recipients, mode, dmContext });
     setAttachStatus('✓ Sent.', false);
     setTimeout(closeAttachModal, 700);
   } catch (e) {
@@ -3887,7 +3985,38 @@ async function confirmSendAttachment() {
     document.getElementById('att-upload-btn').disabled = false;
   }
 }
-async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
+async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmContext }) {
+  mode = mode || 'room';
+  // v0.16.17 — DM mode: charge the paid-DM rate (if any) BEFORE the gate flow.
+  // If this fails the user hasn't burned the CNOOBS payment yet. If the gate
+  // flow fails LATER, the DM rate payment is the cost of the broken upload —
+  // surfaced in the catch path with a clear note.
+  let msgId = null, textMemo = null, textPaid = 0, textCurrency = 'HBD';
+  if (mode === 'dm') {
+    if (!dmContext || !dmContext.target) throw new Error('DM target missing');
+    if (dmContext.rate >= 0.001) {
+      if (!window.hive_keychain) throw new Error('Hive Keychain required to pay the paid-DM rate.');
+      msgId        = 'dma_' + Date.now();
+      textMemo     = `v4call:text:${msgId}:${dmContext.target}`;
+      textPaid     = dmContext.rate;
+      textCurrency = dmContext.currency;
+      setAttachStatus(`Paying ${textPaid.toFixed(3)} ${textCurrency} paid-DM rate (Keychain)…`);
+      const isToken = (textCurrency !== 'HBD' && textCurrency !== 'HIVE');
+      const paid = isToken
+        ? await new Promise(resolve => {
+            const json = JSON.stringify({
+              contractName: 'tokens', contractAction: 'transfer',
+              contractPayload: { symbol: textCurrency, to: dmContext.escrow, quantity: textPaid.toFixed(3), memo: textMemo }
+            });
+            window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Transfer ${textPaid.toFixed(3)} ${textCurrency} (paid-DM rate)`, r => resolve(r.success));
+          })
+        : await new Promise(resolve =>
+            window.hive_keychain.requestTransfer(myUsername, dmContext.escrow, textPaid.toFixed(3), textMemo, textCurrency, r => resolve(r.success))
+          );
+      if (!paid) throw new Error('paid-DM rate cancelled — attachment not sent.');
+    }
+  }
+
   // 1) Encrypt
   setAttachStatus('Encrypting…');
   const { blob, rawKey, plaintextSize } = await buildInnerBlob({ file, sender: myUsername });
@@ -4001,20 +4130,38 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames }) {
 
   // 8) Build + sign envelope
   const created_at = new Date().toISOString();
-  const envelope = {
-    v: 1, type: 'room-attachment', room: currentRoom, cid,
-    size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
-    created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
-    kind_hint: 'image', per_recipient,
-    original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
-  };
+  const envelope = (mode === 'dm')
+    ? {
+        v: 1, type: 'dm-attachment', to_user: dmContext.target, cid,
+        size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
+        created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
+        kind_hint: 'image', per_recipient,
+        original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
+      }
+    : {
+        v: 1, type: 'room-attachment', room: currentRoom, cid,
+        size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
+        created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
+        kind_hint: 'image', per_recipient,
+        original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
+      };
   setAttachStatus('Signing envelope (Keychain)…');
   envelope.envelope_sig = await signRaw(buildEnvelopeSigInput(envelope));
   if (!envelope.envelope_sig) throw new Error('envelope signature cancelled');
 
-  // 9) Emit
-  setAttachStatus('Broadcasting to room…');
-  rsock().emit('room-attachment', envelope);
+  // 9) Emit. DM mode also includes the paid-DM payment fields so the server
+  // can verify the on-chain transfer and disburse net/fee. Server emits the
+  // envelope back to both parties (recipient + sender echo).
+  if (mode === 'dm') {
+    setAttachStatus('Delivering to recipient…');
+    socket.emit('dm-attachment', {
+      ...envelope,
+      msgId, textMemo, textPaid, textCurrency
+    });
+  } else {
+    setAttachStatus('Broadcasting to room…');
+    rsock().emit('room-attachment', envelope);
+  }
 }
 
 // Full 3-audience attachment bubble: recipient (auto-decrypt + thumbnail + save),
@@ -4053,7 +4200,10 @@ function timeUntilExpiry(isoExpires) {
 // ciphertext → unique CID) so they're a safe dedup key. Cleared on leaveRoom.
 const renderedAttachmentCids = new Set();
 function addAttachmentBubble(env) {
-  const c = document.getElementById('messages');
+  // v0.16.17 — DM attachments render into the DM messages column; room
+  // attachments keep their original target (#messages inside the active room).
+  const isDm = env && env.type === 'dm-attachment';
+  const c = document.getElementById(isDm ? 'dm-messages' : 'messages');
   if (!c) return;
   if (env && env.cid && renderedAttachmentCids.has(env.cid)) return;
   if (env && env.cid) renderedAttachmentCids.add(env.cid);
@@ -4065,7 +4215,10 @@ function addAttachmentBubble(env) {
   wrap.className = 'msg-bubble ' + (isSelf ? 'self' : 'other');
 
   const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const recipientLabel = audience.map(a => '@' + escapeHtml(a)).join(', ');
+  // For DM mode, the audience is always {sender, target} — labelling all of
+  // them on the sender's bubble just adds "@self" noise. Show only the others.
+  const labelAudience = isDm ? audience.filter(a => a !== env.sender) : audience;
+  const recipientLabel = labelAudience.map(a => '@' + escapeHtml(a)).join(', ');
 
   const sigSlotId = 'att-sig-' + env.cid.slice(0, 16);
   const expSlotId = 'att-exp-' + env.cid.slice(0, 16);
@@ -4218,6 +4371,51 @@ socket.on('room-attachments-history', (envelopes) => {
   for (const env of envelopes) {
     try { addAttachmentBubble(env); }
     catch (e) { console.error('[room-attachments-history] render error:', e); }
+  }
+});
+
+// ── v0.16.17 — DM attachment listeners ─────────────────────────────────────
+// Live envelope event. Server echoes to both sender and recipient so each
+// renders the same bubble. Bubble routes into #dm-messages (the DM tab).
+// CIDs are unique per encryption so the dedup Set protects against the
+// reconnect-replays-history path the room flow already handles.
+socket.on('dm-attachment', (env) => {
+  try { addAttachmentBubble(env); }
+  catch (e) { console.error('[dm-attachment] handler error:', e); }
+});
+
+// History replay — fired by openDmPanel's ack-callback when the conversation
+// is opened for the first time this session.
+socket.on('dm-attachments-history', (payload) => {
+  const envs = Array.isArray(payload) ? payload : (payload && payload.envelopes);
+  if (!Array.isArray(envs) || !envs.length) return;
+  for (const env of envs) {
+    try { addAttachmentBubble(env); }
+    catch (e) { console.error('[dm-attachments-history] render error:', e); }
+  }
+});
+
+socket.on('dm-attachment-error', (m) => {
+  const text = (m && m.error) ? m.error : (typeof m === 'string' ? m : 'attachment send failed');
+  addLobbyMsg({ type: 'system', text: `⚠ Attachment: ${text}`, context: 'dm' });
+});
+
+socket.on('dm-attachment-payment-required', ({ to, rate, currency }) => {
+  const cur = currency || 'HBD';
+  addLobbyMsg({
+    type: 'system',
+    text: `@${to} requires ${rate.toFixed(3)} ${cur} per attachment — reopen the DM and click 📎 to retry.`,
+    context: 'dm'
+  });
+});
+
+socket.on('dm-attachment-sent', ({ to, textPaid, textCurrency }) => {
+  if (textPaid > 0) {
+    addLobbyMsg({
+      type: 'system',
+      text: `✓ Attachment delivered to @${to} (paid ${textPaid.toFixed(3)} ${textCurrency || 'HBD'}).`,
+      context: 'dm'
+    });
   }
 });
 
