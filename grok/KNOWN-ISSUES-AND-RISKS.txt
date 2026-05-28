@@ -16,40 +16,167 @@ Nothing here is a currently reported production breaker on the
 known 3-server federation.
 
 ================================================================================
-1. CALL INITIATION PRECHECK INCONSISTENCY (INHERITED FROM RECOVERY NOTES)
+1. CALL INITIATION PRECHECK INCONSISTENCY  — CLOSED 2026-05-28
 ================================================================================
 
-Observation:
+ORIGINAL ITEM (kept for context):
   `dm-precheck` + `recipientStatus()` guard was added for text DMs and
   attachments (v0.16.18) so that a user visible only via Nostr (or
   WS-reconnecting) does not cause Keychain prompts for payments that
-  will later fail to route.
+  will later fail to route. The equivalent guard for voice/video call
+  initiation was noted as lower priority.
 
-  The equivalent guard for **voice/video call initiation** was noted
-  as lower priority at the time and may not have been wired up on the
-  client side before the Keychain ring-fee + deposit prompt.
+CLOSED IN: v0.16.19 — fed-flap-recovery quest, 2026-05-28.
 
-Risk:
-  A user sees a Nostr-only user in the lobby, clicks Call, gets
-  prompted for payment, payment succeeds on-chain, then the server
-  cannot route the call-invite because there is no WS federation path.
+Implementation (Claude, lead dev — Grok delegated as a second-mind /
+suggest-by-diff role for this quest):
+  - public/index.html `initiateCall(callee, callType)`:
+      Added `await dmPrecheck(callee)` at the very top, BEFORE the
+      `get-all-rates` socket call and BEFORE any Keychain prompt.
+      Bails with explicit system messages for status='offline'
+      and status='nostr-only' (distinguishes "fed disabled" vs
+      "fed reconnecting"). dmPrecheck is reused as-is — the
+      underlying server handler is generic recipient routing,
+      not DM-specific. A rename to `recipient-precheck` is a
+      separate cleanup (would need coordinated client/server
+      rollout).
+  - server.js `call-user` handler (existing offline branch around
+      line 3497):
+      Used existing `nostrSeenDomain()` helper to distinguish
+      "truly offline" from "visible via Nostr but no WS transport"
+      and surface that in the user-facing reason. The existing
+      ring-fee refund path is unchanged — funds were already safe
+      because of the pre-existing refund branch; only the error
+      message is now accurate. Refund memo changed from
+      `:offline` to `:unreachable` to reflect the broader meaning.
+  - Documented in FED-RECOVERY-NOTES.md Lesson 11 and CLAUDE.md
+      Known Gotchas (top of list).
 
-  The payment would need manual refund or the operator has to handle
-  it via ledger.
+Severity: Closed.
 
-Evidence in code:
-  - server.js has full recipientStatus() and the dm-precheck socket path.
-  - The federated call-invite handler (case 'call-invite') correctly
-    checks lobbyUsers on the receiving side.
-  - No obvious `call-precheck` equivalent in the greps performed.
+================================================================================
+1B. NEW (2026-05-28) — VERIFICATION FETCH TIMEOUT + 5-MIN NEGATIVE CACHE
+    CAUSES FEDERATION FLAPPING THAT WON'T SELF-HEAL FOR 5 MINUTES
+================================================================================
 
-Recommendation:
-  When green-lit, audit the call start path in public/index.html and
-  add the same precheck-before-payment pattern. Use the existing
-  recipientStatus helper on the server.
+Symptom observed in production 2026-05-28 (immediately after the
+dup-FEDERATION_PEERS fix in Lesson 11):
+  All three servers have FEDERATION_PEERS configured correctly.
+  v4call.com logs:
+    [federation] Inbound peer connection — waiting for hello
+    [federation] ✗ Peer verification failed for hive-book.com:
+        Cannot fetch v4call-server.json: The operation was aborted
+        due to timeout
+  hive-book.com + call.completenoobs.com logs (the other side):
+    [federation] Outbound connected: wss://v4call.com/federation
+    [federation] Disconnected from wss://v4call.com/federation — retry in 2s
+    [federation] ✓ Peer verified: @v4call.com   ← this line arrives AFTER disconnect
+    [federation] Connecting to wss://v4call.com/federation...
+  → endless flap; pairs involving v4call.com don't stay up.
 
-Severity: Medium (only affects paid cross-server calls; free calls
-          and same-server calls are unaffected).
+Root cause (in server.js, NOT a config bug):
+  _fetchPeerVerifyFile() uses `AbortSignal.timeout(8000)` — eight
+  seconds covering DNS + TCP + TLS + HTTP for the entire fetch of
+  the peer's /.well-known/v4call-server.json. Slow networks, IPv6
+  dead-ends, or a momentarily slow nginx on the peer all blow this
+  budget.
+
+  AND: peerVerifyCache has PEER_VERIFY_TTL_FAIL = 5 * 60 * 1000
+  (5 minutes). One timeout locks the peer out as "verified=false"
+  for 300 seconds. Even if the network recovers in 10 seconds,
+  every reconnect during the cache window hits the cached failure
+  and instantly closes.
+
+  Combined effect: a single transient timeout cascades into a
+  5-minute outage. Reconnect logic retries every 2s but each
+  retry hits the cache and bounces.
+
+Why hive-book.com sees the "✓ Peer verified" AFTER the disconnect
+  log: hive-book.com's OWN verifyPeer() runs in parallel with
+  v4call.com's. v4call.com's side fails fast → closes the socket.
+  hive-book.com sees the close → logs Disconnected. A moment
+  later hive-book.com's own verify (a separate HTTPS fetch in the
+  OTHER direction) completes and logs ✓. The log line ordering
+  is correct; it's just the timing of two independent
+  verifications crossing.
+
+DIFFICULTY OF DISTINGUISHING ROOT CAUSE:
+  The "timeout" message in the logs doesn't tell us WHERE the
+  budget was eaten — DNS, TLS handshake, HTTP round-trip. Need
+  out-of-band testing to know. The diagnostic command we ran:
+    docker compose exec app sh -c \
+      "time wget -qO- --timeout=20 https://peer/.well-known/v4call-server.json"
+  separates "node fetch is too aggressive" from "actual network
+  problem" from "container DNS broken."
+
+DIAGNOSTIC RESULT (2026-05-28, from v4call.com):
+  - Container wget to hive-book.com well-known: 0.06s
+  - Container wget to call.completenoobs.com well-known: 0.07s
+  - Host curl to both: 0.07s each
+  - DNS resolution inside container: instant, correct IPs
+
+→ Network is FAST. DNS / TLS / routing all healthy. The 8s timeout
+  budget should be more than enough for any genuine fetch. The
+  Node-side fetch is somehow eating 8s+ on a 70ms round-trip.
+
+LIKELY ROOT CAUSES (now confirmed not network-side):
+  1. Event-loop pressure: heavy concurrent work (Nostr publishes
+     every 30s × 4 relays, federation handshakes from 2 passive
+     peers retrying every 2s, Hive scans, hivecrypt sig
+     verification, SQLite calls) blocks the loop long enough for
+     AbortSignal.timeout(8000) to fire before the fetch's I/O
+     actually issues. v4call.com is hit hardest because it's the
+     ONLY passive server (lex largest of the three) — it receives
+     TWO reconnection cycles every 2s, twice the verify load of
+     either of the others.
+  2. 5-minute negative cache locks the FIRST transient failure
+     in for 300s. During that window every reconnect hits the
+     cached fail and bounces — looks like the network is broken
+     but it's just stale cache.
+
+FIXES APPLIED (v0.16.19, this session):
+  A. _fetchPeerVerifyFile timeout bumped 8s → 15s. Logged with a
+     comment explaining the diagnostic finding that motivated it
+     (network is fast, must be loop pressure).
+
+  B. PEER_VERIFY_TTL_FAIL split into two named constants:
+     PEER_VERIFY_TTL_STRUCTURAL (5min, kept) for bad-sig / wrong-
+     claim / domain-mismatch / expired / missing-pubkey style
+     failures that can't change without operator action; and
+     PEER_VERIFY_TTL_TRANSIENT (30s, new) for fetch timeouts,
+     network errors, HTTP 5xx, and Hive-RPC hiccups. New
+     `transient` flag stored alongside `result` in
+     peerVerifyCache. fail() takes a second arg `transient = false`
+     and every call-site now explicitly tags its category.
+     Fetcher tags HTTP 5xx as transient and 4xx as structural via
+     err._transient. Lookup branch in verifyPeer reads
+     cached.transient and picks the right TTL.
+
+  C. NOT applied — IPv4 forcing was a hypothesis pre-diagnostic.
+     Diagnostic ruled out network as the cause, so no need.
+
+  D. NOT applied as part of this fix — the 30s transient cache
+     means cascades self-clear in 30s. An admin-flush endpoint
+     would still be a nice-to-have follow-up (also closes item
+     4 below) but is no longer urgent.
+
+DEPLOY NOTES:
+  - server.js changed → operators must `docker compose down &&
+    docker compose build --no-cache && docker compose up -d`
+    (not just down/up — code changed).
+  - In-process peerVerifyCache is cleared by the restart, so the
+    fix takes effect immediately on all three servers.
+  - Watch logs for `[federation] ✗ Peer verification failed` —
+    should now appear at most every 30s during a real transient
+    failure window, not every 2s. If it reappears after 30s of
+    quiet, that's a genuine repeated failure (worth investigating
+    event loop pressure further).
+  - Recommended deploy order: restart v4call.com FIRST (it's the
+    passive node currently in the worst flap state), then the
+    other two. They'll naturally reconnect within seconds.
+
+Severity: CLOSED (fix in v0.16.19). Re-open if logs show the same
+pattern after deploy.
 
 ================================================================================
 2. NO APPLICATION-LEVEL HEARTBEAT ON WS FEDERATION SOCKETS
@@ -202,18 +329,27 @@ SUMMARY OF RISK LEVELS
 High (needs attention before wider use):
   - None currently observed in the federation layers.
 
-Medium (should be closed in next focused session):
-  - Call initiation precheck parity with DM/attachment path.
+Medium (closed or future scale):
+  - 1. Call initiation precheck parity — CLOSED v0.16.19.
+  - 1B. Verification fetch timeout + cache cascade — CLOSED v0.16.19
+        (timeout bump + cache TTL category split).
+  - WS socket heartbeat / liveness detection — would have caught 1B
+    earlier by detecting zombie sockets. Still on the future hardening
+    list but the 30s transient cache means the failure mode 1B was
+    causing no longer cascades for 5 minutes.
 
 Low (hardening / future scale):
-  - WS socket heartbeat / liveness detection
-  - Verify cache invalidation UX
+  - Verify cache invalidation UX (operator endpoint to flush one
+    domain) — was tightly coupled to 1B, now optional. With the 30s
+    transient TTL most need-to-flush scenarios self-resolve.
   - Hive scan pagination (when >20 servers)
   - Paid call restart survival (broader, not fed-specific)
   - Lower-coordination peer introduction
 
-All of the above are safe to leave as-is for the existing production
-deployment.
+Active production deployment status: federation is healthy after
+v0.16.19 deploys (timeout bump + cache TTL split). All three pairs
+expected to stay up. Logs should show ✗ verification failure at most
+every 30s during genuine transient blips, not every 2s.
 
 ================================================================================
 END OF KNOWN ISSUES
