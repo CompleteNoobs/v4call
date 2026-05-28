@@ -152,6 +152,34 @@ Was: `renderDmUserList()` only ran on `switchLobbyTab('dm')` click. If new users
 
 Now: `lobby-users` socket handler also calls `renderDmUserList()` if the DM tab is currently active. Same pattern likely applies to any other "click-to-refresh" panels — audit when adding new ones.
 
+### Lesson 11 — Duplicate `FEDERATION_PEERS=` lines silently dedup (last-wins)
+
+**Symptom (2026-05-28):** Three-server mesh. Lobby presence worked (Nostr Phase D was up). cnoobz@hive-book.com would flicker in and out of call.completenoobs.com's lobby every minute or so. DMs/calls between those two were broken. The third leg (call ↔ v4call.com) worked perfectly.
+
+**Root cause:** Each server's `.env` had **two** `FEDERATION_PEERS=` lines instead of one comma-separated line:
+```
+FEDERATION_PEERS=wss://hive-book.com/federation
+FEDERATION_PEERS=wss://v4call.com/federation
+```
+Dotenv parsing is **last-wins** — `process.env.FEDERATION_PEERS` only sees the second URL. The first is silently dropped, no warning, no log line. Effective state per server:
+- call.completenoobs.com → only `v4call.com` in its peer list
+- v4call.com → only `call.completenoobs.com`
+- hive-book.com → only `v4call.com`
+
+Cross with the domain tiebreaker (smaller initiates: `call.completenoobs.com < hive-book.com < v4call.com`) and you get: call ↔ v4call up, hive-book ↔ v4call up, **call ↔ hive-book has no WSS link in either direction**. Nostr presence still made cnoobz visible on call.completenoobs.com, but only for the 5-min TTL window of each heartbeat — hence the flicker.
+
+**Fix:** One line per `.env`, comma-separated:
+```
+FEDERATION_PEERS=wss://hive-book.com/federation,wss://v4call.com/federation
+```
+Then `docker compose down && docker compose up -d` (no rebuild — `.env` is mounted).
+
+**Server-side safety net (v0.16.19+):** Boot-time scan reads `.env` directly and warns on every duplicate key. Log line: `[config] ⚠ multiple FEDERATION_PEERS lines in .env — dotenv keeps only the LAST. Use comma-separated form.` Same for any other env vars that have ever been documented as comma-separated lists. Doesn't change behaviour — only surfaces the silent dedup loudly so the next operator sees it within 5 seconds of `docker compose up`.
+
+**Why it was easy to miss:** The original `.env.example` only showed the single-peer form (one URL per server). Adding a third server naturally invites copy-paste a second line. The example block has since been rewritten with explicit two-peer comma-separated examples plus a giant comment warning. Same fix lives in `CLAUDE.md` Known Gotchas.
+
+**The bigger meta-lesson (call it the "WSS-disable-during-Nostr-test trap"):** Whenever you disable WSS fed to isolate-test Nostr, write a one-line note in the .env right next to the change, and a follow-up task to re-enable it. The user lost weeks because Nostr presence made everything look healthy while the WSS pipes had silently regressed. Adjacent rule: any time WS and Nostr can mask each other, default to running BOTH during testing and only isolate one when explicitly verifying that one's behaviour.
+
 ## Current state of the code (v0.16.18)
 
 ### Two new client-side helpers

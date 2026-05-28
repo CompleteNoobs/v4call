@@ -1,0 +1,221 @@
+# Current Known Issues, Risks, and Open Items — Federation Only
+# Captured during deep analysis session (no source edits performed)
+
+================================================================================
+STATUS NOTE
+================================================================================
+
+This file reflects the state of the code after reading the latest
+server.js + nostr-fed.mjs + all design/recovery docs.
+
+Many items that were open in FED-RECOVERY-NOTES.md (May 2026) have
+been closed by the v0.16.15–v0.16.18 work. What remains is either
+low-priority hardening or "nice to have for larger federations".
+
+Nothing here is a currently reported production breaker on the
+known 3-server federation.
+
+================================================================================
+1. CALL INITIATION PRECHECK INCONSISTENCY (INHERITED FROM RECOVERY NOTES)
+================================================================================
+
+Observation:
+  `dm-precheck` + `recipientStatus()` guard was added for text DMs and
+  attachments (v0.16.18) so that a user visible only via Nostr (or
+  WS-reconnecting) does not cause Keychain prompts for payments that
+  will later fail to route.
+
+  The equivalent guard for **voice/video call initiation** was noted
+  as lower priority at the time and may not have been wired up on the
+  client side before the Keychain ring-fee + deposit prompt.
+
+Risk:
+  A user sees a Nostr-only user in the lobby, clicks Call, gets
+  prompted for payment, payment succeeds on-chain, then the server
+  cannot route the call-invite because there is no WS federation path.
+
+  The payment would need manual refund or the operator has to handle
+  it via ledger.
+
+Evidence in code:
+  - server.js has full recipientStatus() and the dm-precheck socket path.
+  - The federated call-invite handler (case 'call-invite') correctly
+    checks lobbyUsers on the receiving side.
+  - No obvious `call-precheck` equivalent in the greps performed.
+
+Recommendation:
+  When green-lit, audit the call start path in public/index.html and
+  add the same precheck-before-payment pattern. Use the existing
+  recipientStatus helper on the server.
+
+Severity: Medium (only affects paid cross-server calls; free calls
+          and same-server calls are unaffected).
+
+================================================================================
+2. NO APPLICATION-LEVEL HEARTBEAT ON WS FEDERATION SOCKETS
+================================================================================
+
+Current state:
+  The server-to-server WS links rely on:
+    - TCP keepalive
+    - Natural traffic (presence, user-online, etc.)
+    - The reconnect logic on 'close'
+
+  There is no explicit ping/pong or "are you still there?" timer on
+  the federationPeers sockets.
+
+Contrast with Nostr side:
+  Explicit heartbeats + 30-min resubscribe because public relays are
+  known to be lossy.
+
+Risk:
+  A half-open connection (one side's network stack died, the other
+  side's TCP socket doesn't know yet) can persist for a long time
+  (minutes to hours depending on OS TCP settings) before a send
+  finally fails and triggers the 'close' handler + cleanup.
+
+For a small trusted federation this has been acceptable. For larger
+or less reliable networks it becomes a source of "ghost peers that
+look connected but don't deliver".
+
+Low-cost improvement:
+  Add a lightweight application ping every 30–60s on federation
+  sockets (with a matching pong handler) and treat missing pong
+  as a signal to close/reconnect. Would make the two layers more
+  consistent.
+
+Severity: Low for current usage. Worth doing before public
+          multi-operator growth.
+
+================================================================================
+3. HIVE SCAN 20-POST LIMIT + NO PAGINATION
+================================================================================
+
+In scanV4CallDirectory():
+  params: [{ tag: 'v4call-server', limit: 20 }]
+
+Comment in code explicitly says:
+  "Once there are more than ~20 active v4call servers, swap in
+   start_author/permlim pagination here."
+
+Current mitigation:
+  Nostr discovery (Phase C) is the primary fast path. Hive scan is
+  fallback or can be disabled.
+
+Still, if someone runs a pure-Hive or NOSTR_HIVE_FALLBACK=true
+  deployment with many servers, older servers can age out of the
+  most-recent-20 window until they re-announce.
+
+Severity: Very low today. Documented limitation.
+
+================================================================================
+4. VERIFY CACHE CAN STALE AFTER OPERATOR CONFIG CHANGE
+================================================================================
+
+1h positive TTL on peerVerifyCache.
+
+If an operator:
+  - Rotates their signing key
+  - Changes escrow account
+  - Changes federation_ws URL in the well-known file
+
+...then peers that have a cached positive verification will not
+pick up the change for up to an hour (unless they restart).
+
+On the next actual message send the connection may be in a weird
+state, or the next hello will fail verification with the new file.
+
+Workaround:
+  Restart the observing servers (clears in-memory cache).
+  Or wait for natural expiry.
+
+Improvement:
+  Admin action to "re-verify peer X now" or flush cache for a domain.
+  Easy to add later.
+
+Severity: Low. Rare operation.
+
+================================================================================
+5. NO PERSISTENCE FOR ACTIVE FEDERATED CALLS ACROSS SERVER RESTART
+================================================================================
+
+This is noted in the broader backlog (not just federation):
+  "Settlement state persistence (paid sessions survive server restart)"
+
+If a server hosting a federated call restarts mid-call:
+  - The temp Socket.io connections from the remote browsers die.
+  - The caller-server's credit-burn timer and cap timer are in-memory.
+  - The callee-server's view of the call is also lost.
+
+Current behavior:
+  The call just ends abruptly for everyone. Disbursement may or
+  may not have happened depending on timing.
+
+This is a broader paid-call robustness issue, not specific to the
+federation transport, but it surfaces most visibly in cross-server
+calls.
+
+Not urgent for the current small federation.
+
+================================================================================
+6. MANUAL COORDINATION TAX WHEN ADDING A NEW PEER
+================================================================================
+
+To add a 4th server today:
+  1. Operator of new server publishes Hive announce + signs well-known.
+  2. nGate scans (or they wait for the 2h Hive scan on existing servers).
+  3. Each existing operator must manually approve via /admin/peers/
+     or the admin-peers.html UI.
+  4. The new server must list the existing servers in its own
+     FEDERATION_PEERS (or discover + approve them).
+
+There is no "trust on first use with audit log" or automatic
+"introduce via a mutual friend" flow.
+
+This is acceptable for a small, high-trust group of operators who
+know each other on Hive. It will become painful at larger scale.
+
+This is more of a "future feature" than a bug (see also the
+User-Added-Servers design notes for a related but different UX).
+
+================================================================================
+7. MIXED-VERSION ROLLOUTS RELY ON OPERATOR DISCIPLINE
+================================================================================
+
+New additive federation message types are silently ignored by
+older peers (no error, no fallback).
+
+Only v0.4 structural changes (room invites) have an explicit
+protocol_version gate.
+
+For the current three operators who coordinate releases this is
+fine. In a larger federation it creates a "feature is sometimes
+missing" class of support tickets.
+
+Mitigation already in docs:
+  "Plan rollouts so paired servers upgrade together."
+
+================================================================================
+SUMMARY OF RISK LEVELS
+================================================================================
+
+High (needs attention before wider use):
+  - None currently observed in the federation layers.
+
+Medium (should be closed in next focused session):
+  - Call initiation precheck parity with DM/attachment path.
+
+Low (hardening / future scale):
+  - WS socket heartbeat / liveness detection
+  - Verify cache invalidation UX
+  - Hive scan pagination (when >20 servers)
+  - Paid call restart survival (broader, not fed-specific)
+  - Lower-coordination peer introduction
+
+All of the above are safe to leave as-is for the existing production
+deployment.
+
+================================================================================
+END OF KNOWN ISSUES
+================================================================================
+Update this file whenever a new production war story appears.

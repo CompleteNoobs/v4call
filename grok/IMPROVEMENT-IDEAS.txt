@@ -1,0 +1,168 @@
+# Federation Improvement Ideas (Low Priority / Future Scale)
+# These are deliberately NOT acted on in this session.
+# Only documented for when the federation grows or a dedicated hardening pass happens.
+
+================================================================================
+PHILOSOPHY
+================================================================================
+
+The current federation is deliberately "good enough for a small group
+of known operators who communicate on Hive anyway."
+
+Many of these ideas only become worth the complexity when you have
+5–10+ independent operators or you want to reduce operational load.
+
+Do not gold-plate. The existing design (WS for payloads + Nostr for
+visibility + Hive as trust root + explicit manual approval) has
+survived real production debugging and multiple latent bug discoveries.
+
+================================================================================
+WS LAYER HARDENING
+================================================================================
+
+1. Application-level heartbeat / ping-pong on federation sockets
+   - Current reliance on TCP keepalive + incidental traffic is fine
+     for low-churn, low-latency private links.
+   - Adding a 30–45s application ping with missing-pong → close()
+     would make detection of half-open sockets deterministic and
+     consistent with the Nostr heartbeat story.
+   - Very small diff. Low risk.
+
+2. Configurable federation socket timeouts / max idle
+   - Expose a couple of env vars instead of hard numbers in the
+     reconnect logic.
+   - Minor.
+
+3. Better visibility into per-peer socket health
+   - /debug-state or a new lightweight /federation-status endpoint
+     that shows for each approved peer: connected?, direction,
+     last_message_at, last_error, etc.
+   - Would reduce "ssh in and grep logs" for operators.
+
+4. Admin "force re-verify + reconnect" action for a specific peer
+   - Currently the only ways to clear the 1h verify cache or kick
+     a stuck socket are restart or waiting.
+   - Small admin endpoint + button in admin-peers.html.
+
+================================================================================
+NOSTR LAYER HARDENING
+================================================================================
+
+1. Better key management UX (optional)
+   - Current file + one-time NSEC seed is correct and secure.
+   - A future operator-facing page that lets them paste an nsec,
+     writes the file, shows the npub, and tells them what to put
+     in the Hive announce would be friendlier than "edit .env then
+     restart and read the log".
+   - Still server-side only. Never expose the key to the browser.
+
+2. Relay health dashboard (very optional)
+   - Track ACCEPTED / REJECTED / UNREACHABLE per relay over time
+     and surface it somewhere.
+   - Overkill for 3–5 operators. Useful if you start depending on
+     many public relays or have 10+ servers.
+
+3. Configurable presence payload size / sampling
+   - Right now we publish the full list of local usernames on every
+     change/heartbeat.
+   - For very large servers (hundreds of concurrent users) this could
+     become chatty. A simple "we have N online, here are the first K
+     for discovery" + separate "full list on demand" is possible but
+     not needed yet.
+
+================================================================================
+OPERATIONAL / DISCOVERY IMPROVEMENTS
+================================================================================
+
+1. "Introduce" flow for new peers (social, not technical)
+   - Today adding a new server requires every existing operator to
+     independently discover + approve it.
+   - A signed "I vouch for this new server" note (published on Hive
+     or as a Nostr event) that existing servers can ingest and
+     pre-populate in discoveredPeers with a "vouched by X" badge
+     would lower the coordination tax.
+   - Still requires the receiving operator to click approve. No
+     auto-trust.
+
+2. Optional "federation contact" metadata in v4call-server.json
+   - An operator could publish a nostr npub or Hive account or
+     email that other operators can use to reach them when adding
+     a new peer.
+   - Purely optional, display-only in the admin UI.
+
+3. Smarter Hive scan pagination (when >20 servers exist)
+   - The comment in scanV4CallDirectory already calls this out.
+   - Use start_author + permlink for the next page when the first
+     page is full. Trivial once the need appears.
+
+================================================================================
+PAID / CALL ROBUSTNESS (FEDERATION SURFACE)
+================================================================================
+
+1. Call precheck parity (medium priority, see KNOWN-ISSUES)
+   - Ensure the same recipientStatus() guard that protects DMs and
+     attachments also protects the ring-fee + deposit flow for
+     cross-server voice/video calls.
+   - Prevents burning small on-chain payments on unreachable
+     Nostr-only users.
+
+2. Federated call state survival across restart (harder)
+   - Persist enough call state (callId, participants, start time,
+     escrow info) that a recovering server can at least notify the
+     other side "we restarted, call is dead, please settle" instead
+     of leaving funds potentially stuck.
+   - This is more of a general paid-call robustness project than
+     pure federation work.
+
+================================================================================
+TESTING / OBSERVABILITY
+================================================================================
+
+1. Synthetic federation health probe
+   - A tiny internal test that, on a timer or on demand, has each
+     server send a signed "ping" envelope to every approved peer and
+     records round-trip + delivery success in the ledger or a
+     simple metric file.
+   - Gives operators a historical graph instead of "it was working
+     when I last looked at logs".
+
+2. Chaos-friendly test harness (very future)
+   - Script that can simulate relay unreachability, WS socket close
+     at random times, slow Hive RPC, etc., while running a small
+     set of cross-server DM/call scenarios.
+   - Overkill until there are regular contributors or paid support
+     for the platform.
+
+================================================================================
+THINGS THAT SHOULD PROBABLY NEVER BE CHANGED (OR ONLY WITH EXTREME CARE)
+================================================================================
+
+- The "dumb transport" boundary between nostr-fed.mjs and server.js.
+- Recipient-side enforcement (rule #15) for every paid cross-server flow.
+- The two-gate model (crypto verify + explicit operator approval).
+- Domain tiebreaker logic (simple and proven).
+- The fact that Nostr can never remove a user that WS still reports.
+- All money movement staying on Hive (no Nostr payments or channels
+  in the federation layer).
+
+These have been load-bearing through multiple real debugging sessions
+and latent bug discoveries. Changing them has high blast radius.
+
+================================================================================
+PRIORITIZATION SUGGESTION
+================================================================================
+
+Next time someone says "let's improve the federation":
+
+1. (Medium) Close the call-initiation precheck gap (parity with DMs).
+2. (Low) Add WS application heartbeat for faster half-open detection.
+3. (Low) Admin "force re-verify this peer" action.
+4. (Future scale) One of the social "introduce new peer" ideas.
+5. Everything else waits for either real pain or >5 independent
+   operators.
+
+================================================================================
+END OF IMPROVEMENT IDEAS
+================================================================================
+Revisit only when the current operational load or growth makes one
+of these painful. Until then, the existing design is a strength.

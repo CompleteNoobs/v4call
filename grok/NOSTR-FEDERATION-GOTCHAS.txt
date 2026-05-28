@@ -1,0 +1,239 @@
+# Nostr Federation Gotchas (Phases B / C / D)
+# v4call server-side Nostr usage for discovery + presence
+# Module: nostr-fed.mjs (deliberately isolated, ESM)
+
+================================================================================
+PHILOSOPHY (MOST IMPORTANT THING TO INTERNALIZE)
+================================================================================
+
+nostr-fed.mjs is a **dumb, best-effort transport**.
+
+- It never trusts anything it receives.
+- It never crashes v4call (every path is try/catch + ERR log).
+- All security decisions are made by the callbacks in server.js
+  (discoverPeerViaNostr, recordNostrPresence) which run the real
+  Hive-anchored verifyPeer().
+
+If you ever feel tempted to "make it smarter" inside the module, stop.
+The separation is the feature.
+
+================================================================================
+1. npub vs HEX — THE SILENT FAILURE CLASS
+================================================================================
+
+nGate (the relay-side gate) whitelists **hex** pubkeys.
+
+- When publishing from v4call: nostr-tools handles it, but you must
+  consistently use hex internally (pkHex).
+- When reading events: ev.pubkey is always hex.
+- The "ACTION NEEDED" log on first boot tells the operator to put
+  the **npub** form into their Hive announce post (human friendly).
+
+Trap:
+  A confused operator pastes hex into the Hive post or npub into
+  some internal comparison. Phase C will happily discover the peer
+  via the event, then the pubkey check in recordNostrPresence will
+  fail with a scary "pubkey mismatch" warning, and the peer will
+  never get presence.
+
+Current mitigation:
+  server.js stores both forms where needed, and the Option B
+  canonical (12-field) now carries nostr_hex which is Hive-signed,
+  so the authoritative binding is safe.
+
+Rule: Be obsessive about labeling every variable "hex" or "npub".
+
+================================================================================
+2. THREE-STATE PUBLISH RESULT (LEARNED IN PHASE A SPIKE)
+================================================================================
+
+pool.publish() does not throw on unreachable relays.
+
+From the code in publishOnce():
+  - rejected promise     → real REJECTED (usually "blocked: not on
+                            relay whitelist" until nGate scans)
+  - resolved with string
+    starting "connection failure" → UNREACHABLE (relay down or firewalled)
+  - resolved cleanly      → ACCEPTED
+
+This distinction is critical. A down public relay must never look
+like "the gated relay rejected us for policy reasons".
+
+If you add more publish paths, reuse this pattern or you will
+mis-diagnose relay health.
+
+================================================================================
+3. RELAY LOSSINESS → HEARTBEATS + PERIODIC RESUB + MULTI-RELAY
+================================================================================
+
+Public Nostr relays are lossy by nature (no strong delivery
+guarantees, variable retention).
+
+Defenses built in:
+  - Heartbeat every NOSTR_PRESENCE_HEARTBEAT_SECONDS (default 60s)
+    even when user list is unchanged.
+  - 30-minute full resubscribe (teardown + new subscribeMany) on
+    both the discovery and presence subscriptions.
+  - Publish to >= 2 gated + >= 2 public relays by default.
+  - Dedup by event id on receive.
+  - Newest-per-domain (or per d-tag for presence) wins.
+
+For a small, trusted federation this is overkill but cheap. When
+you add the 10th server or start relying on public relays more
+heavily, these become load-bearing.
+
+================================================================================
+4. OWN KEY LIVES IN data/nostr-key.json — BIND MOUNT OR DIE
+================================================================================
+
+The key file is the server's long-term Nostr identity.
+
+- Must be under the `./data/nostr` bind mount in docker-compose.
+- Survives `docker compose down && build --no-cache && up`.
+- Lost forever if the host data/ directory is deleted.
+
+Same pattern as the SQLite ledger DBs and approved-peers.json.
+
+One-time NOSTR_NSEC seed in .env is deliberately read **once** and
+then the operator is told to remove it. The file becomes the source
+of truth.
+
+Rotation story (documented):
+  Generate new key (operator or future tooling) → update the
+  NOSTR_PUBKEY: line in the Hive announce post via server-announce.html
+  → republish the post → nGate's next scan ages out the old key from
+  the relay whitelist. No special "key rotation event" protocol at
+  current scale.
+
+================================================================================
+5. PHASE D TRUST MODEL — TWO BINDING LEVELS
+================================================================================
+
+When recordNostrPresence receives a v4call-presence event:
+
+1. expected = expectedNostrHexForDomain(domain)
+     = discoveredPeers[domain].verified_nostr_hex (preferred)
+       or .nostr_pubkey (Phase C poke fallback)
+
+2. If the peer's well-known file was signed with the 12-field Option B
+   canonical, verified_nostr_hex is covered by the Hive posting key
+   signature. This is the strong form.
+
+3. If the peer is still on the old 9-field canonical, we fall back
+   to the binding that arrived in the Phase C discovery event (weaker
+   "poke" binding, but still better than trusting the presence event
+   itself).
+
+If neither matches the event.pubkey → drop with warning.
+
+This is why a bad actor cannot simply publish fake presence for a
+domain they don't control: they would need the corresponding Nostr
+private key that nGate only gives to the operator who controls the
+Hive account that signed the announce.
+
+================================================================================
+6. "WS WINS — NOSTR ONLY ADDS" RECONCILIATION
+================================================================================
+
+nostrAdditivePresenceSnapshot() deliberately does:
+  for each Nostr-visible domain:
+    extra = Nostr users for domain MINUS WS users for domain
+    only emit the extras
+
+Properties:
+  - Healthy WS link → almost always empty diff → zero visual change
+    for users.
+  - WS lagging or down → Nostr users appear with a "source: nostr"
+    hint (currently rendered similarly to federated).
+  - Nostr can never make a user disappear that WS still reports.
+  - When WS recovers, the next broadcastLobby() naturally drops the
+    Nostr-only entries.
+
+This is the minimal-surprise design. It was chosen after considering
+more complex "merge with timestamps" approaches and rejecting them.
+
+================================================================================
+7. APPROVAL IS THE VISIBILITY GATE (v0.16.15 HARD LESSON)
+================================================================================
+
+Before the fix:
+  Phase D made cross-server users appear in every server's lobby as
+  soon as they published presence — even if the receiving server had
+  never approved them.
+
+  This was a spam / social-engineering surface (low cost for attacker:
+  real Hive account + domain + signed well-known + Nostr key + post
+  the announce).
+
+After the fix:
+  - recordNostrPresence and nostrAdditivePresenceSnapshot both check
+    approvedPeers.has(domain)
+  - Discovery (Phase C) still populates discoveredPeers for
+    /admin-peers.html review regardless of approval.
+  - Approving a peer later causes their next presence heartbeat (or
+    the next broadcastLobby) to surface them — no extra work.
+
+Meta-rule captured:
+  "Approval is the operator's *I want to interact with this server*
+  signal. Every channel that surfaces names in front of users must
+  gate on it. Discovery is allowed to be independent."
+
+================================================================================
+8. FED_DISCOVERY_MODE + PRESENCE GATING INTERACTIONS
+================================================================================
+
+Env knobs (current):
+  FED_DISCOVERY_MODE=hive | nostr | both
+  FED_PRESENCE_VIA_NOSTR=true|false
+  NOSTR_SUBSCRIBE_ENABLED (derived)
+
+Presence publish/subscribe is only enabled when:
+  FED_PRESENCE_VIA_NOSTR && NOSTR_SUBSCRIBE_ENABLED
+
+Discovery subscribe is controlled separately.
+
+You can run:
+  - Pure Hive discovery + no Nostr presence (classic mode)
+  - Nostr discovery + Nostr presence (fast modern mode)
+  - Nostr discovery only, presence off (for testing)
+
+The code has guards so you don't accidentally publish presence to
+relays you aren't even subscribed to.
+
+================================================================================
+9. D-TAG COLLISION AVOIDANCE
+================================================================================
+
+Discovery events:   d = <domain>
+Presence events:    d = <domain>:users
+
+This prevents a replaceable event for one purpose from overwriting
+the other on relays that honor NIP-78 d-tag semantics.
+
+The subscribe filters are also separated by #t tag
+(v4call-server vs v4call-presence), so even if d-tags collided the
+subscribers wouldn't process the wrong type.
+
+================================================================================
+10. DOCKERFILE COPY TRAP (NON-NOSTR BUT HIT DURING NOSTR ROLLOUT)
+================================================================================
+
+When nostr-fed.mjs was added as a top-level .mjs file, the Dockerfile
+did not automatically pick it up because it uses explicit COPY lines
+for server.js, public/, etc.
+
+Symptom on first Nostr-enabled build:
+  "Cannot find module './nostr-fed.mjs'" inside the container even
+  though it was in the git tree.
+
+Fix: explicit COPY line for the new server-side file.
+
+Any future top-level server file (not under public/ or scripts/) will
+need the same treatment. The project convention is to note this in
+the build plan.
+
+================================================================================
+END OF NOSTR GOTCHAS
+================================================================================
+The Nostr layer has been unusually clean because the "dumb transport"
+rule was enforced from day one. Preserve it.

@@ -1,0 +1,159 @@
+# Federation Deep-Dive Session Summary
+# Performed under strict "no app file edits" rule — all artifacts in grok/
+
+Date: 2026 (this session)
+Focus: WS federation (/federation) + Nostr federation (Phases B/C/D) only
+Goal: Surface every bug, gotcha, and piece of institutional knowledge so
+      future noobs (human or AI) don't have to re-learn the hard way.
+
+================================================================================
+WHAT WAS DONE
+================================================================================
+
+1. Created v4call/grok/ (per the explicit rule established at the start
+   of the conversation).
+
+2. Read every relevant design document in full:
+   - FEDERATION-BUILD-SPEC.md (complete v0.2–v0.4 history + wire formats)
+   - FED-RECOVERY-NOTES.md (chronological war stories and meta-rules)
+   - NOSTR-FED-BUILD-PLAN.md + PHASE-D-DESIGN.md (full arc A→D)
+   - Supporting notes
+
+3. Read the complete implementation:
+   - nostr-fed.mjs (all 423 lines, every phase)
+   - All federation-related sections of server.js (verifyPeer, hello,
+     fed* functions, connection management, presence reconciliation,
+     Nostr glue code, recipientStatus, etc.)
+
+4. Produced five structured, noob-friendly analysis files inside grok/:
+
+   - FEDERATION-ANALYSIS-2026-OVERVIEW.txt
+     High-level architecture + current health + why the two-layer
+     design exists and must be kept separate.
+
+   - WS-FEDERATION-GOTCHAS.txt
+     11 concrete lessons (Nostr vs WS visibility, domain tiebreaker,
+     promise queue, approval persistence footgun, mixed-version
+     behavior, Hive scanner fragility, etc.)
+
+   - NOSTR-FEDERATION-GOTCHAS.txt
+     10 lessons specific to the Nostr layer (npub/hex, three-state
+     publish results, trust model for Phase D, approval-as-visibility
+     gate, d-tag separation, bind-mount key story, etc.)
+
+   - KNOWN-ISSUES-AND-RISKS.txt
+     Current (post-2026-05 work) open or low-priority items. Most
+     historical pain from the recovery notes has already been closed.
+     One medium item (call precheck parity) remains.
+
+   - NOOB-OPERATOR-CHECKLIST.txt
+     Step-by-step diagnostic commands + the exact log patterns to
+     look for + the most common operator mistakes. Written so a
+     complete noob can debug "users show but can't DM" in minutes.
+
+   - IMPROVEMENT-IDEAS.txt
+     Prioritized list of future hardening work. Emphasizes that the
+     current design is deliberately minimal and has already proven
+     itself through real production incidents.
+
+================================================================================
+OVERALL FEDERATION HEALTH ASSESSMENT
+================================================================================
+
+Strengths (preserve these):
+  - Extremely clean separation between payload transport (WS) and
+    visibility (Nostr).
+  - Consistent recipient-side enforcement (design rule #15) across
+    DMs, attachments, room invites.
+  - Defensive coding in nostr-fed.mjs (never crashes the main app).
+  - Promise queue on federation sockets prevents ordering races.
+  - Domain tiebreaker is simple and effective.
+  - Persistence model (data/ bind mounts) is consistent after the
+    v0.16.15 lesson.
+  - The three latent bug classes surfaced by Phase D testing were
+    all closed with good meta-rules captured in the docs.
+
+Current state:
+  - WS federation is mature and has carried real paid cross-server
+    traffic (DMs + attachments + calls + rooms) across multiple
+    production servers.
+  - Nostr Phases A–D are fully shipped and integrated (discovery
+    seconds instead of 2h, presence additive to WS).
+  - The original "users sometimes don't show across servers" problem
+    is solved.
+  - The "visible via Nostr but actually unreachable" footgun is
+    mitigated by recipientStatus + dm-precheck + clear messaging.
+
+Remaining risk:
+  - Mostly low. One medium item (call initiation should have the
+    same precheck guard as DMs before Keychain prompts).
+  - A few nice-to-have observability and liveness improvements that
+    only matter at larger scale.
+
+The federation is in a healthy, battle-tested state for its current
+user base (small number of cooperating operators).
+
+================================================================================
+KEY META-RULES CAPTURED (FOR FUTURE WORK)
+================================================================================
+
+From the recovery notes and code review (repeat these to any new
+contributor):
+
+1. Recipient's home server is the only one trusted to enforce the
+   recipient's policies. Caller server = courier + witness only.
+
+2. Nostr is for visibility + discovery. WS is for everything that
+   moves value or requires real-time signaling. Never conflate them.
+
+3. Approval is the operator's "I want to interact" signal. Every
+   user-facing surface (lobby presence, callable handles) must gate
+   on it. Discovery can be independent.
+
+4. When a signed canonical payload can conditionally grow (the
+   Option B Nostr trailer), the signer and every verifier must stay
+   byte-for-byte identical. Cross-reference the two implementations.
+
+5. New additive federation message types are silently dropped by
+   older peers. Plan coordinated rollouts for features, not just
+   bugfixes.
+
+6. Any change that gates loading of persisted approvals on "federation
+   currently enabled" will re-create the v0.16.15 surprise.
+
+================================================================================
+ARTIFACTS CREATED (ALL SAFE TO READ / SHARE)
+================================================================================
+
+/home/noob/CAI/v4call/grok/
+  ├── FEDERATION-ANALYSIS-2026-OVERVIEW.txt
+  ├── WS-FEDERATION-GOTCHAS.txt
+  ├── NOSTR-FEDERATION-GOTCHAS.txt
+  ├── KNOWN-ISSUES-AND-RISKS.txt
+  ├── NOOB-OPERATOR-CHECKLIST.txt
+  ├── IMPROVEMENT-IDEAS.txt
+  └── SESSION-SUMMARY.txt   (this file)
+
+These are the complete hand-off for any future session or any new
+person (or AI) who needs to work on federation.
+
+================================================================================
+NEXT ACTIONS (FOR THE USER / FUTURE SESSIONS)
+================================================================================
+
+- If you want any of the improvement ideas turned into concrete
+  .diff files → explicitly say "green light to work on X" and I will
+  produce reviewable diffs inside this grok/ directory only.
+
+- The call precheck gap is the only medium item. It would be a
+  good focused follow-up (read the call initiation path in
+  index.html + the server handler, then produce a minimal safe diff).
+
+- The checklist is ready to be printed or turned into a wiki page
+  for operators.
+
+This session is complete. All knowledge captured. No app code touched.
+
+================================================================================
+END OF SESSION
+================================================================================

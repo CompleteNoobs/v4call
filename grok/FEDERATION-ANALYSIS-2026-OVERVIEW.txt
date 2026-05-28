@@ -1,0 +1,199 @@
+# v4call Federation Analysis — Deep Dive (WS + Nostr)
+# Date: ~2026-06 (analysis performed this session)
+# Scope: ONLY federation (WSS server-to-server + Nostr discovery/presence layers)
+# Rule followed: All findings documented here. No source files were edited.
+
+================================================================================
+EXECUTIVE SUMMARY
+================================================================================
+
+v4call has a **two-layer federation architecture** that is deliberately
+separated (this is one of the strongest design decisions in the codebase):
+
+1. **WS Federation (v0.2 → v0.4)** — The reliable payload transport.
+   - Persistent WebSocket between approved servers on `/federation`
+   - Carries: DMs (text + attachments), 1:1 call signaling, room invites,
+     payment notifications, presence deltas, call lifecycle.
+   - Trust root: Hive posting-key signature over v4call-server.json
+   - Approval gate on top of cryptographic verification.
+   - Money always moves on Hive; servers only relay + re-verify.
+
+2. **Nostr Federation (Phases A–D, shipped v0.16.15–v0.19 era)** — The fast
+   visibility + discovery layer.
+   - Uses kind 30078 (NIP-78 replaceable events) on nGate-gated + public relays.
+   - Phase C: server discovery (replaces or augments 2h Hive scan)
+   - Phase D: cross-server presence (additive only — "WS wins")
+   - Trust root: Same Hive posting key. Nostr events are untrusted "pokes"
+     that trigger Hive-anchored re-verification via verifyPeer().
+
+**Critical mental model for any noob (or future AI):**
+- If users appear in the lobby but DMs/calls fail with "not online" → 
+  WS transport is down or not approved. Nostr is only showing ghosts.
+- Nostr presence + FEDERATION_PEERS commented out = beautiful lie.
+- The two systems are intentionally redundant in different dimensions.
+
+Production reality (from docs + code): 3+ servers (call.completenoobs.com,
+hive-book.com, v4call.com) have run the full stack successfully. Cross-server
+DMs, paid DMs, attachments (ipfs-gate), 1:1 calls, and multi-party rooms all
+demonstrated.
+
+================================================================================
+WS FEDERATION — ARCHITECTURE & STATE
+================================================================================
+
+Core files:
+- server.js (federation logic scattered but well-commented)
+- No separate lib/ for WS fed (everything lives in the main file)
+
+Key in-memory state (resets on restart):
+- `federationPeers` (domain → { ws, connected, users: Map, isOutbound, ... })
+- `pendingFederatedInvites` (15-min TTL sweep)
+- `peerVerifyCache` (1h positive / 5min negative)
+
+Persistent state (data/logs/ — survives rebuilds via bind mount):
+- `approved-peers.json` — operator's trust decisions
+
+Startup sequence (when FEDERATION_ENABLED):
+1. loadApprovedPeers() — always runs now (v0.16.15 fix). Seeds from
+   FEDERATION_PEERS env + disk file. Disk wins for prior approvals.
+2. For each FEDERATION_PEERS URL: fedConnectPeer(url)
+3. Hive scan (if HIVE_SCAN_ENABLED) after 5s, then every 2h
+4. Dynamic import of nostr-fed.mjs (non-blocking, never crashes v4call)
+
+Connection model:
+- Domain tiebreaker (`fedShouldInitiate`): lex smaller domain initiates
+  outbound. Larger domain stays passive. Prevents flapping on simultaneous
+  connect.
+- Inbound: /federation upgrade → federationWss → fedAttachSocket
+- Outbound: new WebSocket(url) → fedAttachSocket
+- Every socket gets a Promise queue (`_processQueue`) so async hello
+  verification cannot cause later messages to be processed out of order
+  or dropped.
+
+Hello handshake (both directions):
+- Immediately after socket open, sender emits `hello` with:
+    domain, name, version, protocol_version, hive_account, escrow
+- Receiver:
+  1. verifyPeer(domain, claimedAccount) — fetches HTTPS well-known,
+     checks canonical payload + Hive posting sig, caches result.
+  2. If not verified → close(1008, "verification failed")
+  3. If not in approvedPeers → close(1008, "not approved")
+  4. fedRegisterPeer (tiebreaker logic for duplicate sockets)
+  5. Record verified_nostr_* fields from Option B canonical
+  6. Send local presence snapshot back
+  7. broadcastLobby()
+
+verifyPeer() is the single most important security function for the entire fed.
+
+================================================================================
+NOSTR FEDERATION — ARCHITECTURE (nostr-fed.mjs + server.js glue)
+================================================================================
+
+Module is deliberately "dumb transport + callbacks". All trust lives in server.js.
+
+Key safety properties (excellent):
+- Everything wrapped; errors logged but never crash v4call.
+- Dynamic import, fire-and-forget.
+- Three-state publish result tracking (ACCEPTED / REJECTED / UNREACHABLE).
+- Periodic 30-min resubscribe as belt-and-braces against half-open sockets.
+- Own-pubkey skip on both publish and subscribe paths.
+
+Phase B (publish own announce):
+- Per-server key in `data/nostr-key.json` (chmod 600, bind-mounted).
+- Bootstraps: file → one-time NOSTR_NSEC seed → generate.
+- Publishes kind 30078, d=domain, t=v4call-server on boot + every
+  NOSTR_REPUBLISH_HOURS.
+- Only when FED_DISCOVERY_MODE != 'hive'.
+
+Phase C (subscribe + discovery):
+- Subscribes t=v4call-server.
+- On event: extract domain only (content is display-only), call
+  discoverPeerViaNostr() callback.
+- Callback runs the FULL verifyPeer() (Hive-anchored). Nostr event is
+  just a fast poke.
+- Newest-per-domain + dedupe by event id.
+- Populates discoveredPeers (same structure as Hive scan) → surfaces in
+  /admin-peers.html for manual approval. Never auto-approves.
+
+Phase D (presence):
+- Separate filter t=v4call-presence, d=`<domain>:users` (avoids collision
+  with discovery d=domain).
+- Throttled publish (default 30s) + heartbeat (60s).
+- On receipt: recordNostrPresence() does strict pubkey check against
+  expectedNostrHexForDomain() (prefers verified_nostr_hex from Option B
+  Hive canonical, falls back to Phase C poke binding).
+- nostrCrossFedPresence map.
+- TTL sweep (default 5min) drops stale domains.
+- Reconciliation: `nostrAdditivePresenceSnapshot()` returns ONLY users
+  not already present via WS federationPeers. WS always wins.
+- Visibility gated on approvedPeers (v0.16.15 hard lesson).
+
+`recipientStatus(username)` is the new (v0.16.18+) single source of truth
+used by dm-precheck before any Keychain prompt.
+
+================================================================================
+WHAT WORKS WELL (strengths to preserve)
+================================================================================
+
+- Recipient-side enforcement (design rule #15) is consistently applied for
+  DMs, attachments, room invites. Caller server is never trusted as sole
+  policy decider.
+- Separation of concerns between WS (money + signaling) and Nostr
+  (visibility) is excellent and has already saved the project multiple times.
+- Promise queue on federation sockets prevents a class of race conditions
+  that would otherwise be extremely painful to debug.
+- Domain tiebreaker is simple, deterministic, and works.
+- verifyPeer + approvedPeers two-gate model is the right security posture.
+- Nostr module is defensive and observable (good logs for ACCEPTED/REJECTED/
+  UNREACHABLE).
+- Persistence story (data/ bind mounts for keys, DBs, approved-peers.json)
+  is consistent and operator-friendly after the v0.16.15 lesson.
+- Canonical payload cross-check between server-sign.html and _verifyPayloadString
+  was fixed after a latent bug was discovered during Phase D rollout.
+
+================================================================================
+CURRENT FEDERATION HEALTH (as of this analysis)
+================================================================================
+
+From code + historical docs, the federation is in a mature state:
+
+- WS layer has been stable for cross-server DMs/calls/rooms/attachments
+  across 3 production servers.
+- Nostr Phases A–D fully shipped and proven (including the three latent
+  bug classes that Phase D testing surfaced and closed).
+- The "users don't show across servers" original pain is solved (Nostr
+  presence + fast discovery).
+- The "visible but unreachable" footgun is mitigated by recipientStatus +
+  dm-precheck (and the clear error messages).
+
+Remaining risk areas are documented in the companion files in this grok/
+directory.
+
+================================================================================
+SOURCES CONSULTED (for traceability)
+================================================================================
+
+- FEDERATION-BUILD-SPEC.md (full v0.2–v0.4 history + wire formats)
+- FED-RECOVERY-NOTES.md (chronological lessons from real debugging)
+- NOSTR-FED-BUILD-PLAN.md + NOSTR-FED-PHASE-D-DESIGN.md (complete arc)
+- nostr-fed.mjs (full source)
+- server.js (federation blocks, verifyPeer, fed* functions, Nostr glue,
+  recipientStatus, presence reconciliation)
+- Various .md files for context (CLAUDE.md excerpts, STATUS.md)
+
+All analysis performed under the strict "no direct edits" rule. All proposed
+changes would be emitted only as .diff files inside this grok/ tree after
+explicit green light.
+
+================================================================================
+NEXT STEPS FOR THIS SESSION
+================================================================================
+
+See the other .txt files in this directory for:
+- WS-FEDERATION-GOTCHAS.txt
+- NOSTR-FEDERATION-GOTCHAS.txt  
+- KNOWN-ISSUES-AND-RISKS.txt (current open items)
+- NOOB-OPERATOR-CHECKLIST.txt (diagnostic commands + failure patterns)
+- IMPROVEMENT-IDEAS.txt (future hardening, low priority)
+
+End of overview.

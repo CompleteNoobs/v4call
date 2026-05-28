@@ -2707,6 +2707,27 @@ async function initiateCall(callee, callType = 'voice') {
     pendingCallRoom = null; hideCallingOverlay();
   }
 
+  // v0.16.19 — Routing pre-flight (mirrors the DM-send guard added in v0.16.18).
+  // Without this, ringing a Nostr-only-visible user would charge the ring fee
+  // via Keychain before the server discovered there's no WS transport to
+  // deliver the call-invite. Re-uses dmPrecheck — the server-side
+  // dm-precheck handler is generic recipient-routing, not DM-specific. See
+  // FED-RECOVERY-NOTES.md Lesson 11 / "WSS-disable-during-Nostr-test trap"
+  // for why this gap mattered.
+  const callRouting = await dmPrecheck(callee);
+  if (callRouting.status === 'offline') {
+    addLobbyMsg({type:'system',text:`⚠ @${callee} is offline — can't ring.`});
+    return;
+  }
+  if (callRouting.status === 'nostr-only') {
+    if (callRouting.federationEnabled === false) {
+      addLobbyMsg({type:'system',text:`⚠ @${callee} is on ${callRouting.domain || 'peer'} (visible via Nostr presence), but this server has WS federation disabled — calls can't route. No payment charged.`});
+    } else {
+      addLobbyMsg({type:'system',text:`⏳ @${callee} is shown online via Nostr but WS federation is reconnecting — try again in ~30s. No payment charged.`});
+    }
+    return;
+  }
+
   // Fetch callee's applicable rates via socket (server knows caller identity)
   addLobbyMsg({type:'system',text:`Checking @${callee}'s rates…`});
   socket.emit('get-all-rates', { callee, callType }, (response) => {

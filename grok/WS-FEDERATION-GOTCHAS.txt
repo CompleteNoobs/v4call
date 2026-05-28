@@ -1,0 +1,252 @@
+# WS Federation Gotchas & Hard Lessons
+# v4call server-to-server WebSocket layer (/federation)
+# For any future noob, AI, or operator debugging cross-server DMs/calls/rooms
+
+================================================================================
+1. THE #1 CONFUSION: NOSTR PRESENCE + WS TRANSPORT ARE NOT THE SAME THING
+================================================================================
+
+Symptom:
+  Lobby shows @user@other.com with a server badge.
+  DM or call to them immediately fails with "not online" or confusing errors.
+  Logs on sender show "visible via Nostr but WS federation not connected".
+
+Root cause:
+  `nostrAdditivePresenceSnapshot()` + `broadcastLobby()` makes Nostr-only
+  users visible in the UI. But `peerForUser()` (used by actual DM/call
+  routing) ONLY looks at `federationPeers` (the WS map).
+
+  When FEDERATION_PEERS is empty or the WS connection is down/reconnecting,
+  you get "beautiful ghosts."
+
+Mitigation (already in code):
+  - `recipientStatus()` returns 'nostr-only' vs 'federated'
+  - `dm-precheck` socket call + client guard before any Keychain prompt
+  - Clear error text: "⏳ Federation reconnecting — wait ~30s" or
+    "WS federation disabled on this server"
+
+Operator diagnostic:
+  docker compose logs app 2>&1 | grep -E "\[federation\]|\[text\]|\[fed-text\]"
+  Look for "Outbound connected" / "Inbound peer connection" / "Peer verified"
+  on the initiator side (the lex-smaller domain).
+
+Prevention rule:
+  Never assume "user is in lobby list" == "I can route a message to them".
+  Always go through recipientStatus() for any new paid flow.
+
+================================================================================
+2. DOMAIN TIEBREAKER — ONLY ONE SIDE INITIATES OUTBOUND
+================================================================================
+
+Code: fedShouldInitiate(domain) = SERVER_DOMAIN.localeCompare(peer) < 0
+
+Consequences:
+  - If your domain is lexicographically larger, you will NEVER see
+    "Connecting to wss://smaller-peer..." in your logs.
+  - The smaller domain is the only one that will log outbound attempts
+    and "Outbound connected".
+  - Both sides can still have the peer in FEDERATION_PEERS; the larger
+    side just skips its fedConnectPeer call.
+
+Debugging trap:
+  Operator on the passive side says "it's not even trying to connect!"
+  Answer: correct — look at the other server's logs.
+
+Historical reason:
+  Without the tiebreaker, simultaneous outbound connects from both sides
+  produced "duplicate" rejections, both sockets closed, exponential backoff
+  on both, flapping forever.
+
+================================================================================
+3. APPROVAL PERSISTENCE FOOTGUN (FIXED v0.16.15 BUT EASY TO RE-INTRODUCE)
+================================================================================
+
+Old bug:
+  loadApprovedPeers() was inside `if (FEDERATION_ENABLED)`.
+  Commenting out FEDERATION_PEERS in .env caused the disk file
+  (approved-peers.json) to be ignored on next boot. Previously-approved
+  peers vanished from memory even though the JSON file was untouched.
+
+Current correct behavior:
+  loadApprovedPeers() runs unconditionally at module load time.
+  .env only seeds additional auto-approved entries.
+
+Gotcha for future changes:
+  Any refactor that gates peer state loading on "is federation enabled right
+  now" will re-introduce this. The operator's intent ("I approved these
+  servers in the past") must survive a temporary FEDERATION_PEERS= empty
+  situation.
+
+================================================================================
+4. PROMISE QUEUE ON SOCKETS IS LOAD-BEARING
+================================================================================
+
+In fedAttachSocket():
+  ws._processQueue = Promise.resolve();
+  ws.on('message', data => {
+    ws._processQueue = ws._processQueue
+      .then(() => fedHandleMessage(ws, data.toString()))
+      .catch(...)
+  });
+
+Why it exists:
+  `case 'hello'` does `await verifyPeer(...)` (network + Hive RPC).
+  During that window, a burst of `presence` or `user-online` messages can
+  arrive. Without the chain, they would be processed while `ws._domain`
+  is not yet set, or before the peer is registered in federationPeers,
+  and would be silently dropped.
+
+Symptom if broken:
+  "Presence from X dropped (peer not yet registered)" warnings,
+  or federated users not appearing until a manual reconnect.
+
+================================================================================
+5. DUPLICATE SOCKET / TIEBREAKER REPLACEMENT LOGIC
+================================================================================
+
+In fedRegisterPeer():
+  If a second socket for the same domain arrives while one is healthy,
+  the code compares `isOutbound` against what `fedShouldInitiate` prefers
+  for that domain, and closes the non-preferred one with "superseded"
+  or "duplicate".
+
+Subtlety:
+  The comparison must be identical on both servers, or you get flapping.
+  It is — both use the same `SERVER_DOMAIN.localeCompare` logic.
+
+Edge case:
+  Network partition + both sides think the other is dead + both initiate
+  at the same time on recovery. Tiebreaker still decides cleanly.
+
+================================================================================
+6. RECONNECT BACKOFF + "HEALTHY SOCKET ALREADY EXISTS" GUARD
+================================================================================
+
+In fedConnectPeer():
+  Before each new outbound attempt:
+    if (existing && existing.ws && existing.ws.readyState === WebSocket.OPEN) {
+      setTimeout(open, 30000); return;
+    }
+
+This prevents the "I already have an inbound from them, don't also
+connect outbound" waste.
+
+Combined with exponential backoff (capped at 60s), this is reasonably
+resilient to transient network blips.
+
+Limitation:
+  No application-level ping/pong or heartbeat on the WS federation
+  socket itself (relies on TCP keepalive + the presence messages that
+  flow naturally). A half-open socket (one side dead, the other doesn't
+  know) will only be detected on the next actual send or TCP timeout.
+
+  Nostr side has explicit 30-min resubscribe + heartbeat publishes
+  precisely because public relays are lossy. The private WS links
+  between known operators are assumed more stable.
+
+================================================================================
+7. VERIFY PEER CACHING + STALE DATA RISK
+================================================================================
+
+Cache: 1h for success, 5min for failure.
+
+Risk:
+  If an operator rotates their v4call-server.json (new nonce, new
+  federation_ws URL, key rotation), a peer that has a positive cache
+  entry will not see the change for up to an hour.
+
+Mitigation in practice:
+  - Most operators don't rotate frequently.
+  - On a hard failure the cache is negative and short-lived.
+  - Restarting the server clears the in-memory cache.
+
+Improvement idea (low priority):
+  Add an admin endpoint to flush the verify cache for a specific domain,
+  or on any manual approval action.
+
+================================================================================
+8. "NOT APPROVED" VS "VERIFICATION FAILED" — DIFFERENT CLOSE CODES
+================================================================================
+
+Both use close(1008, reason), but the log messages are different and
+the operator action is different:
+  - verification failed → something wrong with the peer's well-known or
+    Hive account (or transient fetch failure).
+  - not approved → crypto passed, but this operator hasn't clicked
+    approve yet (or revoked).
+
+The client (peer server) just sees a close. The useful info is only in
+the *receiving* server's logs. This is fine for small federations but
+means operators must coordinate when adding a new peer.
+
+================================================================================
+9. FEDERATED MEMBER EVICTION ON PEER DROP (v0.16 Part B)
+================================================================================
+
+cleanupFederatedMembersForPeer(domain) is called from the 'close' handler
+of federation sockets.
+
+It walks every room, removes members whose homeServer matches the dropped
+domain, emits kicked where appropriate, and may delete empty rooms.
+
+Important:
+  - Only triggers on actual socket close, not transient blips (Socket.io
+    client reconnects are separate from the server-to-server WS).
+  - For federated *room members* (not 1:1 calls), the browser has a
+    direct temp Socket.io to the *host* server. When the federation WS
+    between home and host drops, the host evicts the federated members
+    immediately. The browser then sees its temp socket die or gets a
+    kicked event and cleans up locally.
+
+This is correct "single source of truth" behavior (host server owns the
+room state).
+
+================================================================================
+10. HIVE DISCOVERY SCANNER FRAGILITY (HISTORICAL, PARTIALLY MITIGATED)
+================================================================================
+
+Old problem (documented in FED-RECOVERY-NOTES):
+  - Some Hive nodes returned 200 + no `result` → silently skipped.
+  - Other nodes returned "Bad Gateway" or fetch failures.
+  - Result: "[discovery] No response from Hive tag query" even when
+    posts existed.
+
+Current state (improved):
+  - hivePost() now explicitly logs "200 but no result" with body preview
+    and the error field if present.
+  - HIVE_API_NODES list has been refreshed (dropped anyx.io etc.).
+  - Nostr discovery (Phase C) is now the fast path; Hive scan is
+    belt-and-braces fallback (or can be disabled entirely via
+    FED_DISCOVERY_MODE + NOSTR_HIVE_FALLBACK=false).
+
+Still worth watching:
+  The 20-post limit + most-recent-per-author logic means if you have
+  >20 active v4call servers posting regularly, older servers can fall
+  out of the scan window until they re-post. Pagination is noted as
+  future work in a comment.
+
+================================================================================
+11. MIXED-VERSION FEDERATION — NEW MESSAGE TYPES ARE SILENTLY DROPPED
+================================================================================
+
+In fedHandleMessage switch:
+  unknown type → falls off the end, no error sent back.
+
+Consequence:
+  When you add a new envelope (e.g. dm-attachment in v0.16.17), an
+  un-upgraded peer will simply never react to it. No crash, but the
+  feature is missing.
+
+This is by design (additive changes don't require protocol_version bump).
+Only structural changes that would break older peers (v0.4 room invites)
+use the protocol_version gate in hello.
+
+Operator implication:
+  When rolling out a new cross-server feature, upgrade the paired servers
+  close together. Don't rely on "it will just work across versions" for
+  the new shiny thing.
+
+================================================================================
+END OF WS GOTCHAS
+================================================================================
+Keep this file updated as new war stories are learned.

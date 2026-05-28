@@ -1,0 +1,226 @@
+# Federation Operator Diagnostic Checklist & Commands
+# For complete noobs (and future AIs) debugging "why isn't federation working?"
+
+================================================================================
+MENTAL MODEL — READ THIS FIRST EVERY TIME
+================================================================================
+
+There are TWO independent systems:
+
+1. WS Federation (FEDERATION_PEERS in .env)
+   → Actual transport for DMs, calls, money, rooms.
+   → If this is down, users can be visible (via Nostr) but unreachable.
+
+2. Nostr (FED_DISCOVERY_MODE + FED_PRESENCE_VIA_NOSTR)
+   → Fast discovery + lobby presence only.
+   → Can make the lobby look healthy while the real pipes are broken.
+
+Golden rule:
+  "If it shows in the lobby but DM says not online → check WS first,
+   not Nostr."
+
+================================================================================
+STEP 0 — QUICK HEALTH CHECK (30 seconds)
+================================================================================
+
+On BOTH (all) servers:
+
+```bash
+# Full startup federation logs (critical — do NOT use --tail=0)
+docker compose logs app 2>&1 | grep -E "\[config\]|\[federation\]|\[nostr\]|\[discovery\]|Approved peers|Outbound|Inbound|Peer verified|presence publish" | tail -40
+```
+
+What you want to see on the **initiator side** (lex smaller domain):
+  - [federation] Connecting to wss://...
+  - [federation] Outbound connected: ...
+  - [federation] ✓ Peer verified: ...
+
+On the **passive side**:
+  - [federation] Inbound peer connection — waiting for hello
+  - [federation] ✓ Peer verified: ...
+
+If you only see repeated "Disconnected ... retry in Xs" with growing delays:
+  → TCP/TLS problem (nginx config, certs, firewall, wrong URL in FEDERATION_PEERS).
+
+If you see "Peer verified but NOT APPROVED":
+  → Crypto passed. Operator on this server needs to approve the peer.
+
+================================================================================
+STEP 1 — IS WS FEDERATION ACTUALLY CONNECTED RIGHT NOW?
+================================================================================
+
+```bash
+docker compose logs app 2>&1 | grep -E "\[federation\]" | tail -30
+```
+
+Look for recent:
+  - "Outbound connected" or "Inbound peer connection"
+  - No long gap of only "Disconnected — retry in" lines
+
+Also check live:
+```bash
+docker compose logs -f app | grep "\[federation\]"
+```
+(Let it run while you test a DM from the other server)
+
+================================================================================
+STEP 2 — IS NOSTR PRESENCE / DISCOVERY WORKING?
+================================================================================
+
+```bash
+docker compose logs app 2>&1 | grep -E "\[nostr\]" | tail -40
+```
+
+Good signs:
+  - "identity: npub1..."
+  - "publishing announce for ..."
+  - "✓ ... ACCEPTED" (or "UNREACHABLE" for public relays — that's expected sometimes)
+  - "presence publish (heartbeat): N local user(s)..."
+  - "subscribe: opening..."
+
+Bad signs:
+  - "no relays configured"
+  - Repeated "REJECTED: blocked: not on relay whitelist" long after the
+    Hive announce was posted (means nGate hasn't scanned yet or the
+    NOSTR_PUBKEY line is missing/wrong in the announce post).
+
+================================================================================
+STEP 3 — "USERS SHOW BUT CAN'T DM/CALL" — THE CLASSIC SYMPTOM
+================================================================================
+
+On the **sender** server, have the user attempt the DM while watching logs:
+
+```bash
+docker compose logs -f app | grep -E "\[text\]|\[fed-text\]|\[fed-att\]|lobby-dm|dm-precheck"
+```
+
+Expected happy path for cross-server DM:
+  Sender:
+    [text] @from → @to@peer.com: fedSend(type=dm) issued (ws.open=true ...)
+  Receiver:
+    [fed-text] ← @from@peer → @to: delivered to local socket (sid ...)
+
+Failure patterns:
+  - "visible via Nostr on X but WS federation not connected"
+    → FEDERATION_PEERS is empty or WS link is down on this server.
+  - "recipient NOT in local lobbyUsers — message stored in chat DB only"
+    → Receiver's lobbyUsers state is stale (rare after v0.16.x fixes,
+      usually a reconnect timing issue).
+  - fedSend with ws.open=false
+    → Outbound socket on sender is in a bad state (reconnect logic
+      should recover, but check the federation logs).
+
+Also run the dm-precheck manually if needed (it surfaces the exact
+recipientStatus value the server sees).
+
+================================================================================
+STEP 4 — APPROVAL & DISCOVERY STATE
+================================================================================
+
+Useful debug endpoint (no auth, safe):
+  https://yourserver.com/debug-state
+
+Or hit the admin UI (requires ADMIN_KEY):
+  /admin/peers.html
+
+From logs or code inspection you can also check:
+  - approvedPeers (loaded from disk + env)
+  - discoveredPeers (Hive scan + Nostr discoveries)
+
+If a peer is in discoveredPeers but not approved → that's why the
+WS connection is being rejected with "not approved".
+
+================================================================================
+STEP 5 — COMMON OPERATOR MISTAKES (CHECK THESE IN ORDER)
+================================================================================
+
+1. **FEDERATION_PEERS commented out or wrong URL**
+   - Must be the full wss://.../federation URL of the *peer*.
+   - The peer must have the reverse entry (or rely on the other side
+     initiating due to domain tiebreaker).
+
+2. **Forgot to approve after discovery**
+   - Nostr or Hive scan found the server → it appears in admin-peers.
+   - You still have to click approve (or POST to the endpoint).
+
+3. **Nostr key not in Hive announce / nGate hasn't scanned**
+   - First boot of nostr-fed prints the exact line to add:
+     NOSTR_PUBKEY:npub1...
+   - Until that line is in a published v4call-server post and nGate
+     has scanned, gated relays will REJECT publishes.
+
+4. **After git reset --hard, operator files were not restored**
+   - nginx/v4call.conf and public/.well-known/v4call-server.json are
+     the two files that get clobbered.
+   - The recommended recipe (from recovery notes) keeps bk.* copies
+     committed and cps them back before rebuild.
+
+5. **Rebuild not done after .env change**
+   - .env is mounted at runtime — `docker compose down && up -d` is
+     enough.
+   - Code changes require `--no-cache` build.
+
+6. **Domain tiebreaker confusion**
+   - The lex-larger domain will look "dead" in its own logs.
+   - Always check the smaller domain's logs for the outbound attempts.
+
+================================================================================
+STEP 6 — CLEAN RESTART TEST (WHEN THINGS ARE TRULY CONFUSED)
+================================================================================
+
+On BOTH servers:
+
+```bash
+docker compose down
+# (optional but thorough)
+docker compose build --no-cache
+docker compose up -d
+```
+
+Then wait 30–60 seconds and re-run the Step 0 log grep.
+
+After restart:
+  - Nostr identity should come from the data/nostr-key.json file
+    (you should NOT see "generated a NEW Nostr identity").
+  - WS should attempt outbound (on the initiator) within seconds.
+  - Nostr should publish announce + start presence heartbeats.
+
+================================================================================
+STEP 7 — USEFUL ONE-LINERS
+================================================================================
+
+# Last 20 federation decisions
+docker compose logs app 2>&1 | grep "\[federation\]" | tail -20
+
+# Nostr health
+docker compose logs app 2>&1 | grep "\[nostr\]" | tail -30
+
+# Discovery activity (Hive + Nostr)
+docker compose logs app 2>&1 | grep "\[discovery\]" | tail -20
+
+# Any "error" or "warn" in the last 100 lines that might be federation-related
+docker compose logs app 2>&1 | tail -100 | grep -iE "error|warn|fail|reject|blocked|unreachable" | grep -v "node_modules"
+
+# Watch live while testing a cross-server DM
+docker compose logs -f app | grep -E "\[text\]|\[fed-text\]|\[federation\]"
+
+================================================================================
+WHEN TO PASTE LOGS FOR HELP
+================================================================================
+
+If you need to ask another operator or future Grok/Claude:
+
+1. Run the Step 0 command on BOTH servers after a clean restart.
+2. Capture the output while the user on server A tries to DM a user on
+   server B.
+3. Include the exact FEDERATION_PEERS and FED_DISCOVERY_MODE lines
+   (redact keys).
+4. Note which domain is lex smaller.
+
+This usually lets someone diagnose in <5 minutes.
+
+================================================================================
+END OF CHECKLIST
+================================================================================
+Print this, keep it next to the server, update when new failure modes
+are discovered.
