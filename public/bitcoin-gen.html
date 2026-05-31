@@ -1,0 +1,3315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin Keypair Generator — v4call</title>
+<!--
+=========================================================================
+  Bitcoin Keypair Generator — v4call edition
+  Tool version: 1.0.0
+  Network: Bitcoin Mainnet only
+  Address type: Native SegWit (P2WPKH, bech32, hrp="bc")
+  Derivation: BIP39 → BIP32 → BIP84, path m/84'/0'/0'/0/0
+  Passphrase mode: PBKDF2-SHA512, 100000 iterations, dkLen=32
+                   salt = user salt if provided, else literal "v4call"
+
+  --- 100% offline, 100% self-contained ---
+  This file makes ZERO network requests. You can:
+    - download it,
+    - sha256sum it,
+    - copy it to an air-gapped machine,
+    - open it in Firefox/Chromium/Brave with no internet,
+    - regenerate the SAME keys from the same passphrase/mnemonic, forever.
+
+  --- How this file was built (so you can reproduce it byte-for-byte) ---
+  All cryptography is vendored from audited upstream sources, pasted in
+  verbatim, with no edits beyond a tiny CommonJS-in-IIFE loader shim so
+  Node-style require()/exports work in the browser.
+
+  Vendored libraries (CommonJS source files, fetched from jsDelivr):
+    noble-secp256k1@1.2.14    /index.js
+      sha256: 884c3af0059995aba2939b08d733afe13e3b5f002e10d14036aaeac9f49569ea
+    @noble/hashes@1.3.0       /sha256.js
+      sha256: c35ac8bd4d37bc7e021983b6e030e9924b260313f63a709dfeaeba8095da3206
+    @noble/hashes@1.3.0       /sha512.js
+      sha256: 8da6ad975c6dedea17b5fc01497a47cb2afdcbbc7034d119bfa3bbb58ddfcffd
+    @noble/hashes@1.3.0       /hmac.js
+      sha256: 2530a0c8a8d9e4463c7b7bab3d81d713a5d237331da52d726583e5784b93159a
+    @noble/hashes@1.3.0       /pbkdf2.js
+      sha256: f0323e9d46d951c0bb22fba42825f4b2c6f442bc70aa07c47b75ada506adf841
+    @noble/hashes@1.3.0       /ripemd160.js
+      sha256: 32b719ffdf1647c079ee98060404d138d4e7faa97d60a6f35793acf32a8de2b4
+    @noble/hashes@1.3.0       /utils.js
+      sha256: 57a27a3a825209b364f355888b3962f4ebd7afa34ad2ef9b31823b4533ae29f7
+    @noble/hashes@1.3.0       /_sha2.js
+      sha256: a9cb046115a5daccba3c95d6bbac7b86893ee87d7d867822673210dc76c4e000
+    @noble/hashes@1.3.0       /_u64.js
+      sha256: c053f599d7e4d72b4a941dbca2c40464fb57a33728c9685e3a7e56bc3e613528
+    @noble/hashes@1.3.0       /_assert.js
+      sha256: 6652bf6dba8779c8e66040312d4dce78c5d9d33a8ed1845777e7533af847f856
+    @noble/hashes@1.3.0       /crypto.js
+      sha256: c5ee6d6553e69ba96f9a2a7f70e677bf69a6e2d52849a892e67b2e547dc96b28
+
+  Vendored BIP39 English wordlist (2048 words), official:
+    github.com/bitcoin/bips  /bip-0039/english.txt
+      sha256: 2f5eed53a4727b4bf8880d8f3f199efc90e58503646d9ff8eff3a2ed3b24dbda
+
+  Hand-written from spec (small, audit-friendly, no actual elliptic-curve
+  math — that comes from noble-secp256k1 above):
+    - base58 + base58check    (Bitcoin alphabet)
+    - WIF encoding            (0x80 prefix, 0x01 compressed flag, mainnet)
+    - bech32 (BIP173)         (witness v0, hrp="bc")
+    - BIP32 master + ckdPriv  (HMAC-SHA512 based, hardened + non-hardened)
+    - BIP39 entropy <-> mnemonic + checksum validation
+    - BIP39 mnemonic -> seed  (PBKDF2-SHA512, 2048 iters, dkLen=64)
+
+  Reproduce the bundle:
+    1. curl -sSL -o noble-secp256k1.js \
+         https://cdn.jsdelivr.net/npm/noble-secp256k1@1.2.14/index.js
+    2. For each of the @noble/hashes files listed above:
+         curl -sSL -o FILE \
+           https://cdn.jsdelivr.net/npm/@noble/hashes@1.3.0/FILE
+    3. curl -sSL -o english.txt \
+         https://raw.githubusercontent.com/bitcoin/bips/master/bip-0039/english.txt
+    4. sha256sum each file; values must match those listed above.
+
+  --- Use at your own risk ---
+  Made for testing, development, and education. The author is a tinkerer,
+  not a wallet engineer. Audit the code before trusting it with real money.
+  MIT Licensed.
+=========================================================================
+-->
+<style>
+  :root{
+    --bg:#020617;          /* slate-950 */
+    --surface:#0f172a;     /* slate-900 */
+    --surface-2:#1e293b;   /* slate-800 */
+    --border:#334155;      /* slate-700 */
+    --border-soft:#475569; /* slate-600 */
+    --text:#e2e8f0;        /* slate-200 */
+    --subtext:#cbd5e1;     /* slate-300 */
+    --muted:#94a3b8;       /* slate-400 */
+    --muted-2:#64748b;     /* slate-500 */
+    --emerald:#10b981;
+    --emerald-dim:#065f46;
+    --amber:#f59e0b;
+    --amber-dim:#78350f;
+    --sky:#0ea5e9;
+    --sky-dim:#0c4a6e;
+    --red:#ef4444;
+    --orange:#f97316;
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; background:var(--bg); color:var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing:antialiased; }
+  .container{ max-width:780px; margin:0 auto; padding:48px 24px; }
+  .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+  h1{ margin:0; font-size:1.6rem; font-weight:600; letter-spacing:-0.01em; }
+  h2{ margin:0; font-size:1.15rem; font-weight:600; display:flex; align-items:center; gap:8px; }
+  h3{ margin:0; font-size:1.15rem; font-weight:600; color:var(--emerald); }
+  p{ margin:0; }
+  a{ color:var(--muted); text-decoration:none; font-size:0.875rem; }
+  a:hover{ color:#fff; }
+
+  .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:32px; gap:16px; flex-wrap:wrap; }
+  .header-left{ display:flex; align-items:center; gap:12px; }
+  .logo{ width:40px; height:40px; background:var(--orange); border-radius:14px;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+  .sub{ font-size:0.85rem; color:var(--muted); margin-top:2px; }
+
+  .card{ background:var(--surface); border:1px solid var(--border); border-radius:20px;
+    padding:28px; margin-bottom:24px; }
+  .card.output{ border-color:rgba(16,185,129,0.35); }
+  .hidden{ display:none !important; }
+
+  .notice{ display:flex; align-items:center; gap:8px; color:var(--emerald); font-weight:600;
+    font-size:0.92rem; margin-bottom:10px; }
+  .notice-text{ color:var(--muted); font-size:0.85rem; }
+
+  .row{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-bottom:20px; }
+  .row-title small{ display:block; color:var(--muted); font-size:0.85rem; font-weight:400; margin-top:4px; }
+  .stack{ display:flex; flex-direction:column; gap:14px; }
+
+  label{ display:block; font-size:0.72rem; color:var(--muted); margin-bottom:6px; letter-spacing:0.04em; text-transform:uppercase; }
+  input[type="text"], textarea{
+    width:100%; background:var(--bg); border:1px solid var(--border); color:var(--text);
+    border-radius:14px; padding:12px 14px; font-size:0.9rem;
+    font-family: inherit; outline:none; resize:vertical;
+  }
+  input[type="text"]:focus, textarea:focus{ border-color:var(--emerald); }
+  .hint{ color:var(--muted-2); font-size:0.7rem; margin-top:4px; }
+
+  button{
+    border:none; cursor:pointer; font-family:inherit; font-weight:600;
+    border-radius:14px; padding:12px 22px; font-size:0.9rem;
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    transition: background 0.15s ease, transform 0.05s ease;
+  }
+  button:active{ transform: translateY(1px); }
+  .btn-emerald{ background:var(--emerald); color:#022c1b; }
+  .btn-emerald:hover{ background:#0ea871; }
+  .btn-amber{ background:var(--amber); color:#3d2207; }
+  .btn-amber:hover{ background:#d97e08; }
+  .btn-sky{ background:var(--sky); color:#062436; }
+  .btn-sky:hover{ background:#0c8fce; }
+  .btn-ghost{ background:var(--surface-2); border:1px solid var(--border-soft); color:var(--text); }
+  .btn-ghost:hover{ background:var(--border); }
+  .btn-wide{ width:100%; }
+  .btn-pair{ display:flex; gap:12px; margin-bottom:14px; }
+  .btn-pair button{ flex:1; }
+
+  .copy-btn{
+    background:rgba(16,185,129,0.10); color:var(--emerald);
+    padding:6px 14px; font-size:0.75rem; border-radius:12px;
+  }
+  .copy-btn:hover{ background:rgba(16,185,129,0.22); }
+
+  .key-display{
+    background:var(--bg); border:1px solid var(--border); border-radius:14px;
+    padding:14px 16px; font-size:0.85rem; word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  }
+  .key-display.red{ border-color:rgba(239,68,68,0.4); }
+  .key-display.emerald{ border-color:rgba(16,185,129,0.4); }
+  .field-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+  .field-label{ font-size:0.7rem; letter-spacing:0.05em; }
+  .field-label.emerald{ color:var(--emerald); }
+  .field-label.red{ color:var(--red); }
+  .warn{ font-size:0.7rem; margin-top:6px; }
+  .warn.amber{ color:var(--amber); }
+  .warn.red{ color:var(--red); }
+
+  .meta{
+    background:var(--bg); border:1px solid var(--border); border-radius:14px;
+    padding:12px 14px; font-size:0.75rem; color:var(--subtext);
+    white-space:pre-wrap; line-height:1.55;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  }
+  .meta-label{ font-size:0.7rem; color:var(--emerald); margin-bottom:6px; letter-spacing:0.05em; }
+
+  .divider{ border-top:1px solid var(--border); padding-top:14px; margin-top:14px; font-size:0.7rem; color:var(--muted-2); }
+
+  footer{ margin-top:48px; text-align:center; font-size:0.75rem; color:var(--muted-2); }
+  footer p{ margin:4px 0; }
+
+  .ico{ width:18px; height:18px; flex-shrink:0; }
+  .ico-lg{ width:22px; height:22px; }
+  .ico-em{ color:var(--emerald); }
+  .ico-am{ color:var(--amber); }
+  .ico-sk{ color:var(--sky); }
+
+  .addr-toggle{ display:flex; gap:14px; margin-bottom:14px; flex-wrap:wrap; }
+  .addr-toggle label{ display:flex; align-items:center; gap:6px; font-size:0.82rem; color:var(--subtext); cursor:pointer; }
+  .addr-toggle input{ accent-color:var(--emerald); cursor:pointer; }
+
+  .rec-section{ background:var(--bg); border:1px solid var(--border); border-radius:14px; padding:14px 16px; margin-bottom:14px; }
+  .rs-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+  .rs-title{ font-weight:600; color:#a78bfa; font-size:0.95rem; }
+  .rs-path{ font-size:0.72rem; color:var(--muted); }
+  .rs-note{ font-size:0.72rem; color:var(--muted-2); margin:4px 0 12px; }
+  .rs-rows{ display:flex; flex-direction:column; gap:8px; }
+  .rs-row{ background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:9px 12px; }
+  .rs-row-head{ font-size:0.7rem; color:var(--muted); margin-bottom:4px; }
+  .rs-row-idx{ color:#a78bfa; font-weight:600; }
+  .rs-row-path{ }
+  .rs-line{ display:flex; gap:10px; font-size:0.78rem; align-items:baseline; padding:2px 0; }
+  .rs-line-label{ color:var(--muted-2); flex-shrink:0; width:58px; font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; }
+  .rs-line-val{ color:var(--text); word-break:break-all; }
+  .rs-wif{ color:var(--subtext); }
+
+  .link-btn{ background:none; border:none; padding:0; margin:0; color:#fb923c; cursor:pointer;
+    font-family:inherit; font-size:0.7rem; text-decoration:underline; }
+  .link-btn:hover{ color:#fdba74; }
+  code.mono{ background:var(--bg); padding:1px 6px; border-radius:5px; font-size:0.78rem; color:var(--subtext); }
+  .verify-ok{ color:#10b981; font-weight:600; font-size:0.95rem; padding:14px 16px; background:rgba(16,185,129,0.07);
+    border:1px solid rgba(16,185,129,0.3); border-radius:14px; word-break:break-all; }
+  .verify-sub{ color:var(--subtext); font-weight:400; font-size:0.78rem; margin-top:6px; }
+  .verify-bad{ color:#ef4444; font-weight:600; font-size:0.95rem; padding:14px 16px; background:rgba(239,68,68,0.07);
+    border:1px solid rgba(239,68,68,0.3); border-radius:14px; }
+  .verify-hint{ background:var(--bg); border:1px solid var(--border); border-radius:10px; padding:12px;
+    font-size:0.72rem; color:var(--muted); white-space:pre-wrap; word-break:break-all; margin-top:10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+  @media (max-width:600px){
+    .container{ padding:24px 14px; }
+    .card{ padding:20px; border-radius:16px; }
+    h1{ font-size:1.35rem; }
+    .btn-pair{ flex-direction:column; }
+    .rs-line{ flex-direction:column; gap:2px; }
+    .rs-line-label{ width:auto; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">
+        <svg class="ico-lg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11.767 19.089c4.924.868 6.14-6.025 1.216-6.894m-1.216 6.894L5.86 18.047m5.908 1.042-.347 1.97m1.563-8.864c4.924.869 6.14-6.025 1.215-6.893m-1.215 6.893-3.94-.694m5.155-6.2L8.29 4.26m5.908 1.042.348-1.97M7.48 20.364l3.126-17.727"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Bitcoin Keypair Generator</h1>
+        <div class="sub">v4call • offline-capable • mainnet only</div>
+      </div>
+    </div>
+    <a href="./">← back to v4call</a>
+  </div>
+
+  <div class="card">
+    <div class="notice">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      </svg>
+      <span>100% Browser Only — Nothing is sent to any server</span>
+    </div>
+    <p class="notice-text">Generate Bitcoin keypairs for testing, development, or educational purposes. All computation happens in your browser. Save this HTML file to use offline.</p>
+  </div>
+
+  <!-- Random -->
+  <div class="card">
+    <h2>
+      <svg class="ico ico-em" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="3"/>
+        <circle cx="8" cy="8" r="1.3"/><circle cx="16" cy="8" r="1.3"/>
+        <circle cx="8" cy="16" r="1.3"/><circle cx="16" cy="16" r="1.3"/>
+        <circle cx="12" cy="12" r="1.3"/>
+      </svg>
+      <span>Random Keypair</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">Generate a fresh random Bitcoin keypair using window.crypto.getRandomValues.</p>
+    <div class="addr-toggle">
+      <label><input type="radio" name="random-addr" value="segwit" checked> Native SegWit (bc1...)</label>
+      <label><input type="radio" name="random-addr" value="legacy"> Legacy (1...)</label>
+    </div>
+    <button id="btn-random" class="btn-emerald btn-wide">
+      <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/>
+      </svg>
+      <span>Generate Random</span>
+    </button>
+  </div>
+
+  <!-- Passphrase -->
+  <div class="card">
+    <h2>
+      <svg class="ico ico-am" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="9" cy="14" r="4"/><path d="M21 3l-8.5 8.5"/><path d="M16 7l3 3"/>
+      </svg>
+      <span>Reproducible from Passphrase</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">Same passphrase + salt = same keys every time (great for testing). Uses PBKDF2-SHA512, 100000 rounds.</p>
+    <div class="stack">
+      <div>
+        <label>Passphrase</label>
+        <input id="passphrase" type="text" placeholder="Enter your secret phrase...">
+      </div>
+      <div>
+        <label>Salt (optional, defaults to "v4call")</label>
+        <input id="salt" type="text" placeholder='Optional — defaults to "v4call" if blank'>
+      </div>
+      <div class="addr-toggle">
+        <label><input type="radio" name="passphrase-addr" value="segwit" checked> Native SegWit (bc1...)</label>
+        <label><input type="radio" name="passphrase-addr" value="legacy"> Legacy (1...)</label>
+      </div>
+      <button id="btn-passphrase" class="btn-amber btn-wide">
+        <span>Generate from Passphrase</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Mnemonic -->
+  <div class="card">
+    <h2>
+      <svg class="ico ico-sk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/>
+        <circle cx="5" cy="6" r="1.5"/><circle cx="5" cy="12" r="1.5"/><circle cx="5" cy="18" r="1.5"/>
+      </svg>
+      <span>From Mnemonic (12 or 24 words)</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">BIP39 standard. Derives a BIP84 native-segwit address at m/84'/0'/0'/0/0.</p>
+    <div class="btn-pair">
+      <button id="btn-mnemonic-12" class="btn-ghost">Generate 12 Words</button>
+      <button id="btn-mnemonic-24" class="btn-ghost">Generate 24 Words</button>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label>Your 12 or 24 words (space separated)</label>
+      <textarea id="mnemonic" rows="3" placeholder="word1 word2 word3 ..."></textarea>
+      <p class="hint">Paste your own words or use the buttons above. Ctrl+Enter to derive.</p>
+    </div>
+    <button id="btn-from-mnemonic" class="btn-sky btn-wide">
+      <span>Generate from Mnemonic</span>
+    </button>
+  </div>
+
+  <!-- Recovery -->
+  <div class="card">
+    <h2>
+      <svg class="ico" style="color:#a78bfa" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>
+      </svg>
+      <span>Recovery — Try Old Words</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">Paste 12 or 24 words you remember. Shows the first 5 addresses at each common derivation path so you can check a block explorer (mempool.space, blockstream.info) for any history. 100% offline — words never leave the page.</p>
+    <div style="margin-bottom:14px;">
+      <label>Mnemonic to test</label>
+      <textarea id="recovery-mnemonic" rows="3" placeholder="word1 word2 word3 ..."></textarea>
+      <p class="hint">Validates BIP39 checksum first. If invalid, your old wallet wasn't BIP39 — see btcrecover.</p>
+    </div>
+    <button id="btn-recovery" class="btn-wide" style="background:#a78bfa;color:#1e1b4b;">
+      <span>Show addresses across all paths</span>
+    </button>
+  </div>
+
+  <!-- Recovery output -->
+  <div id="recovery-output" class="card output hidden" style="border-color:rgba(167,139,250,0.35);">
+    <h3 style="color:#a78bfa;">Recovery Results</h3>
+    <p class="sub" style="margin:6px 0 18px 0;">Paste any address into a block explorer to check for history. If a path shows funds, restore the seed in Electrum / Sparrow and set that derivation path. WIFs are shown so you can also sweep individual addresses directly.</p>
+    <div id="recovery-body"></div>
+    <div class="divider">If no path has history, your old wallet probably used a non-BIP39 seed format. Try btcrecover (github.com/3rdIteration/btcrecover) — handles typos and several legacy formats.</div>
+  </div>
+
+  <!-- Output -->
+  <div id="output" class="card output hidden">
+    <div class="row" style="margin-bottom:24px;">
+      <h3>Generated Keypair</h3>
+      <button id="btn-copy-all" class="copy-btn">
+        <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+        </svg>
+        <span>Copy All</span>
+      </button>
+    </div>
+
+    <div class="stack" style="gap:22px;">
+      <div id="mnemonic-output" class="hidden">
+        <div class="field-row">
+          <div class="field-label emerald mono">MNEMONIC (BIP39)</div>
+          <button class="copy-btn" data-copy="mnemonic-text">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <div id="mnemonic-text" class="key-display"></div>
+        <div class="warn amber">⚠ Write this down and keep it safe.</div>
+      </div>
+
+      <div>
+        <div class="field-row">
+          <div class="field-label red mono">PRIVATE KEY (WIF)</div>
+          <button class="copy-btn" data-copy="private-key">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <div id="private-key" class="key-display red"></div>
+        <div class="warn red">🔒 Keep this secret — never share it.</div>
+      </div>
+
+      <div>
+        <div class="field-row">
+          <div class="field-label emerald mono">PUBLIC ADDRESS (bech32, P2WPKH)</div>
+          <button class="copy-btn" data-copy="public-address">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <div id="public-address" class="key-display emerald"></div>
+      </div>
+
+      <div>
+        <div class="meta-label mono">REPRODUCIBILITY METADATA</div>
+        <div id="meta-block" class="meta"></div>
+      </div>
+
+      <div class="divider">All keys generated locally — no network requests. Save this HTML file to keep using it offline.</div>
+    </div>
+  </div>
+
+  <!-- Sign Message -->
+  <div class="card">
+    <h2>
+      <svg class="ico" style="color:#fb923c" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 17.25V21h3.75L18.81 8.94l-3.75-3.75L3 17.25z"/><path d="M14.06 6.19l3.75 3.75"/>
+      </svg>
+      <span>Sign Message — Prove You Own an Address</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">Sign text with a private key (WIF). The output is BIP137-style — Electrum, Sparrow, and <code class="mono">bitcoin-cli verifymessage</code> can all verify it. Works for both legacy "1..." and bech32 "bc1..." addresses.</p>
+    <div class="stack">
+      <div>
+        <label>Private Key (WIF)</label>
+        <input id="sign-wif" type="text" placeholder="L... or K... — paste here, or use last generated">
+        <p class="hint"><button id="btn-use-last-wif" class="link-btn" type="button">Use last generated WIF</button></p>
+      </div>
+      <div>
+        <label>Message to sign</label>
+        <textarea id="sign-message" rows="3" placeholder="e.g. I @noblemage on v4call.com control this Bitcoin address. 2026-05-31"></textarea>
+      </div>
+      <div class="addr-toggle">
+        <label><input type="radio" name="sign-addr" value="segwit" checked> Sign for Native SegWit (bc1...)</label>
+        <label><input type="radio" name="sign-addr" value="legacy"> Sign for Legacy (1...)</label>
+      </div>
+      <button id="btn-sign" class="btn-wide" style="background:#fb923c;color:#3d1b07;font-weight:600;">
+        <span>Sign Message</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Sign Output -->
+  <div id="sign-output" class="card output hidden" style="border-color:rgba(251,146,60,0.35);">
+    <h3 style="color:#fb923c;">Signed Proof</h3>
+    <div class="stack" style="gap:18px;margin-top:14px;">
+      <div>
+        <div class="field-row">
+          <div class="field-label mono" style="color:#fb923c;">ADDRESS (computed from WIF + type)</div>
+          <button class="copy-btn" data-copy-text="sign-address-out">Copy</button>
+        </div>
+        <div id="sign-address-out" class="key-display"></div>
+      </div>
+      <div>
+        <div class="field-row">
+          <div class="field-label mono" style="color:#fb923c;">SIGNATURE (base64, 65-byte BIP137)</div>
+          <button class="copy-btn" data-copy-text="sign-signature-out">Copy</button>
+        </div>
+        <div id="sign-signature-out" class="key-display"></div>
+      </div>
+      <div>
+        <div class="field-row">
+          <div class="field-label mono" style="color:#fb923c;">PROOF JSON (importable into Verify, server-announce, etc.)</div>
+          <button class="copy-btn" data-copy-text="sign-json-out">Copy</button>
+        </div>
+        <div id="sign-json-out" class="key-display" style="white-space:pre;"></div>
+      </div>
+      <div class="divider">External verify: paste the address, message and signature into Electrum (Tools → Sign/verify message), Sparrow (Tools → Verify message), or <code class="mono">bitcoin-cli verifymessage &lt;addr&gt; &lt;sig&gt; &lt;msg&gt;</code>.</div>
+    </div>
+  </div>
+
+  <!-- Verify -->
+  <div class="card">
+    <h2>
+      <svg class="ico" style="color:#22d3ee" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/>
+      </svg>
+      <span>Verify Proof</span>
+    </h2>
+    <p class="sub" style="margin:6px 0 14px 0;">Check that a signature was produced by the holder of a given address. Works for proofs from this tool, Electrum, Sparrow, or <code class="mono">bitcoin-cli signmessage</code>.</p>
+    <div class="stack">
+      <div>
+        <label>Address</label>
+        <input id="verify-address" type="text" placeholder="1... or bc1... or 3...">
+      </div>
+      <div>
+        <label>Message</label>
+        <textarea id="verify-message" rows="3" placeholder="The exact message that was signed (whitespace and newlines matter)"></textarea>
+      </div>
+      <div>
+        <label>Signature (base64)</label>
+        <input id="verify-signature" type="text" placeholder="H0jK... / Iyz... — 88-char base64 of 65 bytes">
+      </div>
+      <div class="btn-pair">
+        <button id="btn-paste-proof" class="btn-ghost">Paste proof JSON…</button>
+        <button id="btn-verify" class="btn-wide" style="background:#22d3ee;color:#06242c;font-weight:600;flex:1;">
+          <span>Verify</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Verify Output -->
+  <div id="verify-output" class="card output hidden" style="border-color:rgba(34,211,238,0.35);"></div>
+
+  <footer>
+    <p>MIT Licensed • Made for v4call</p>
+    <p>Use at your own risk. For testing &amp; educational purposes.</p>
+  </footer>
+</div>
+
+<script>
+// =====================================================================
+// VENDORED LIBRARY BUNDLE — see <head> comments for sources & SHA-256s
+// =====================================================================
+
+// --- minimal CommonJS module loader ---
+const __modules = {};
+function defineModule(name, factory) {
+  const exports = {};
+  const module = { exports };
+  factory(function require(dep) {
+    // normalize: "./foo.js" -> "foo.js", "@noble/hashes/crypto" -> "crypto.js"
+    let key = dep;
+    if (key.startsWith("./")) key = key.slice(2);
+    if (key === "@noble/hashes/crypto") key = "crypto.js";
+    if (key === "crypto") return undefined; // node 'crypto' stub — browser uses self.crypto
+    if (!(key in __modules)) throw new Error("Missing module: " + dep);
+    return __modules[key];
+  }, exports, module);
+  __modules[name] = module.exports;
+}
+
+defineModule("_assert.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.output = exports.exists = exports.hash = exports.bytes = exports.bool = exports.number = void 0;
+function number(n) {
+    if (!Number.isSafeInteger(n) || n < 0)
+        throw new Error(`Wrong positive integer: ${n}`);
+}
+exports.number = number;
+function bool(b) {
+    if (typeof b !== 'boolean')
+        throw new Error(`Expected boolean, not ${b}`);
+}
+exports.bool = bool;
+function bytes(b, ...lengths) {
+    if (!(b instanceof Uint8Array))
+        throw new TypeError('Expected Uint8Array');
+    if (lengths.length > 0 && !lengths.includes(b.length))
+        throw new TypeError(`Expected Uint8Array of length ${lengths}, not of length=${b.length}`);
+}
+exports.bytes = bytes;
+function hash(hash) {
+    if (typeof hash !== 'function' || typeof hash.create !== 'function')
+        throw new Error('Hash should be wrapped by utils.wrapConstructor');
+    number(hash.outputLen);
+    number(hash.blockLen);
+}
+exports.hash = hash;
+function exists(instance, checkFinished = true) {
+    if (instance.destroyed)
+        throw new Error('Hash instance has been destroyed');
+    if (checkFinished && instance.finished)
+        throw new Error('Hash#digest() has already been called');
+}
+exports.exists = exists;
+function output(out, instance) {
+    bytes(out);
+    const min = instance.outputLen;
+    if (out.length < min) {
+        throw new Error(`digestInto() expects output buffer of length at least ${min}`);
+    }
+}
+exports.output = output;
+const assert = {
+    number,
+    bool,
+    bytes,
+    hash,
+    exists,
+    output,
+};
+exports.default = assert;
+//# sourceMappingURL=_assert.js.map
+});
+
+defineModule("_u64.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.add = exports.toBig = exports.split = exports.fromBig = void 0;
+const U32_MASK64 = BigInt(2 ** 32 - 1);
+const _32n = BigInt(32);
+// We are not using BigUint64Array, because they are extremely slow as per 2022
+function fromBig(n, le = false) {
+    if (le)
+        return { h: Number(n & U32_MASK64), l: Number((n >> _32n) & U32_MASK64) };
+    return { h: Number((n >> _32n) & U32_MASK64) | 0, l: Number(n & U32_MASK64) | 0 };
+}
+exports.fromBig = fromBig;
+function split(lst, le = false) {
+    let Ah = new Uint32Array(lst.length);
+    let Al = new Uint32Array(lst.length);
+    for (let i = 0; i < lst.length; i++) {
+        const { h, l } = fromBig(lst[i], le);
+        [Ah[i], Al[i]] = [h, l];
+    }
+    return [Ah, Al];
+}
+exports.split = split;
+const toBig = (h, l) => (BigInt(h >>> 0) << _32n) | BigInt(l >>> 0);
+exports.toBig = toBig;
+// for Shift in [0, 32)
+const shrSH = (h, l, s) => h >>> s;
+const shrSL = (h, l, s) => (h << (32 - s)) | (l >>> s);
+// Right rotate for Shift in [1, 32)
+const rotrSH = (h, l, s) => (h >>> s) | (l << (32 - s));
+const rotrSL = (h, l, s) => (h << (32 - s)) | (l >>> s);
+// Right rotate for Shift in (32, 64), NOTE: 32 is special case.
+const rotrBH = (h, l, s) => (h << (64 - s)) | (l >>> (s - 32));
+const rotrBL = (h, l, s) => (h >>> (s - 32)) | (l << (64 - s));
+// Right rotate for shift===32 (just swaps l&h)
+const rotr32H = (h, l) => l;
+const rotr32L = (h, l) => h;
+// Left rotate for Shift in [1, 32)
+const rotlSH = (h, l, s) => (h << s) | (l >>> (32 - s));
+const rotlSL = (h, l, s) => (l << s) | (h >>> (32 - s));
+// Left rotate for Shift in (32, 64), NOTE: 32 is special case.
+const rotlBH = (h, l, s) => (l << (s - 32)) | (h >>> (64 - s));
+const rotlBL = (h, l, s) => (h << (s - 32)) | (l >>> (64 - s));
+// JS uses 32-bit signed integers for bitwise operations which means we cannot
+// simple take carry out of low bit sum by shift, we need to use division.
+// Removing "export" has 5% perf penalty -_-
+function add(Ah, Al, Bh, Bl) {
+    const l = (Al >>> 0) + (Bl >>> 0);
+    return { h: (Ah + Bh + ((l / 2 ** 32) | 0)) | 0, l: l | 0 };
+}
+exports.add = add;
+// Addition with more than 2 elements
+const add3L = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
+const add3H = (low, Ah, Bh, Ch) => (Ah + Bh + Ch + ((low / 2 ** 32) | 0)) | 0;
+const add4L = (Al, Bl, Cl, Dl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0);
+const add4H = (low, Ah, Bh, Ch, Dh) => (Ah + Bh + Ch + Dh + ((low / 2 ** 32) | 0)) | 0;
+const add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
+const add5H = (low, Ah, Bh, Ch, Dh, Eh) => (Ah + Bh + Ch + Dh + Eh + ((low / 2 ** 32) | 0)) | 0;
+// prettier-ignore
+const u64 = {
+    fromBig, split, toBig: exports.toBig,
+    shrSH, shrSL,
+    rotrSH, rotrSL, rotrBH, rotrBL,
+    rotr32H, rotr32L,
+    rotlSH, rotlSL, rotlBH, rotlBL,
+    add, add3L, add3H, add4L, add4H, add5H, add5L,
+};
+exports.default = u64;
+//# sourceMappingURL=_u64.js.map
+});
+
+defineModule("crypto.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.crypto = void 0;
+exports.crypto = typeof globalThis === 'object' && 'crypto' in globalThis ? globalThis.crypto : undefined;
+//# sourceMappingURL=crypto.js.map
+});
+
+defineModule("utils.js", function(require, exports, module) {
+"use strict";
+/*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.randomBytes = exports.wrapConstructorWithOpts = exports.wrapConstructor = exports.checkOpts = exports.Hash = exports.concatBytes = exports.toBytes = exports.utf8ToBytes = exports.asyncLoop = exports.nextTick = exports.hexToBytes = exports.bytesToHex = exports.isLE = exports.rotr = exports.createView = exports.u32 = exports.u8 = void 0;
+// We use `globalThis.crypto`, but node.js versions earlier than v19 don't
+// declare it in global scope. For node.js, package.json#exports field mapping
+// rewrites import from `crypto` to `cryptoNode`, which imports native module.
+// Makes the utils un-importable in browsers without a bundler.
+// Once node.js 18 is deprecated, we can just drop the import.
+const crypto_1 = require("@noble/hashes/crypto");
+// Cast array to different type
+const u8 = (arr) => new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength);
+exports.u8 = u8;
+const u32 = (arr) => new Uint32Array(arr.buffer, arr.byteOffset, Math.floor(arr.byteLength / 4));
+exports.u32 = u32;
+// Cast array to view
+const createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+exports.createView = createView;
+// The rotate right (circular right shift) operation for uint32
+const rotr = (word, shift) => (word << (32 - shift)) | (word >>> shift);
+exports.rotr = rotr;
+// big-endian hardware is rare. Just in case someone still decides to run hashes:
+// early-throw an error because we don't support BE yet.
+exports.isLE = new Uint8Array(new Uint32Array([0x11223344]).buffer)[0] === 0x44;
+if (!exports.isLE)
+    throw new Error('Non little-endian hardware is not supported');
+const hexes = Array.from({ length: 256 }, (v, i) => i.toString(16).padStart(2, '0'));
+/**
+ * @example bytesToHex(Uint8Array.from([0xde, 0xad, 0xbe, 0xef])) // 'deadbeef'
+ */
+function bytesToHex(uint8a) {
+    // pre-caching improves the speed 6x
+    if (!(uint8a instanceof Uint8Array))
+        throw new Error('Uint8Array expected');
+    let hex = '';
+    for (let i = 0; i < uint8a.length; i++) {
+        hex += hexes[uint8a[i]];
+    }
+    return hex;
+}
+exports.bytesToHex = bytesToHex;
+/**
+ * @example hexToBytes('deadbeef') // Uint8Array.from([0xde, 0xad, 0xbe, 0xef])
+ */
+function hexToBytes(hex) {
+    if (typeof hex !== 'string') {
+        throw new TypeError('hexToBytes: expected string, got ' + typeof hex);
+    }
+    if (hex.length % 2)
+        throw new Error('hexToBytes: received invalid unpadded hex');
+    const array = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < array.length; i++) {
+        const j = i * 2;
+        const hexByte = hex.slice(j, j + 2);
+        const byte = Number.parseInt(hexByte, 16);
+        if (Number.isNaN(byte) || byte < 0)
+            throw new Error('Invalid byte sequence');
+        array[i] = byte;
+    }
+    return array;
+}
+exports.hexToBytes = hexToBytes;
+// There is no setImmediate in browser and setTimeout is slow.
+// call of async fn will return Promise, which will be fullfiled only on
+// next scheduler queue processing step and this is exactly what we need.
+const nextTick = async () => { };
+exports.nextTick = nextTick;
+// Returns control to thread each 'tick' ms to avoid blocking
+async function asyncLoop(iters, tick, cb) {
+    let ts = Date.now();
+    for (let i = 0; i < iters; i++) {
+        cb(i);
+        // Date.now() is not monotonic, so in case if clock goes backwards we return return control too
+        const diff = Date.now() - ts;
+        if (diff >= 0 && diff < tick)
+            continue;
+        await (0, exports.nextTick)();
+        ts += diff;
+    }
+}
+exports.asyncLoop = asyncLoop;
+function utf8ToBytes(str) {
+    if (typeof str !== 'string') {
+        throw new TypeError(`utf8ToBytes expected string, got ${typeof str}`);
+    }
+    return new TextEncoder().encode(str);
+}
+exports.utf8ToBytes = utf8ToBytes;
+function toBytes(data) {
+    if (typeof data === 'string')
+        data = utf8ToBytes(data);
+    if (!(data instanceof Uint8Array))
+        throw new TypeError(`Expected input type is Uint8Array (got ${typeof data})`);
+    return data;
+}
+exports.toBytes = toBytes;
+/**
+ * Concats Uint8Array-s into one; like `Buffer.concat([buf1, buf2])`
+ * @example concatBytes(buf1, buf2)
+ */
+function concatBytes(...arrays) {
+    if (!arrays.every((a) => a instanceof Uint8Array))
+        throw new Error('Uint8Array list expected');
+    if (arrays.length === 1)
+        return arrays[0];
+    const length = arrays.reduce((a, arr) => a + arr.length, 0);
+    const result = new Uint8Array(length);
+    for (let i = 0, pad = 0; i < arrays.length; i++) {
+        const arr = arrays[i];
+        result.set(arr, pad);
+        pad += arr.length;
+    }
+    return result;
+}
+exports.concatBytes = concatBytes;
+// For runtime check if class implements interface
+class Hash {
+    // Safe version that clones internal state
+    clone() {
+        return this._cloneInto();
+    }
+}
+exports.Hash = Hash;
+// Check if object doens't have custom constructor (like Uint8Array/Array)
+const isPlainObject = (obj) => Object.prototype.toString.call(obj) === '[object Object]' && obj.constructor === Object;
+function checkOpts(defaults, opts) {
+    if (opts !== undefined && (typeof opts !== 'object' || !isPlainObject(opts)))
+        throw new TypeError('Options should be object or undefined');
+    const merged = Object.assign(defaults, opts);
+    return merged;
+}
+exports.checkOpts = checkOpts;
+function wrapConstructor(hashConstructor) {
+    const hashC = (message) => hashConstructor().update(toBytes(message)).digest();
+    const tmp = hashConstructor();
+    hashC.outputLen = tmp.outputLen;
+    hashC.blockLen = tmp.blockLen;
+    hashC.create = () => hashConstructor();
+    return hashC;
+}
+exports.wrapConstructor = wrapConstructor;
+function wrapConstructorWithOpts(hashCons) {
+    const hashC = (msg, opts) => hashCons(opts).update(toBytes(msg)).digest();
+    const tmp = hashCons({});
+    hashC.outputLen = tmp.outputLen;
+    hashC.blockLen = tmp.blockLen;
+    hashC.create = (opts) => hashCons(opts);
+    return hashC;
+}
+exports.wrapConstructorWithOpts = wrapConstructorWithOpts;
+/**
+ * Secure PRNG. Uses `globalThis.crypto` or node.js crypto module.
+ */
+function randomBytes(bytesLength = 32) {
+    if (crypto_1.crypto && typeof crypto_1.crypto.getRandomValues === 'function') {
+        return crypto_1.crypto.getRandomValues(new Uint8Array(bytesLength));
+    }
+    throw new Error('crypto.getRandomValues must be defined');
+}
+exports.randomBytes = randomBytes;
+//# sourceMappingURL=utils.js.map
+});
+
+defineModule("_sha2.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.SHA2 = void 0;
+const _assert_js_1 = require("./_assert.js");
+const utils_js_1 = require("./utils.js");
+// Polyfill for Safari 14
+function setBigUint64(view, byteOffset, value, isLE) {
+    if (typeof view.setBigUint64 === 'function')
+        return view.setBigUint64(byteOffset, value, isLE);
+    const _32n = BigInt(32);
+    const _u32_max = BigInt(0xffffffff);
+    const wh = Number((value >> _32n) & _u32_max);
+    const wl = Number(value & _u32_max);
+    const h = isLE ? 4 : 0;
+    const l = isLE ? 0 : 4;
+    view.setUint32(byteOffset + h, wh, isLE);
+    view.setUint32(byteOffset + l, wl, isLE);
+}
+// Base SHA2 class (RFC 6234)
+class SHA2 extends utils_js_1.Hash {
+    constructor(blockLen, outputLen, padOffset, isLE) {
+        super();
+        this.blockLen = blockLen;
+        this.outputLen = outputLen;
+        this.padOffset = padOffset;
+        this.isLE = isLE;
+        this.finished = false;
+        this.length = 0;
+        this.pos = 0;
+        this.destroyed = false;
+        this.buffer = new Uint8Array(blockLen);
+        this.view = (0, utils_js_1.createView)(this.buffer);
+    }
+    update(data) {
+        _assert_js_1.default.exists(this);
+        const { view, buffer, blockLen } = this;
+        data = (0, utils_js_1.toBytes)(data);
+        const len = data.length;
+        for (let pos = 0; pos < len;) {
+            const take = Math.min(blockLen - this.pos, len - pos);
+            // Fast path: we have at least one block in input, cast it to view and process
+            if (take === blockLen) {
+                const dataView = (0, utils_js_1.createView)(data);
+                for (; blockLen <= len - pos; pos += blockLen)
+                    this.process(dataView, pos);
+                continue;
+            }
+            buffer.set(data.subarray(pos, pos + take), this.pos);
+            this.pos += take;
+            pos += take;
+            if (this.pos === blockLen) {
+                this.process(view, 0);
+                this.pos = 0;
+            }
+        }
+        this.length += data.length;
+        this.roundClean();
+        return this;
+    }
+    digestInto(out) {
+        _assert_js_1.default.exists(this);
+        _assert_js_1.default.output(out, this);
+        this.finished = true;
+        // Padding
+        // We can avoid allocation of buffer for padding completely if it
+        // was previously not allocated here. But it won't change performance.
+        const { buffer, view, blockLen, isLE } = this;
+        let { pos } = this;
+        // append the bit '1' to the message
+        buffer[pos++] = 0b10000000;
+        this.buffer.subarray(pos).fill(0);
+        // we have less than padOffset left in buffer, so we cannot put length in current block, need process it and pad again
+        if (this.padOffset > blockLen - pos) {
+            this.process(view, 0);
+            pos = 0;
+        }
+        // Pad until full block byte with zeros
+        for (let i = pos; i < blockLen; i++)
+            buffer[i] = 0;
+        // Note: sha512 requires length to be 128bit integer, but length in JS will overflow before that
+        // You need to write around 2 exabytes (u64_max / 8 / (1024**6)) for this to happen.
+        // So we just write lowest 64 bits of that value.
+        setBigUint64(view, blockLen - 8, BigInt(this.length * 8), isLE);
+        this.process(view, 0);
+        const oview = (0, utils_js_1.createView)(out);
+        const len = this.outputLen;
+        // NOTE: we do division by 4 later, which should be fused in single op with modulo by JIT
+        if (len % 4)
+            throw new Error('_sha2: outputLen should be aligned to 32bit');
+        const outLen = len / 4;
+        const state = this.get();
+        if (outLen > state.length)
+            throw new Error('_sha2: outputLen bigger than state');
+        for (let i = 0; i < outLen; i++)
+            oview.setUint32(4 * i, state[i], isLE);
+    }
+    digest() {
+        const { buffer, outputLen } = this;
+        this.digestInto(buffer);
+        const res = buffer.slice(0, outputLen);
+        this.destroy();
+        return res;
+    }
+    _cloneInto(to) {
+        to || (to = new this.constructor());
+        to.set(...this.get());
+        const { blockLen, buffer, length, finished, destroyed, pos } = this;
+        to.length = length;
+        to.pos = pos;
+        to.finished = finished;
+        to.destroyed = destroyed;
+        if (length % blockLen)
+            to.buffer.set(buffer);
+        return to;
+    }
+}
+exports.SHA2 = SHA2;
+//# sourceMappingURL=_sha2.js.map
+});
+
+defineModule("sha256.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sha224 = exports.sha256 = void 0;
+const _sha2_js_1 = require("./_sha2.js");
+const utils_js_1 = require("./utils.js");
+// Choice: a ? b : c
+const Chi = (a, b, c) => (a & b) ^ (~a & c);
+// Majority function, true if any two inpust is true
+const Maj = (a, b, c) => (a & b) ^ (a & c) ^ (b & c);
+// Round constants:
+// first 32 bits of the fractional parts of the cube roots of the first 64 primes 2..311)
+// prettier-ignore
+const SHA256_K = new Uint32Array([
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+]);
+// Initial state (first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19):
+// prettier-ignore
+const IV = new Uint32Array([
+    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
+]);
+// Temporary buffer, not used to store anything between runs
+// Named this way because it matches specification.
+const SHA256_W = new Uint32Array(64);
+class SHA256 extends _sha2_js_1.SHA2 {
+    constructor() {
+        super(64, 32, 8, false);
+        // We cannot use array here since array allows indexing by variable
+        // which means optimizer/compiler cannot use registers.
+        this.A = IV[0] | 0;
+        this.B = IV[1] | 0;
+        this.C = IV[2] | 0;
+        this.D = IV[3] | 0;
+        this.E = IV[4] | 0;
+        this.F = IV[5] | 0;
+        this.G = IV[6] | 0;
+        this.H = IV[7] | 0;
+    }
+    get() {
+        const { A, B, C, D, E, F, G, H } = this;
+        return [A, B, C, D, E, F, G, H];
+    }
+    // prettier-ignore
+    set(A, B, C, D, E, F, G, H) {
+        this.A = A | 0;
+        this.B = B | 0;
+        this.C = C | 0;
+        this.D = D | 0;
+        this.E = E | 0;
+        this.F = F | 0;
+        this.G = G | 0;
+        this.H = H | 0;
+    }
+    process(view, offset) {
+        // Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array
+        for (let i = 0; i < 16; i++, offset += 4)
+            SHA256_W[i] = view.getUint32(offset, false);
+        for (let i = 16; i < 64; i++) {
+            const W15 = SHA256_W[i - 15];
+            const W2 = SHA256_W[i - 2];
+            const s0 = (0, utils_js_1.rotr)(W15, 7) ^ (0, utils_js_1.rotr)(W15, 18) ^ (W15 >>> 3);
+            const s1 = (0, utils_js_1.rotr)(W2, 17) ^ (0, utils_js_1.rotr)(W2, 19) ^ (W2 >>> 10);
+            SHA256_W[i] = (s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16]) | 0;
+        }
+        // Compression function main loop, 64 rounds
+        let { A, B, C, D, E, F, G, H } = this;
+        for (let i = 0; i < 64; i++) {
+            const sigma1 = (0, utils_js_1.rotr)(E, 6) ^ (0, utils_js_1.rotr)(E, 11) ^ (0, utils_js_1.rotr)(E, 25);
+            const T1 = (H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i]) | 0;
+            const sigma0 = (0, utils_js_1.rotr)(A, 2) ^ (0, utils_js_1.rotr)(A, 13) ^ (0, utils_js_1.rotr)(A, 22);
+            const T2 = (sigma0 + Maj(A, B, C)) | 0;
+            H = G;
+            G = F;
+            F = E;
+            E = (D + T1) | 0;
+            D = C;
+            C = B;
+            B = A;
+            A = (T1 + T2) | 0;
+        }
+        // Add the compressed chunk to the current hash value
+        A = (A + this.A) | 0;
+        B = (B + this.B) | 0;
+        C = (C + this.C) | 0;
+        D = (D + this.D) | 0;
+        E = (E + this.E) | 0;
+        F = (F + this.F) | 0;
+        G = (G + this.G) | 0;
+        H = (H + this.H) | 0;
+        this.set(A, B, C, D, E, F, G, H);
+    }
+    roundClean() {
+        SHA256_W.fill(0);
+    }
+    destroy() {
+        this.set(0, 0, 0, 0, 0, 0, 0, 0);
+        this.buffer.fill(0);
+    }
+}
+// Constants from https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+class SHA224 extends SHA256 {
+    constructor() {
+        super();
+        this.A = 0xc1059ed8 | 0;
+        this.B = 0x367cd507 | 0;
+        this.C = 0x3070dd17 | 0;
+        this.D = 0xf70e5939 | 0;
+        this.E = 0xffc00b31 | 0;
+        this.F = 0x68581511 | 0;
+        this.G = 0x64f98fa7 | 0;
+        this.H = 0xbefa4fa4 | 0;
+        this.outputLen = 28;
+    }
+}
+/**
+ * SHA2-256 hash function
+ * @param message - data that would be hashed
+ */
+exports.sha256 = (0, utils_js_1.wrapConstructor)(() => new SHA256());
+exports.sha224 = (0, utils_js_1.wrapConstructor)(() => new SHA224());
+//# sourceMappingURL=sha256.js.map
+});
+
+defineModule("sha512.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.sha384 = exports.sha512_256 = exports.sha512_224 = exports.sha512 = exports.SHA512 = void 0;
+const _sha2_js_1 = require("./_sha2.js");
+const _u64_js_1 = require("./_u64.js");
+const utils_js_1 = require("./utils.js");
+// Round contants (first 32 bits of the fractional parts of the cube roots of the first 80 primes 2..409):
+// prettier-ignore
+const [SHA512_Kh, SHA512_Kl] = _u64_js_1.default.split([
+    '0x428a2f98d728ae22', '0x7137449123ef65cd', '0xb5c0fbcfec4d3b2f', '0xe9b5dba58189dbbc',
+    '0x3956c25bf348b538', '0x59f111f1b605d019', '0x923f82a4af194f9b', '0xab1c5ed5da6d8118',
+    '0xd807aa98a3030242', '0x12835b0145706fbe', '0x243185be4ee4b28c', '0x550c7dc3d5ffb4e2',
+    '0x72be5d74f27b896f', '0x80deb1fe3b1696b1', '0x9bdc06a725c71235', '0xc19bf174cf692694',
+    '0xe49b69c19ef14ad2', '0xefbe4786384f25e3', '0x0fc19dc68b8cd5b5', '0x240ca1cc77ac9c65',
+    '0x2de92c6f592b0275', '0x4a7484aa6ea6e483', '0x5cb0a9dcbd41fbd4', '0x76f988da831153b5',
+    '0x983e5152ee66dfab', '0xa831c66d2db43210', '0xb00327c898fb213f', '0xbf597fc7beef0ee4',
+    '0xc6e00bf33da88fc2', '0xd5a79147930aa725', '0x06ca6351e003826f', '0x142929670a0e6e70',
+    '0x27b70a8546d22ffc', '0x2e1b21385c26c926', '0x4d2c6dfc5ac42aed', '0x53380d139d95b3df',
+    '0x650a73548baf63de', '0x766a0abb3c77b2a8', '0x81c2c92e47edaee6', '0x92722c851482353b',
+    '0xa2bfe8a14cf10364', '0xa81a664bbc423001', '0xc24b8b70d0f89791', '0xc76c51a30654be30',
+    '0xd192e819d6ef5218', '0xd69906245565a910', '0xf40e35855771202a', '0x106aa07032bbd1b8',
+    '0x19a4c116b8d2d0c8', '0x1e376c085141ab53', '0x2748774cdf8eeb99', '0x34b0bcb5e19b48a8',
+    '0x391c0cb3c5c95a63', '0x4ed8aa4ae3418acb', '0x5b9cca4f7763e373', '0x682e6ff3d6b2b8a3',
+    '0x748f82ee5defb2fc', '0x78a5636f43172f60', '0x84c87814a1f0ab72', '0x8cc702081a6439ec',
+    '0x90befffa23631e28', '0xa4506cebde82bde9', '0xbef9a3f7b2c67915', '0xc67178f2e372532b',
+    '0xca273eceea26619c', '0xd186b8c721c0c207', '0xeada7dd6cde0eb1e', '0xf57d4f7fee6ed178',
+    '0x06f067aa72176fba', '0x0a637dc5a2c898a6', '0x113f9804bef90dae', '0x1b710b35131c471b',
+    '0x28db77f523047d84', '0x32caab7b40c72493', '0x3c9ebe0a15c9bebc', '0x431d67c49c100d4c',
+    '0x4cc5d4becb3e42b6', '0x597f299cfc657e2a', '0x5fcb6fab3ad6faec', '0x6c44198c4a475817'
+].map(n => BigInt(n)));
+// Temporary buffer, not used to store anything between runs
+const SHA512_W_H = new Uint32Array(80);
+const SHA512_W_L = new Uint32Array(80);
+class SHA512 extends _sha2_js_1.SHA2 {
+    constructor() {
+        super(128, 64, 16, false);
+        // We cannot use array here since array allows indexing by variable which means optimizer/compiler cannot use registers.
+        // Also looks cleaner and easier to verify with spec.
+        // Initial state (first 32 bits of the fractional parts of the square roots of the first 8 primes 2..19):
+        // h -- high 32 bits, l -- low 32 bits
+        this.Ah = 0x6a09e667 | 0;
+        this.Al = 0xf3bcc908 | 0;
+        this.Bh = 0xbb67ae85 | 0;
+        this.Bl = 0x84caa73b | 0;
+        this.Ch = 0x3c6ef372 | 0;
+        this.Cl = 0xfe94f82b | 0;
+        this.Dh = 0xa54ff53a | 0;
+        this.Dl = 0x5f1d36f1 | 0;
+        this.Eh = 0x510e527f | 0;
+        this.El = 0xade682d1 | 0;
+        this.Fh = 0x9b05688c | 0;
+        this.Fl = 0x2b3e6c1f | 0;
+        this.Gh = 0x1f83d9ab | 0;
+        this.Gl = 0xfb41bd6b | 0;
+        this.Hh = 0x5be0cd19 | 0;
+        this.Hl = 0x137e2179 | 0;
+    }
+    // prettier-ignore
+    get() {
+        const { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
+        return [Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl];
+    }
+    // prettier-ignore
+    set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl) {
+        this.Ah = Ah | 0;
+        this.Al = Al | 0;
+        this.Bh = Bh | 0;
+        this.Bl = Bl | 0;
+        this.Ch = Ch | 0;
+        this.Cl = Cl | 0;
+        this.Dh = Dh | 0;
+        this.Dl = Dl | 0;
+        this.Eh = Eh | 0;
+        this.El = El | 0;
+        this.Fh = Fh | 0;
+        this.Fl = Fl | 0;
+        this.Gh = Gh | 0;
+        this.Gl = Gl | 0;
+        this.Hh = Hh | 0;
+        this.Hl = Hl | 0;
+    }
+    process(view, offset) {
+        // Extend the first 16 words into the remaining 64 words w[16..79] of the message schedule array
+        for (let i = 0; i < 16; i++, offset += 4) {
+            SHA512_W_H[i] = view.getUint32(offset);
+            SHA512_W_L[i] = view.getUint32((offset += 4));
+        }
+        for (let i = 16; i < 80; i++) {
+            // s0 := (w[i-15] rightrotate 1) xor (w[i-15] rightrotate 8) xor (w[i-15] rightshift 7)
+            const W15h = SHA512_W_H[i - 15] | 0;
+            const W15l = SHA512_W_L[i - 15] | 0;
+            const s0h = _u64_js_1.default.rotrSH(W15h, W15l, 1) ^ _u64_js_1.default.rotrSH(W15h, W15l, 8) ^ _u64_js_1.default.shrSH(W15h, W15l, 7);
+            const s0l = _u64_js_1.default.rotrSL(W15h, W15l, 1) ^ _u64_js_1.default.rotrSL(W15h, W15l, 8) ^ _u64_js_1.default.shrSL(W15h, W15l, 7);
+            // s1 := (w[i-2] rightrotate 19) xor (w[i-2] rightrotate 61) xor (w[i-2] rightshift 6)
+            const W2h = SHA512_W_H[i - 2] | 0;
+            const W2l = SHA512_W_L[i - 2] | 0;
+            const s1h = _u64_js_1.default.rotrSH(W2h, W2l, 19) ^ _u64_js_1.default.rotrBH(W2h, W2l, 61) ^ _u64_js_1.default.shrSH(W2h, W2l, 6);
+            const s1l = _u64_js_1.default.rotrSL(W2h, W2l, 19) ^ _u64_js_1.default.rotrBL(W2h, W2l, 61) ^ _u64_js_1.default.shrSL(W2h, W2l, 6);
+            // SHA256_W[i] = s0 + s1 + SHA256_W[i - 7] + SHA256_W[i - 16];
+            const SUMl = _u64_js_1.default.add4L(s0l, s1l, SHA512_W_L[i - 7], SHA512_W_L[i - 16]);
+            const SUMh = _u64_js_1.default.add4H(SUMl, s0h, s1h, SHA512_W_H[i - 7], SHA512_W_H[i - 16]);
+            SHA512_W_H[i] = SUMh | 0;
+            SHA512_W_L[i] = SUMl | 0;
+        }
+        let { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
+        // Compression function main loop, 80 rounds
+        for (let i = 0; i < 80; i++) {
+            // S1 := (e rightrotate 14) xor (e rightrotate 18) xor (e rightrotate 41)
+            const sigma1h = _u64_js_1.default.rotrSH(Eh, El, 14) ^ _u64_js_1.default.rotrSH(Eh, El, 18) ^ _u64_js_1.default.rotrBH(Eh, El, 41);
+            const sigma1l = _u64_js_1.default.rotrSL(Eh, El, 14) ^ _u64_js_1.default.rotrSL(Eh, El, 18) ^ _u64_js_1.default.rotrBL(Eh, El, 41);
+            //const T1 = (H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i]) | 0;
+            const CHIh = (Eh & Fh) ^ (~Eh & Gh);
+            const CHIl = (El & Fl) ^ (~El & Gl);
+            // T1 = H + sigma1 + Chi(E, F, G) + SHA512_K[i] + SHA512_W[i]
+            // prettier-ignore
+            const T1ll = _u64_js_1.default.add5L(Hl, sigma1l, CHIl, SHA512_Kl[i], SHA512_W_L[i]);
+            const T1h = _u64_js_1.default.add5H(T1ll, Hh, sigma1h, CHIh, SHA512_Kh[i], SHA512_W_H[i]);
+            const T1l = T1ll | 0;
+            // S0 := (a rightrotate 28) xor (a rightrotate 34) xor (a rightrotate 39)
+            const sigma0h = _u64_js_1.default.rotrSH(Ah, Al, 28) ^ _u64_js_1.default.rotrBH(Ah, Al, 34) ^ _u64_js_1.default.rotrBH(Ah, Al, 39);
+            const sigma0l = _u64_js_1.default.rotrSL(Ah, Al, 28) ^ _u64_js_1.default.rotrBL(Ah, Al, 34) ^ _u64_js_1.default.rotrBL(Ah, Al, 39);
+            const MAJh = (Ah & Bh) ^ (Ah & Ch) ^ (Bh & Ch);
+            const MAJl = (Al & Bl) ^ (Al & Cl) ^ (Bl & Cl);
+            Hh = Gh | 0;
+            Hl = Gl | 0;
+            Gh = Fh | 0;
+            Gl = Fl | 0;
+            Fh = Eh | 0;
+            Fl = El | 0;
+            ({ h: Eh, l: El } = _u64_js_1.default.add(Dh | 0, Dl | 0, T1h | 0, T1l | 0));
+            Dh = Ch | 0;
+            Dl = Cl | 0;
+            Ch = Bh | 0;
+            Cl = Bl | 0;
+            Bh = Ah | 0;
+            Bl = Al | 0;
+            const All = _u64_js_1.default.add3L(T1l, sigma0l, MAJl);
+            Ah = _u64_js_1.default.add3H(All, T1h, sigma0h, MAJh);
+            Al = All | 0;
+        }
+        // Add the compressed chunk to the current hash value
+        ({ h: Ah, l: Al } = _u64_js_1.default.add(this.Ah | 0, this.Al | 0, Ah | 0, Al | 0));
+        ({ h: Bh, l: Bl } = _u64_js_1.default.add(this.Bh | 0, this.Bl | 0, Bh | 0, Bl | 0));
+        ({ h: Ch, l: Cl } = _u64_js_1.default.add(this.Ch | 0, this.Cl | 0, Ch | 0, Cl | 0));
+        ({ h: Dh, l: Dl } = _u64_js_1.default.add(this.Dh | 0, this.Dl | 0, Dh | 0, Dl | 0));
+        ({ h: Eh, l: El } = _u64_js_1.default.add(this.Eh | 0, this.El | 0, Eh | 0, El | 0));
+        ({ h: Fh, l: Fl } = _u64_js_1.default.add(this.Fh | 0, this.Fl | 0, Fh | 0, Fl | 0));
+        ({ h: Gh, l: Gl } = _u64_js_1.default.add(this.Gh | 0, this.Gl | 0, Gh | 0, Gl | 0));
+        ({ h: Hh, l: Hl } = _u64_js_1.default.add(this.Hh | 0, this.Hl | 0, Hh | 0, Hl | 0));
+        this.set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl);
+    }
+    roundClean() {
+        SHA512_W_H.fill(0);
+        SHA512_W_L.fill(0);
+    }
+    destroy() {
+        this.buffer.fill(0);
+        this.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+    }
+}
+exports.SHA512 = SHA512;
+class SHA512_224 extends SHA512 {
+    constructor() {
+        super();
+        // h -- high 32 bits, l -- low 32 bits
+        this.Ah = 0x8c3d37c8 | 0;
+        this.Al = 0x19544da2 | 0;
+        this.Bh = 0x73e19966 | 0;
+        this.Bl = 0x89dcd4d6 | 0;
+        this.Ch = 0x1dfab7ae | 0;
+        this.Cl = 0x32ff9c82 | 0;
+        this.Dh = 0x679dd514 | 0;
+        this.Dl = 0x582f9fcf | 0;
+        this.Eh = 0x0f6d2b69 | 0;
+        this.El = 0x7bd44da8 | 0;
+        this.Fh = 0x77e36f73 | 0;
+        this.Fl = 0x04c48942 | 0;
+        this.Gh = 0x3f9d85a8 | 0;
+        this.Gl = 0x6a1d36c8 | 0;
+        this.Hh = 0x1112e6ad | 0;
+        this.Hl = 0x91d692a1 | 0;
+        this.outputLen = 28;
+    }
+}
+class SHA512_256 extends SHA512 {
+    constructor() {
+        super();
+        // h -- high 32 bits, l -- low 32 bits
+        this.Ah = 0x22312194 | 0;
+        this.Al = 0xfc2bf72c | 0;
+        this.Bh = 0x9f555fa3 | 0;
+        this.Bl = 0xc84c64c2 | 0;
+        this.Ch = 0x2393b86b | 0;
+        this.Cl = 0x6f53b151 | 0;
+        this.Dh = 0x96387719 | 0;
+        this.Dl = 0x5940eabd | 0;
+        this.Eh = 0x96283ee2 | 0;
+        this.El = 0xa88effe3 | 0;
+        this.Fh = 0xbe5e1e25 | 0;
+        this.Fl = 0x53863992 | 0;
+        this.Gh = 0x2b0199fc | 0;
+        this.Gl = 0x2c85b8aa | 0;
+        this.Hh = 0x0eb72ddc | 0;
+        this.Hl = 0x81c52ca2 | 0;
+        this.outputLen = 32;
+    }
+}
+class SHA384 extends SHA512 {
+    constructor() {
+        super();
+        // h -- high 32 bits, l -- low 32 bits
+        this.Ah = 0xcbbb9d5d | 0;
+        this.Al = 0xc1059ed8 | 0;
+        this.Bh = 0x629a292a | 0;
+        this.Bl = 0x367cd507 | 0;
+        this.Ch = 0x9159015a | 0;
+        this.Cl = 0x3070dd17 | 0;
+        this.Dh = 0x152fecd8 | 0;
+        this.Dl = 0xf70e5939 | 0;
+        this.Eh = 0x67332667 | 0;
+        this.El = 0xffc00b31 | 0;
+        this.Fh = 0x8eb44a87 | 0;
+        this.Fl = 0x68581511 | 0;
+        this.Gh = 0xdb0c2e0d | 0;
+        this.Gl = 0x64f98fa7 | 0;
+        this.Hh = 0x47b5481d | 0;
+        this.Hl = 0xbefa4fa4 | 0;
+        this.outputLen = 48;
+    }
+}
+exports.sha512 = (0, utils_js_1.wrapConstructor)(() => new SHA512());
+exports.sha512_224 = (0, utils_js_1.wrapConstructor)(() => new SHA512_224());
+exports.sha512_256 = (0, utils_js_1.wrapConstructor)(() => new SHA512_256());
+exports.sha384 = (0, utils_js_1.wrapConstructor)(() => new SHA384());
+//# sourceMappingURL=sha512.js.map
+});
+
+defineModule("ripemd160.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.ripemd160 = exports.RIPEMD160 = void 0;
+const _sha2_js_1 = require("./_sha2.js");
+const utils_js_1 = require("./utils.js");
+// https://homes.esat.kuleuven.be/~bosselae/ripemd160.html
+// https://homes.esat.kuleuven.be/~bosselae/ripemd160/pdf/AB-9601/AB-9601.pdf
+const Rho = new Uint8Array([7, 4, 13, 1, 10, 6, 15, 3, 12, 0, 9, 5, 2, 14, 11, 8]);
+const Id = Uint8Array.from({ length: 16 }, (_, i) => i);
+const Pi = Id.map((i) => (9 * i + 5) % 16);
+let idxL = [Id];
+let idxR = [Pi];
+for (let i = 0; i < 4; i++)
+    for (let j of [idxL, idxR])
+        j.push(j[i].map((k) => Rho[k]));
+const shifts = [
+    [11, 14, 15, 12, 5, 8, 7, 9, 11, 13, 14, 15, 6, 7, 9, 8],
+    [12, 13, 11, 15, 6, 9, 9, 7, 12, 15, 11, 13, 7, 8, 7, 7],
+    [13, 15, 14, 11, 7, 7, 6, 8, 13, 14, 13, 12, 5, 5, 6, 9],
+    [14, 11, 12, 14, 8, 6, 5, 5, 15, 12, 15, 14, 9, 9, 8, 6],
+    [15, 12, 13, 13, 9, 5, 8, 6, 14, 11, 12, 11, 8, 6, 5, 5],
+].map((i) => new Uint8Array(i));
+const shiftsL = idxL.map((idx, i) => idx.map((j) => shifts[i][j]));
+const shiftsR = idxR.map((idx, i) => idx.map((j) => shifts[i][j]));
+const Kl = new Uint32Array([0x00000000, 0x5a827999, 0x6ed9eba1, 0x8f1bbcdc, 0xa953fd4e]);
+const Kr = new Uint32Array([0x50a28be6, 0x5c4dd124, 0x6d703ef3, 0x7a6d76e9, 0x00000000]);
+// The rotate left (circular left shift) operation for uint32
+const rotl = (word, shift) => (word << shift) | (word >>> (32 - shift));
+// It's called f() in spec.
+function f(group, x, y, z) {
+    if (group === 0)
+        return x ^ y ^ z;
+    else if (group === 1)
+        return (x & y) | (~x & z);
+    else if (group === 2)
+        return (x | ~y) ^ z;
+    else if (group === 3)
+        return (x & z) | (y & ~z);
+    else
+        return x ^ (y | ~z);
+}
+// Temporary buffer, not used to store anything between runs
+const BUF = new Uint32Array(16);
+class RIPEMD160 extends _sha2_js_1.SHA2 {
+    constructor() {
+        super(64, 20, 8, true);
+        this.h0 = 0x67452301 | 0;
+        this.h1 = 0xefcdab89 | 0;
+        this.h2 = 0x98badcfe | 0;
+        this.h3 = 0x10325476 | 0;
+        this.h4 = 0xc3d2e1f0 | 0;
+    }
+    get() {
+        const { h0, h1, h2, h3, h4 } = this;
+        return [h0, h1, h2, h3, h4];
+    }
+    set(h0, h1, h2, h3, h4) {
+        this.h0 = h0 | 0;
+        this.h1 = h1 | 0;
+        this.h2 = h2 | 0;
+        this.h3 = h3 | 0;
+        this.h4 = h4 | 0;
+    }
+    process(view, offset) {
+        for (let i = 0; i < 16; i++, offset += 4)
+            BUF[i] = view.getUint32(offset, true);
+        // prettier-ignore
+        let al = this.h0 | 0, ar = al, bl = this.h1 | 0, br = bl, cl = this.h2 | 0, cr = cl, dl = this.h3 | 0, dr = dl, el = this.h4 | 0, er = el;
+        // Instead of iterating 0 to 80, we split it into 5 groups
+        // And use the groups in constants, functions, etc. Much simpler
+        for (let group = 0; group < 5; group++) {
+            const rGroup = 4 - group;
+            const hbl = Kl[group], hbr = Kr[group]; // prettier-ignore
+            const rl = idxL[group], rr = idxR[group]; // prettier-ignore
+            const sl = shiftsL[group], sr = shiftsR[group]; // prettier-ignore
+            for (let i = 0; i < 16; i++) {
+                const tl = (rotl(al + f(group, bl, cl, dl) + BUF[rl[i]] + hbl, sl[i]) + el) | 0;
+                al = el, el = dl, dl = rotl(cl, 10) | 0, cl = bl, bl = tl; // prettier-ignore
+            }
+            // 2 loops are 10% faster
+            for (let i = 0; i < 16; i++) {
+                const tr = (rotl(ar + f(rGroup, br, cr, dr) + BUF[rr[i]] + hbr, sr[i]) + er) | 0;
+                ar = er, er = dr, dr = rotl(cr, 10) | 0, cr = br, br = tr; // prettier-ignore
+            }
+        }
+        // Add the compressed chunk to the current hash value
+        this.set((this.h1 + cl + dr) | 0, (this.h2 + dl + er) | 0, (this.h3 + el + ar) | 0, (this.h4 + al + br) | 0, (this.h0 + bl + cr) | 0);
+    }
+    roundClean() {
+        BUF.fill(0);
+    }
+    destroy() {
+        this.destroyed = true;
+        this.buffer.fill(0);
+        this.set(0, 0, 0, 0, 0);
+    }
+}
+exports.RIPEMD160 = RIPEMD160;
+/**
+ * RIPEMD-160 - a hash function from 1990s.
+ * @param message - msg that would be hashed
+ */
+exports.ripemd160 = (0, utils_js_1.wrapConstructor)(() => new RIPEMD160());
+//# sourceMappingURL=ripemd160.js.map
+});
+
+defineModule("hmac.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.hmac = void 0;
+const _assert_js_1 = require("./_assert.js");
+const utils_js_1 = require("./utils.js");
+// HMAC (RFC 2104)
+class HMAC extends utils_js_1.Hash {
+    constructor(hash, _key) {
+        super();
+        this.finished = false;
+        this.destroyed = false;
+        _assert_js_1.default.hash(hash);
+        const key = (0, utils_js_1.toBytes)(_key);
+        this.iHash = hash.create();
+        if (typeof this.iHash.update !== 'function')
+            throw new TypeError('Expected instance of class which extends utils.Hash');
+        this.blockLen = this.iHash.blockLen;
+        this.outputLen = this.iHash.outputLen;
+        const blockLen = this.blockLen;
+        const pad = new Uint8Array(blockLen);
+        // blockLen can be bigger than outputLen
+        pad.set(key.length > blockLen ? hash.create().update(key).digest() : key);
+        for (let i = 0; i < pad.length; i++)
+            pad[i] ^= 0x36;
+        this.iHash.update(pad);
+        // By doing update (processing of first block) of outer hash here we can re-use it between multiple calls via clone
+        this.oHash = hash.create();
+        // Undo internal XOR && apply outer XOR
+        for (let i = 0; i < pad.length; i++)
+            pad[i] ^= 0x36 ^ 0x5c;
+        this.oHash.update(pad);
+        pad.fill(0);
+    }
+    update(buf) {
+        _assert_js_1.default.exists(this);
+        this.iHash.update(buf);
+        return this;
+    }
+    digestInto(out) {
+        _assert_js_1.default.exists(this);
+        _assert_js_1.default.bytes(out, this.outputLen);
+        this.finished = true;
+        this.iHash.digestInto(out);
+        this.oHash.update(out);
+        this.oHash.digestInto(out);
+        this.destroy();
+    }
+    digest() {
+        const out = new Uint8Array(this.oHash.outputLen);
+        this.digestInto(out);
+        return out;
+    }
+    _cloneInto(to) {
+        // Create new instance without calling constructor since key already in state and we don't know it.
+        to || (to = Object.create(Object.getPrototypeOf(this), {}));
+        const { oHash, iHash, finished, destroyed, blockLen, outputLen } = this;
+        to = to;
+        to.finished = finished;
+        to.destroyed = destroyed;
+        to.blockLen = blockLen;
+        to.outputLen = outputLen;
+        to.oHash = oHash._cloneInto(to.oHash);
+        to.iHash = iHash._cloneInto(to.iHash);
+        return to;
+    }
+    destroy() {
+        this.destroyed = true;
+        this.oHash.destroy();
+        this.iHash.destroy();
+    }
+}
+/**
+ * HMAC: RFC2104 message authentication code.
+ * @param hash - function that would be used e.g. sha256
+ * @param key - message key
+ * @param message - message data
+ */
+const hmac = (hash, key, message) => new HMAC(hash, key).update(message).digest();
+exports.hmac = hmac;
+exports.hmac.create = (hash, key) => new HMAC(hash, key);
+//# sourceMappingURL=hmac.js.map
+});
+
+defineModule("pbkdf2.js", function(require, exports, module) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.pbkdf2Async = exports.pbkdf2 = void 0;
+const _assert_js_1 = require("./_assert.js");
+const hmac_js_1 = require("./hmac.js");
+const utils_js_1 = require("./utils.js");
+// Common prologue and epilogue for sync/async functions
+function pbkdf2Init(hash, _password, _salt, _opts) {
+    _assert_js_1.default.hash(hash);
+    const opts = (0, utils_js_1.checkOpts)({ dkLen: 32, asyncTick: 10 }, _opts);
+    const { c, dkLen, asyncTick } = opts;
+    _assert_js_1.default.number(c);
+    _assert_js_1.default.number(dkLen);
+    _assert_js_1.default.number(asyncTick);
+    if (c < 1)
+        throw new Error('PBKDF2: iterations (c) should be >= 1');
+    const password = (0, utils_js_1.toBytes)(_password);
+    const salt = (0, utils_js_1.toBytes)(_salt);
+    // DK = PBKDF2(PRF, Password, Salt, c, dkLen);
+    const DK = new Uint8Array(dkLen);
+    // U1 = PRF(Password, Salt + INT_32_BE(i))
+    const PRF = hmac_js_1.hmac.create(hash, password);
+    const PRFSalt = PRF._cloneInto().update(salt);
+    return { c, dkLen, asyncTick, DK, PRF, PRFSalt };
+}
+function pbkdf2Output(PRF, PRFSalt, DK, prfW, u) {
+    PRF.destroy();
+    PRFSalt.destroy();
+    if (prfW)
+        prfW.destroy();
+    u.fill(0);
+    return DK;
+}
+/**
+ * PBKDF2-HMAC: RFC 2898 key derivation function
+ * @param hash - hash function that would be used e.g. sha256
+ * @param password - password from which a derived key is generated
+ * @param salt - cryptographic salt
+ * @param opts - {c, dkLen} where c is work factor and dkLen is output message size
+ */
+function pbkdf2(hash, password, salt, opts) {
+    const { c, dkLen, DK, PRF, PRFSalt } = pbkdf2Init(hash, password, salt, opts);
+    let prfW; // Working copy
+    const arr = new Uint8Array(4);
+    const view = (0, utils_js_1.createView)(arr);
+    const u = new Uint8Array(PRF.outputLen);
+    // DK = T1 + T2 + ⋯ + Tdklen/hlen
+    for (let ti = 1, pos = 0; pos < dkLen; ti++, pos += PRF.outputLen) {
+        // Ti = F(Password, Salt, c, i)
+        const Ti = DK.subarray(pos, pos + PRF.outputLen);
+        view.setInt32(0, ti, false);
+        // F(Password, Salt, c, i) = U1 ^ U2 ^ ⋯ ^ Uc
+        // U1 = PRF(Password, Salt + INT_32_BE(i))
+        (prfW = PRFSalt._cloneInto(prfW)).update(arr).digestInto(u);
+        Ti.set(u.subarray(0, Ti.length));
+        for (let ui = 1; ui < c; ui++) {
+            // Uc = PRF(Password, Uc−1)
+            PRF._cloneInto(prfW).update(u).digestInto(u);
+            for (let i = 0; i < Ti.length; i++)
+                Ti[i] ^= u[i];
+        }
+    }
+    return pbkdf2Output(PRF, PRFSalt, DK, prfW, u);
+}
+exports.pbkdf2 = pbkdf2;
+async function pbkdf2Async(hash, password, salt, opts) {
+    const { c, dkLen, asyncTick, DK, PRF, PRFSalt } = pbkdf2Init(hash, password, salt, opts);
+    let prfW; // Working copy
+    const arr = new Uint8Array(4);
+    const view = (0, utils_js_1.createView)(arr);
+    const u = new Uint8Array(PRF.outputLen);
+    // DK = T1 + T2 + ⋯ + Tdklen/hlen
+    for (let ti = 1, pos = 0; pos < dkLen; ti++, pos += PRF.outputLen) {
+        // Ti = F(Password, Salt, c, i)
+        const Ti = DK.subarray(pos, pos + PRF.outputLen);
+        view.setInt32(0, ti, false);
+        // F(Password, Salt, c, i) = U1 ^ U2 ^ ⋯ ^ Uc
+        // U1 = PRF(Password, Salt + INT_32_BE(i))
+        (prfW = PRFSalt._cloneInto(prfW)).update(arr).digestInto(u);
+        Ti.set(u.subarray(0, Ti.length));
+        await (0, utils_js_1.asyncLoop)(c - 1, asyncTick, (i) => {
+            // Uc = PRF(Password, Uc−1)
+            PRF._cloneInto(prfW).update(u).digestInto(u);
+            for (let i = 0; i < Ti.length; i++)
+                Ti[i] ^= u[i];
+        });
+    }
+    return pbkdf2Output(PRF, PRFSalt, DK, prfW, u);
+}
+exports.pbkdf2Async = pbkdf2Async;
+//# sourceMappingURL=pbkdf2.js.map
+});
+
+// --- noble-secp256k1 1.2.14 (CommonJS, IIFE-wrapped) ---
+const nobleSecp256k1 = (function() {
+  const exports = {};
+  const module = { exports };
+  // 'require' shim — only 'crypto' is requested, returning undefined is safe
+  // because the lib detects self.crypto (WebCrypto) first.
+  function require(name) { return undefined; }
+"use strict";
+/*! noble-secp256k1 - MIT License (c) Paul Miller (paulmillr.com) */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.utils = exports.schnorr = exports.verify = exports.signSync = exports.sign = exports.getSharedSecret = exports.recoverPublicKey = exports.getPublicKey = exports.SignResult = exports.Signature = exports.Point = exports.CURVE = void 0;
+const CURVE = {
+    a: 0n,
+    b: 7n,
+    P: 2n ** 256n - 2n ** 32n - 977n,
+    n: 2n ** 256n - 432420386565659656852420866394968145599n,
+    h: 1n,
+    Gx: 55066263022277343669578718895168534326250603453777594175500187360389116729240n,
+    Gy: 32670510020758816978083085130507043184471273380659243275938904335757337482424n,
+    beta: 0x7ae96a2b657c07106e64479eac3434e99cf0497512f58995c1396c28719501een,
+};
+exports.CURVE = CURVE;
+function weistrass(x) {
+    const { a, b } = CURVE;
+    return mod(x ** 3n + a * x + b);
+}
+const USE_ENDOMORPHISM = CURVE.a === 0n;
+class JacobianPoint {
+    constructor(x, y, z) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+    }
+    static fromAffine(p) {
+        if (!(p instanceof Point)) {
+            throw new TypeError('JacobianPoint#fromAffine: expected Point');
+        }
+        return new JacobianPoint(p.x, p.y, 1n);
+    }
+    static toAffineBatch(points) {
+        const toInv = invertBatch(points.map((p) => p.z));
+        return points.map((p, i) => p.toAffine(toInv[i]));
+    }
+    static normalizeZ(points) {
+        return JacobianPoint.toAffineBatch(points).map(JacobianPoint.fromAffine);
+    }
+    equals(other) {
+        const a = this;
+        const b = other;
+        const az2 = mod(a.z * a.z);
+        const az3 = mod(a.z * az2);
+        const bz2 = mod(b.z * b.z);
+        const bz3 = mod(b.z * bz2);
+        return mod(a.x * bz2) === mod(az2 * b.x) && mod(a.y * bz3) === mod(az3 * b.y);
+    }
+    negate() {
+        return new JacobianPoint(this.x, mod(-this.y), this.z);
+    }
+    double() {
+        const X1 = this.x;
+        const Y1 = this.y;
+        const Z1 = this.z;
+        const A = mod(X1 ** 2n);
+        const B = mod(Y1 ** 2n);
+        const C = mod(B ** 2n);
+        const D = mod(2n * (mod(mod((X1 + B) ** 2n)) - A - C));
+        const E = mod(3n * A);
+        const F = mod(E ** 2n);
+        const X3 = mod(F - 2n * D);
+        const Y3 = mod(E * (D - X3) - 8n * C);
+        const Z3 = mod(2n * Y1 * Z1);
+        return new JacobianPoint(X3, Y3, Z3);
+    }
+    add(other) {
+        if (!(other instanceof JacobianPoint)) {
+            throw new TypeError('JacobianPoint#add: expected JacobianPoint');
+        }
+        const X1 = this.x;
+        const Y1 = this.y;
+        const Z1 = this.z;
+        const X2 = other.x;
+        const Y2 = other.y;
+        const Z2 = other.z;
+        if (X2 === 0n || Y2 === 0n)
+            return this;
+        if (X1 === 0n || Y1 === 0n)
+            return other;
+        const Z1Z1 = mod(Z1 ** 2n);
+        const Z2Z2 = mod(Z2 ** 2n);
+        const U1 = mod(X1 * Z2Z2);
+        const U2 = mod(X2 * Z1Z1);
+        const S1 = mod(Y1 * Z2 * Z2Z2);
+        const S2 = mod(mod(Y2 * Z1) * Z1Z1);
+        const H = mod(U2 - U1);
+        const r = mod(S2 - S1);
+        if (H === 0n) {
+            if (r === 0n) {
+                return this.double();
+            }
+            else {
+                return JacobianPoint.ZERO;
+            }
+        }
+        const HH = mod(H ** 2n);
+        const HHH = mod(H * HH);
+        const V = mod(U1 * HH);
+        const X3 = mod(r ** 2n - HHH - 2n * V);
+        const Y3 = mod(r * (V - X3) - S1 * HHH);
+        const Z3 = mod(Z1 * Z2 * H);
+        return new JacobianPoint(X3, Y3, Z3);
+    }
+    subtract(other) {
+        return this.add(other.negate());
+    }
+    multiplyUnsafe(scalar) {
+        if (!isValidScalar(scalar))
+            throw new TypeError('Point#multiply: expected valid scalar');
+        let n = mod(BigInt(scalar), CURVE.n);
+        if (!USE_ENDOMORPHISM) {
+            let p = JacobianPoint.ZERO;
+            let d = this;
+            while (n > 0n) {
+                if (n & 1n)
+                    p = p.add(d);
+                d = d.double();
+                n >>= 1n;
+            }
+            return p;
+        }
+        let [k1neg, k1, k2neg, k2] = splitScalarEndo(n);
+        let k1p = JacobianPoint.ZERO;
+        let k2p = JacobianPoint.ZERO;
+        let d = this;
+        while (k1 > 0n || k2 > 0n) {
+            if (k1 & 1n)
+                k1p = k1p.add(d);
+            if (k2 & 1n)
+                k2p = k2p.add(d);
+            d = d.double();
+            k1 >>= 1n;
+            k2 >>= 1n;
+        }
+        if (k1neg)
+            k1p = k1p.negate();
+        if (k2neg)
+            k2p = k2p.negate();
+        k2p = new JacobianPoint(mod(k2p.x * CURVE.beta), k2p.y, k2p.z);
+        return k1p.add(k2p);
+    }
+    precomputeWindow(W) {
+        const windows = USE_ENDOMORPHISM ? 128 / W + 1 : 256 / W + 1;
+        let points = [];
+        let p = this;
+        let base = p;
+        for (let window = 0; window < windows; window++) {
+            base = p;
+            points.push(base);
+            for (let i = 1; i < 2 ** (W - 1); i++) {
+                base = base.add(p);
+                points.push(base);
+            }
+            p = base.double();
+        }
+        return points;
+    }
+    wNAF(n, affinePoint) {
+        if (!affinePoint && this.equals(JacobianPoint.BASE))
+            affinePoint = Point.BASE;
+        const W = (affinePoint && affinePoint._WINDOW_SIZE) || 1;
+        if (256 % W) {
+            throw new Error('Point#wNAF: Invalid precomputation window, must be power of 2');
+        }
+        let precomputes = affinePoint && pointPrecomputes.get(affinePoint);
+        if (!precomputes) {
+            precomputes = this.precomputeWindow(W);
+            if (affinePoint && W !== 1) {
+                precomputes = JacobianPoint.normalizeZ(precomputes);
+                pointPrecomputes.set(affinePoint, precomputes);
+            }
+        }
+        let p = JacobianPoint.ZERO;
+        let f = JacobianPoint.ZERO;
+        const windows = USE_ENDOMORPHISM ? 128 / W + 1 : 256 / W + 1;
+        const windowSize = 2 ** (W - 1);
+        const mask = BigInt(2 ** W - 1);
+        const maxNumber = 2 ** W;
+        const shiftBy = BigInt(W);
+        for (let window = 0; window < windows; window++) {
+            const offset = window * windowSize;
+            let wbits = Number(n & mask);
+            n >>= shiftBy;
+            if (wbits > windowSize) {
+                wbits -= maxNumber;
+                n += 1n;
+            }
+            if (wbits === 0) {
+                f = f.add(window % 2 ? precomputes[offset].negate() : precomputes[offset]);
+            }
+            else {
+                const cached = precomputes[offset + Math.abs(wbits) - 1];
+                p = p.add(wbits < 0 ? cached.negate() : cached);
+            }
+        }
+        return [p, f];
+    }
+    multiply(scalar, affinePoint) {
+        if (!isValidScalar(scalar))
+            throw new TypeError('Point#multiply: expected valid scalar');
+        let n = mod(BigInt(scalar), CURVE.n);
+        let point;
+        let fake;
+        if (USE_ENDOMORPHISM) {
+            const [k1neg, k1, k2neg, k2] = splitScalarEndo(n);
+            let k1p, k2p, f1p, f2p;
+            [k1p, f1p] = this.wNAF(k1, affinePoint);
+            [k2p, f2p] = this.wNAF(k2, affinePoint);
+            if (k1neg)
+                k1p = k1p.negate();
+            if (k2neg)
+                k2p = k2p.negate();
+            k2p = new JacobianPoint(mod(k2p.x * CURVE.beta), k2p.y, k2p.z);
+            [point, fake] = [k1p.add(k2p), f1p.add(f2p)];
+        }
+        else {
+            [point, fake] = this.wNAF(n, affinePoint);
+        }
+        return JacobianPoint.normalizeZ([point, fake])[0];
+    }
+    toAffine(invZ = invert(this.z)) {
+        const invZ2 = invZ ** 2n;
+        const x = mod(this.x * invZ2);
+        const y = mod(this.y * invZ2 * invZ);
+        return new Point(x, y);
+    }
+}
+JacobianPoint.BASE = new JacobianPoint(CURVE.Gx, CURVE.Gy, 1n);
+JacobianPoint.ZERO = new JacobianPoint(0n, 1n, 0n);
+const pointPrecomputes = new WeakMap();
+class Point {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+    }
+    _setWindowSize(windowSize) {
+        this._WINDOW_SIZE = windowSize;
+        pointPrecomputes.delete(this);
+    }
+    static fromCompressedHex(bytes) {
+        const isShort = bytes.length === 32;
+        const x = bytesToNumber(isShort ? bytes : bytes.slice(1));
+        const y2 = weistrass(x);
+        let y = sqrtMod(y2);
+        const isYOdd = (y & 1n) === 1n;
+        if (isShort) {
+            if (isYOdd)
+                y = mod(-y);
+        }
+        else {
+            const isFirstByteOdd = (bytes[0] & 1) === 1;
+            if (isFirstByteOdd !== isYOdd)
+                y = mod(-y);
+        }
+        const point = new Point(x, y);
+        point.assertValidity();
+        return point;
+    }
+    static fromUncompressedHex(bytes) {
+        const x = bytesToNumber(bytes.slice(1, 33));
+        const y = bytesToNumber(bytes.slice(33));
+        const point = new Point(x, y);
+        point.assertValidity();
+        return point;
+    }
+    static fromHex(hex) {
+        const bytes = ensureBytes(hex);
+        const header = bytes[0];
+        if (bytes.length === 32 || (bytes.length === 33 && (header === 0x02 || header === 0x03))) {
+            return this.fromCompressedHex(bytes);
+        }
+        if (bytes.length === 65 && header === 0x04)
+            return this.fromUncompressedHex(bytes);
+        throw new Error(`Point.fromHex: received invalid point. Expected 32-33 compressed bytes or 65 uncompressed bytes, not ${bytes.length}`);
+    }
+    static fromPrivateKey(privateKey) {
+        return Point.BASE.multiply(normalizePrivateKey(privateKey));
+    }
+    static fromSignature(msgHash, signature, recovery) {
+        let h = msgHash instanceof Uint8Array ? bytesToNumber(msgHash) : hexToNumber(msgHash);
+        const sig = normalizeSignature(signature);
+        const { r, s } = sig;
+        if (recovery !== 0 && recovery !== 1) {
+            throw new Error('Cannot recover signature: invalid yParity bit');
+        }
+        const prefix = 2 + (recovery & 1);
+        const P_ = Point.fromHex(`0${prefix}${pad64(r)}`);
+        const sP = JacobianPoint.fromAffine(P_).multiplyUnsafe(s);
+        const hG = JacobianPoint.BASE.multiply(h);
+        const rinv = invert(r, CURVE.n);
+        const Q = sP.subtract(hG).multiplyUnsafe(rinv);
+        const point = Q.toAffine();
+        point.assertValidity();
+        return point;
+    }
+    toRawBytes(isCompressed = false) {
+        return hexToBytes(this.toHex(isCompressed));
+    }
+    toHex(isCompressed = false) {
+        const x = pad64(this.x);
+        if (isCompressed) {
+            return `${this.y & 1n ? '03' : '02'}${x}`;
+        }
+        else {
+            return `04${x}${pad64(this.y)}`;
+        }
+    }
+    toHexX() {
+        return this.toHex(true).slice(2);
+    }
+    toRawX() {
+        return this.toRawBytes(true).slice(1);
+    }
+    assertValidity() {
+        const msg = 'Point is not on elliptic curve';
+        const { P } = CURVE;
+        const { x, y } = this;
+        if (x === 0n || y === 0n || x >= P || y >= P)
+            throw new Error(msg);
+        const left = mod(y * y);
+        const right = weistrass(x);
+        if ((left - right) % P !== 0n)
+            throw new Error(msg);
+    }
+    equals(other) {
+        return this.x === other.x && this.y === other.y;
+    }
+    negate() {
+        return new Point(this.x, mod(-this.y));
+    }
+    double() {
+        return JacobianPoint.fromAffine(this).double().toAffine();
+    }
+    add(other) {
+        return JacobianPoint.fromAffine(this).add(JacobianPoint.fromAffine(other)).toAffine();
+    }
+    subtract(other) {
+        return this.add(other.negate());
+    }
+    multiply(scalar) {
+        return JacobianPoint.fromAffine(this).multiply(scalar, this).toAffine();
+    }
+}
+exports.Point = Point;
+Point.BASE = new Point(CURVE.Gx, CURVE.Gy);
+Point.ZERO = new Point(0n, 0n);
+function sliceDer(s) {
+    return Number.parseInt(s[0], 16) >= 8 ? '00' + s : s;
+}
+class Signature {
+    constructor(r, s) {
+        this.r = r;
+        this.s = s;
+    }
+    static fromCompact(hex) {
+        if (typeof hex !== 'string' && !(hex instanceof Uint8Array)) {
+            throw new TypeError(`Signature.fromCompact: Expected string or Uint8Array`);
+        }
+        const str = hex instanceof Uint8Array ? bytesToHex(hex) : hex;
+        if (str.length !== 128)
+            throw new Error('Signature.fromCompact: Expected 64-byte hex');
+        const sig = new Signature(hexToNumber(str.slice(0, 64)), hexToNumber(str.slice(64, 128)));
+        sig.assertValidity();
+        return sig;
+    }
+    static fromDER(hex) {
+        const fn = 'Signature.fromDER';
+        if (typeof hex !== 'string' && !(hex instanceof Uint8Array)) {
+            throw new TypeError(`${fn}: Expected string or Uint8Array`);
+        }
+        const str = hex instanceof Uint8Array ? bytesToHex(hex) : hex;
+        const length = parseByte(str.slice(2, 4));
+        if (str.slice(0, 2) !== '30' || length !== str.length - 4 || str.slice(4, 6) !== '02') {
+            throw new Error(`${fn}: Invalid signature ${str}`);
+        }
+        const rLen = parseByte(str.slice(6, 8));
+        const rEnd = 8 + rLen;
+        const rr = str.slice(8, rEnd);
+        if (rr.startsWith('00') && parseByte(rr.slice(2, 4)) <= 0x7f) {
+            throw new Error(`${fn}: Invalid r with trailing length`);
+        }
+        const r = hexToNumber(rr);
+        const separator = str.slice(rEnd, rEnd + 2);
+        if (separator !== '02') {
+            throw new Error(`${fn}: Invalid r-s separator`);
+        }
+        const sLen = parseByte(str.slice(rEnd + 2, rEnd + 4));
+        const diff = length - sLen - rLen - 10;
+        if (diff > 0 || diff === -4) {
+            throw new Error(`${fn}: Invalid total length`);
+        }
+        if (sLen > length - rLen - 4) {
+            throw new Error(`${fn}: Invalid s`);
+        }
+        const sStart = rEnd + 4;
+        const ss = str.slice(sStart, sStart + sLen);
+        if (ss.startsWith('00') && parseByte(ss.slice(2, 4)) <= 0x7f) {
+            throw new Error(`${fn}: Invalid s with trailing length`);
+        }
+        const s = hexToNumber(ss);
+        const sig = new Signature(r, s);
+        sig.assertValidity();
+        return sig;
+    }
+    static fromHex(hex) {
+        return this.fromDER(hex);
+    }
+    assertValidity() {
+        const { r, s } = this;
+        if (!isWithinCurveOrder(r))
+            throw new Error('Invalid Signature: r must be 0 < r < n');
+        if (!isWithinCurveOrder(s))
+            throw new Error('Invalid Signature: s must be 0 < s < n');
+    }
+    toDERRawBytes(isCompressed = false) {
+        return hexToBytes(this.toDERHex(isCompressed));
+    }
+    toDERHex(isCompressed = false) {
+        const sHex = sliceDer(numberToHex(this.s));
+        if (isCompressed)
+            return sHex;
+        const rHex = sliceDer(numberToHex(this.r));
+        const rLen = numberToHex(rHex.length / 2);
+        const sLen = numberToHex(sHex.length / 2);
+        const length = numberToHex(rHex.length / 2 + sHex.length / 2 + 4);
+        return `30${length}02${rLen}${rHex}02${sLen}${sHex}`;
+    }
+    toRawBytes() {
+        return this.toDERRawBytes();
+    }
+    toHex() {
+        return this.toDERHex();
+    }
+    toCompactRawBytes() {
+        return hexToBytes(this.toCompactHex());
+    }
+    toCompactHex() {
+        return pad64(this.r) + pad64(this.s);
+    }
+}
+exports.Signature = Signature;
+exports.SignResult = Signature;
+function concatBytes(...arrays) {
+    if (arrays.length === 1)
+        return arrays[0];
+    const length = arrays.reduce((a, arr) => a + arr.length, 0);
+    const result = new Uint8Array(length);
+    for (let i = 0, pad = 0; i < arrays.length; i++) {
+        const arr = arrays[i];
+        result.set(arr, pad);
+        pad += arr.length;
+    }
+    return result;
+}
+function bytesToHex(uint8a) {
+    let hex = '';
+    for (let i = 0; i < uint8a.length; i++) {
+        hex += uint8a[i].toString(16).padStart(2, '0');
+    }
+    return hex;
+}
+function pad64(num) {
+    return num.toString(16).padStart(64, '0');
+}
+function pad32b(num) {
+    return hexToBytes(pad64(num));
+}
+function numberToHex(num) {
+    const hex = num.toString(16);
+    return hex.length & 1 ? `0${hex}` : hex;
+}
+function hexToNumber(hex) {
+    if (typeof hex !== 'string') {
+        throw new TypeError('hexToNumber: expected string, got ' + typeof hex);
+    }
+    return BigInt(`0x${hex}`);
+}
+function hexToBytes(hex) {
+    if (typeof hex !== 'string') {
+        throw new TypeError('hexToBytes: expected string, got ' + typeof hex);
+    }
+    if (hex.length % 2)
+        throw new Error('hexToBytes: received invalid unpadded hex');
+    const array = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < array.length; i++) {
+        const j = i * 2;
+        array[i] = Number.parseInt(hex.slice(j, j + 2), 16);
+    }
+    return array;
+}
+function ensureBytes(hex) {
+    return hex instanceof Uint8Array ? hex : hexToBytes(hex);
+}
+function bytesToNumber(bytes) {
+    return hexToNumber(bytesToHex(bytes));
+}
+function parseByte(str) {
+    return Number.parseInt(str, 16) * 2;
+}
+function isValidScalar(num) {
+    if (typeof num === 'bigint' && num > 0n)
+        return true;
+    if (typeof num === 'number' && num > 0 && Number.isSafeInteger(num))
+        return true;
+    return false;
+}
+function mod(a, b = CURVE.P) {
+    const result = a % b;
+    return result >= 0 ? result : b + result;
+}
+function pow2(x, power) {
+    const { P } = CURVE;
+    let res = x;
+    while (power-- > 0n) {
+        res *= res;
+        res %= P;
+    }
+    return res;
+}
+function sqrtMod(x) {
+    const { P } = CURVE;
+    const b2 = (x * x * x) % P;
+    const b3 = (b2 * b2 * x) % P;
+    const b6 = (pow2(b3, 3n) * b3) % P;
+    const b9 = (pow2(b6, 3n) * b3) % P;
+    const b11 = (pow2(b9, 2n) * b2) % P;
+    const b22 = (pow2(b11, 11n) * b11) % P;
+    const b44 = (pow2(b22, 22n) * b22) % P;
+    const b88 = (pow2(b44, 44n) * b44) % P;
+    const b176 = (pow2(b88, 88n) * b88) % P;
+    const b220 = (pow2(b176, 44n) * b44) % P;
+    const b223 = (pow2(b220, 3n) * b3) % P;
+    const t1 = (pow2(b223, 23n) * b22) % P;
+    const t2 = (pow2(t1, 6n) * b2) % P;
+    return pow2(t2, 2n);
+}
+function invert(number, modulo = CURVE.P) {
+    if (number === 0n || modulo <= 0n) {
+        throw new Error(`invert: expected positive integers, got n=${number} mod=${modulo}`);
+    }
+    let a = mod(number, modulo);
+    let b = modulo;
+    let [x, y, u, v] = [0n, 1n, 1n, 0n];
+    while (a !== 0n) {
+        const q = b / a;
+        const r = b % a;
+        const m = x - u * q;
+        const n = y - v * q;
+        [b, a] = [a, r];
+        [x, y] = [u, v];
+        [u, v] = [m, n];
+    }
+    const gcd = b;
+    if (gcd !== 1n)
+        throw new Error('invert: does not exist');
+    return mod(x, modulo);
+}
+function invertBatch(nums, n = CURVE.P) {
+    const len = nums.length;
+    const scratch = new Array(len);
+    let acc = 1n;
+    for (let i = 0; i < len; i++) {
+        if (nums[i] === 0n)
+            continue;
+        scratch[i] = acc;
+        acc = mod(acc * nums[i], n);
+    }
+    acc = invert(acc, n);
+    for (let i = len - 1; i >= 0; i--) {
+        if (nums[i] === 0n)
+            continue;
+        const tmp = mod(acc * nums[i], n);
+        nums[i] = mod(acc * scratch[i], n);
+        acc = tmp;
+    }
+    return nums;
+}
+const divNearest = (a, b) => (a + b / 2n) / b;
+const POW_2_128 = 2n ** 128n;
+function splitScalarEndo(k) {
+    const { n } = CURVE;
+    const a1 = 0x3086d221a7d46bcde86c90e49284eb15n;
+    const b1 = -0xe4437ed6010e88286f547fa90abfe4c3n;
+    const a2 = 0x114ca50f7a8e2f3f657c1108d9d44cfd8n;
+    const b2 = a1;
+    const c1 = divNearest(b2 * k, n);
+    const c2 = divNearest(-b1 * k, n);
+    let k1 = mod(k - c1 * a1 - c2 * a2, n);
+    let k2 = mod(-c1 * b1 - c2 * b2, n);
+    const k1neg = k1 > POW_2_128;
+    const k2neg = k2 > POW_2_128;
+    if (k1neg)
+        k1 = n - k1;
+    if (k2neg)
+        k2 = n - k2;
+    if (k1 > POW_2_128 || k2 > POW_2_128)
+        throw new Error('splitScalarEndo: Endomorphism failed');
+    return [k1neg, k1, k2neg, k2];
+}
+function truncateHash(hash) {
+    if (typeof hash !== 'string')
+        hash = bytesToHex(hash);
+    let msg = hexToNumber(hash || '0');
+    const byteLength = hash.length / 2;
+    const delta = byteLength * 8 - 256;
+    if (delta > 0) {
+        msg = msg >> BigInt(delta);
+    }
+    if (msg >= CURVE.n) {
+        msg -= CURVE.n;
+    }
+    return msg;
+}
+function _abc6979(msgHash, privateKey) {
+    if (msgHash == null)
+        throw new Error(`sign: expected valid msgHash, not "${msgHash}"`);
+    const num = typeof msgHash === 'string' ? hexToNumber(msgHash) : bytesToNumber(msgHash);
+    const h1 = pad32b(num);
+    const h1n = bytesToNumber(h1);
+    const x = pad32b(privateKey);
+    let v = new Uint8Array(32).fill(1);
+    let k = new Uint8Array(32).fill(0);
+    const b0 = Uint8Array.from([0x00]);
+    const b1 = Uint8Array.from([0x01]);
+    return [h1, h1n, x, v, k, b0, b1];
+}
+async function getQRSrfc6979(msgHash, privateKey) {
+    const privKey = normalizePrivateKey(privateKey);
+    let [h1, h1n, x, v, k, b0, b1] = _abc6979(msgHash, privKey);
+    const hmac = exports.utils.hmacSha256;
+    k = await hmac(k, v, b0, x, h1);
+    v = await hmac(k, v);
+    k = await hmac(k, v, b1, x, h1);
+    v = await hmac(k, v);
+    for (let i = 0; i < 1000; i++) {
+        v = await hmac(k, v);
+        let qrs = calcQRSFromK(v, h1n, privKey);
+        if (qrs)
+            return qrs;
+        k = await hmac(k, v, b0);
+        v = await hmac(k, v);
+    }
+    throw new TypeError('secp256k1: Tried 1,000 k values for sign(), all were invalid');
+}
+function getQRSrfc6979Sync(msgHash, privateKey) {
+    const privKey = normalizePrivateKey(privateKey);
+    let [h1, h1n, x, v, k, b0, b1] = _abc6979(msgHash, privKey);
+    const hmac = exports.utils.hmacSha256Sync;
+    if (!hmac)
+        throw new Error('utils.hmacSha256Sync is undefined, you need to set it');
+    k = hmac(k, v, b0, x, h1);
+    if (k instanceof Promise)
+        throw new Error('To use sync sign(), ensure utils.hmacSha256 is sync');
+    v = hmac(k, v);
+    k = hmac(k, v, b1, x, h1);
+    v = hmac(k, v);
+    for (let i = 0; i < 1000; i++) {
+        v = hmac(k, v);
+        let qrs = calcQRSFromK(v, h1n, privKey);
+        if (qrs)
+            return qrs;
+        k = hmac(k, v, b0);
+        v = hmac(k, v);
+    }
+    throw new TypeError('secp256k1: Tried 1,000 k values for sign(), all were invalid');
+}
+function isWithinCurveOrder(num) {
+    return 0 < num && num < CURVE.n;
+}
+function calcQRSFromK(v, msg, priv) {
+    const k = bytesToNumber(v);
+    if (!isWithinCurveOrder(k))
+        return;
+    const max = CURVE.n;
+    const q = Point.BASE.multiply(k);
+    const r = mod(q.x, max);
+    const s = mod(invert(k, max) * (msg + r * priv), max);
+    if (r === 0n || s === 0n)
+        return;
+    return [q, r, s];
+}
+function normalizePrivateKey(key) {
+    let num;
+    if (typeof key === 'bigint') {
+        num = key;
+    }
+    else if (typeof key === 'number' && Number.isSafeInteger(key) && key > 0) {
+        num = BigInt(key);
+    }
+    else if (typeof key === 'string') {
+        if (key.length !== 64)
+            throw new Error('Expected 32 bytes of private key');
+        num = hexToNumber(key);
+    }
+    else if (key instanceof Uint8Array) {
+        if (key.length !== 32)
+            throw new Error('Expected 32 bytes of private key');
+        num = bytesToNumber(key);
+    }
+    else {
+        throw new TypeError('Expected valid private key');
+    }
+    if (!isWithinCurveOrder(num))
+        throw new Error('Expected private key: 0 < key < n');
+    return num;
+}
+function normalizePublicKey(publicKey) {
+    if (publicKey instanceof Point) {
+        publicKey.assertValidity();
+        return publicKey;
+    }
+    else {
+        return Point.fromHex(publicKey);
+    }
+}
+function normalizeSignature(signature) {
+    if (signature instanceof Signature) {
+        signature.assertValidity();
+        return signature;
+    }
+    else {
+        return Signature.fromDER(signature);
+    }
+}
+function getPublicKey(privateKey, isCompressed = false) {
+    const point = Point.fromPrivateKey(privateKey);
+    if (typeof privateKey === 'string') {
+        return point.toHex(isCompressed);
+    }
+    return point.toRawBytes(isCompressed);
+}
+exports.getPublicKey = getPublicKey;
+function recoverPublicKey(msgHash, signature, recovery) {
+    const point = Point.fromSignature(msgHash, signature, recovery);
+    return typeof msgHash === 'string' ? point.toHex() : point.toRawBytes();
+}
+exports.recoverPublicKey = recoverPublicKey;
+function isPub(item) {
+    const arr = item instanceof Uint8Array;
+    const str = typeof item === 'string';
+    const len = (arr || str) && item.length;
+    if (arr)
+        return len === 33 || len === 65;
+    if (str)
+        return len === 66 || len === 130;
+    if (item instanceof Point)
+        return true;
+    return false;
+}
+function getSharedSecret(privateA, publicB, isCompressed = false) {
+    if (isPub(privateA))
+        throw new TypeError('getSharedSecret: first arg must be private key');
+    if (!isPub(publicB))
+        throw new TypeError('getSharedSecret: second arg must be public key');
+    const b = normalizePublicKey(publicB);
+    b.assertValidity();
+    const shared = b.multiply(normalizePrivateKey(privateA));
+    return typeof privateA === 'string'
+        ? shared.toHex(isCompressed)
+        : shared.toRawBytes(isCompressed);
+}
+exports.getSharedSecret = getSharedSecret;
+function QRSToSig(qrs, opts, str = false) {
+    const [q, r, s] = qrs;
+    let { canonical, der, recovered } = opts;
+    let recovery = (q.x === r ? 0 : 2) | Number(q.y & 1n);
+    let adjustedS = s;
+    const HIGH_NUMBER = CURVE.n >> 1n;
+    if (s > HIGH_NUMBER && canonical) {
+        adjustedS = CURVE.n - s;
+        recovery ^= 1;
+    }
+    const sig = new Signature(r, adjustedS);
+    sig.assertValidity();
+    const hex = der === false ? sig.toCompactHex() : sig.toDERHex();
+    const hashed = str ? hex : hexToBytes(hex);
+    return recovered ? [hashed, recovery] : hashed;
+}
+async function sign(msgHash, privKey, opts = {}) {
+    return QRSToSig(await getQRSrfc6979(msgHash, privKey), opts, typeof msgHash === 'string');
+}
+exports.sign = sign;
+function signSync(msgHash, privKey, opts = {}) {
+    return QRSToSig(getQRSrfc6979Sync(msgHash, privKey), opts, typeof msgHash === 'string');
+}
+exports.signSync = signSync;
+function verify(signature, msgHash, publicKey) {
+    const { n } = CURVE;
+    let sig;
+    try {
+        sig = normalizeSignature(signature);
+    }
+    catch (error) {
+        return false;
+    }
+    const { r, s } = sig;
+    const h = truncateHash(msgHash);
+    if (h === 0n)
+        return false;
+    const pubKey = JacobianPoint.fromAffine(normalizePublicKey(publicKey));
+    const s1 = invert(s, n);
+    const u1 = mod(h * s1, n);
+    const u2 = mod(r * s1, n);
+    const Ghs1 = JacobianPoint.BASE.multiply(u1);
+    const Prs1 = pubKey.multiplyUnsafe(u2);
+    const R = Ghs1.add(Prs1).toAffine();
+    const v = mod(R.x, n);
+    return v === r;
+}
+exports.verify = verify;
+async function taggedHash(tag, ...messages) {
+    const tagB = new Uint8Array(tag.split('').map((c) => c.charCodeAt(0)));
+    const tagH = await exports.utils.sha256(tagB);
+    const h = await exports.utils.sha256(concatBytes(tagH, tagH, ...messages));
+    return bytesToNumber(h);
+}
+async function createChallenge(x, P, message) {
+    const rx = pad32b(x);
+    const t = await taggedHash('BIP0340/challenge', rx, P.toRawX(), message);
+    return mod(t, CURVE.n);
+}
+function hasEvenY(point) {
+    return mod(point.y, 2n) === 0n;
+}
+class SchnorrSignature {
+    constructor(r, s) {
+        this.r = r;
+        this.s = s;
+        if (r <= 0n || s <= 0n || r >= CURVE.P || s >= CURVE.n)
+            throw new Error('Invalid signature');
+    }
+    static fromHex(hex) {
+        const bytes = ensureBytes(hex);
+        if (bytes.length !== 64) {
+            throw new TypeError(`SchnorrSignature.fromHex: expected 64 bytes, not ${bytes.length}`);
+        }
+        const r = bytesToNumber(bytes.slice(0, 32));
+        const s = bytesToNumber(bytes.slice(32));
+        return new SchnorrSignature(r, s);
+    }
+    toHex() {
+        return pad64(this.r) + pad64(this.s);
+    }
+    toRawBytes() {
+        return hexToBytes(this.toHex());
+    }
+}
+function schnorrGetPublicKey(privateKey) {
+    const P = Point.fromPrivateKey(privateKey);
+    return typeof privateKey === 'string' ? P.toHexX() : P.toRawX();
+}
+async function schnorrSign(msgHash, privateKey, auxRand = exports.utils.randomBytes()) {
+    if (msgHash == null)
+        throw new TypeError(`sign: Expected valid message, not "${msgHash}"`);
+    if (!privateKey)
+        privateKey = 0n;
+    const { n } = CURVE;
+    const m = ensureBytes(msgHash);
+    const d0 = normalizePrivateKey(privateKey);
+    const rand = ensureBytes(auxRand);
+    if (rand.length !== 32)
+        throw new TypeError('sign: Expected 32 bytes of aux randomness');
+    const P = Point.fromPrivateKey(d0);
+    const d = hasEvenY(P) ? d0 : n - d0;
+    const t0h = await taggedHash('BIP0340/aux', rand);
+    const t = d ^ t0h;
+    const k0h = await taggedHash('BIP0340/nonce', pad32b(t), P.toRawX(), m);
+    const k0 = mod(k0h, n);
+    if (k0 === 0n)
+        throw new Error('sign: Creation of signature failed. k is zero');
+    const R = Point.fromPrivateKey(k0);
+    const k = hasEvenY(R) ? k0 : n - k0;
+    const e = await createChallenge(R.x, P, m);
+    const sig = new SchnorrSignature(R.x, mod(k + e * d, n));
+    const isValid = await schnorrVerify(sig.toRawBytes(), m, P.toRawX());
+    if (!isValid)
+        throw new Error('sign: Invalid signature produced');
+    return typeof msgHash === 'string' ? sig.toHex() : sig.toRawBytes();
+}
+async function schnorrVerify(signature, msgHash, publicKey) {
+    const sig = signature instanceof SchnorrSignature ? signature : SchnorrSignature.fromHex(signature);
+    const m = typeof msgHash === 'string' ? hexToBytes(msgHash) : msgHash;
+    const P = normalizePublicKey(publicKey);
+    const e = await createChallenge(sig.r, P, m);
+    const sG = Point.fromPrivateKey(sig.s);
+    const eP = P.multiply(e);
+    const R = sG.subtract(eP);
+    if (R.equals(Point.BASE) || !hasEvenY(R) || R.x !== sig.r)
+        return false;
+    return true;
+}
+exports.schnorr = {
+    Signature: SchnorrSignature,
+    getPublicKey: schnorrGetPublicKey,
+    sign: schnorrSign,
+    verify: schnorrVerify,
+};
+Point.BASE._setWindowSize(8);
+const crypto = (() => {
+    const webCrypto = typeof self === 'object' && 'crypto' in self ? self.crypto : undefined;
+    const nodeRequire = typeof module !== 'undefined' && typeof require === 'function';
+    return {
+        node: nodeRequire && !webCrypto ? require('crypto') : undefined,
+        web: webCrypto,
+    };
+})();
+exports.utils = {
+    isValidPrivateKey(privateKey) {
+        try {
+            normalizePrivateKey(privateKey);
+            return true;
+        }
+        catch (error) {
+            return false;
+        }
+    },
+    randomBytes: (bytesLength = 32) => {
+        if (crypto.web) {
+            return crypto.web.getRandomValues(new Uint8Array(bytesLength));
+        }
+        else if (crypto.node) {
+            const { randomBytes } = crypto.node;
+            return new Uint8Array(randomBytes(bytesLength).buffer);
+        }
+        else {
+            throw new Error("The environment doesn't have randomBytes function");
+        }
+    },
+    randomPrivateKey: () => {
+        let i = 8;
+        while (i--) {
+            const b32 = exports.utils.randomBytes(32);
+            const num = bytesToNumber(b32);
+            if (isWithinCurveOrder(num) && num !== 1n)
+                return b32;
+        }
+        throw new Error('Valid private key was not found in 8 iterations. PRNG is broken');
+    },
+    sha256: async (message) => {
+        if (crypto.web) {
+            const buffer = await crypto.web.subtle.digest('SHA-256', message.buffer);
+            return new Uint8Array(buffer);
+        }
+        else if (crypto.node) {
+            const { createHash } = crypto.node;
+            return Uint8Array.from(createHash('sha256').update(message).digest());
+        }
+        else {
+            throw new Error("The environment doesn't have sha256 function");
+        }
+    },
+    hmacSha256: async (key, ...messages) => {
+        if (crypto.web) {
+            const ckey = await crypto.web.subtle.importKey('raw', key, { name: 'HMAC', hash: { name: 'SHA-256' } }, false, ['sign']);
+            const message = concatBytes(...messages);
+            const buffer = await crypto.web.subtle.sign('HMAC', ckey, message);
+            return new Uint8Array(buffer);
+        }
+        else if (crypto.node) {
+            const { createHmac } = crypto.node;
+            const hash = createHmac('sha256', key);
+            for (let message of messages) {
+                hash.update(message);
+            }
+            return Uint8Array.from(hash.digest());
+        }
+        else {
+            throw new Error("The environment doesn't have hmac-sha256 function");
+        }
+    },
+    sha256Sync: undefined,
+    hmacSha256Sync: undefined,
+    precompute(windowSize = 8, point = Point.BASE) {
+        const cached = point === Point.BASE ? point : new Point(point.x, point.y);
+        cached._setWindowSize(windowSize);
+        cached.multiply(3n);
+        return cached;
+    },
+};
+
+  return module.exports;
+})();
+
+// --- short references ---
+const _sha256 = __modules["sha256.js"].sha256;
+const _sha512 = __modules["sha512.js"].sha512;
+const _hmac = __modules["hmac.js"].hmac;
+const _pbkdf2 = __modules["pbkdf2.js"].pbkdf2;
+const _ripemd160 = __modules["ripemd160.js"].ripemd160;
+
+const BIP39_WORDLIST=["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","buddy","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","concert","conduct","confirm","congress","connect","consider","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","cradle","craft","cram","crane","crash","crater","crawl","crazy","cream","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crumble","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","december","decide","decline","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","divert","divide","divorce","dizzy","doctor","document","dog","doll","dolphin","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","icon","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","salute","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syrup","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weasel","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"];
+
+// =====================================================================
+// HAND-WRITTEN: bech32 / base58 / BIP32 / BIP39 / addressing
+// (Spec implementations — see header comments for spec references)
+// =====================================================================
+
+// --- utf8 + hex helpers ---
+const te = new TextEncoder();
+function utf8(s){ return te.encode(s.normalize("NFKD")); }
+function bytesToHex(b){ return Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join(""); }
+function hexToBytes(h){ const a=new Uint8Array(h.length/2); for(let i=0;i<a.length;i++) a[i]=parseInt(h.slice(i*2,i*2+2),16); return a; }
+function concat(...arrs){ let l=0; for(const a of arrs) l+=a.length; const r=new Uint8Array(l); let o=0; for(const a of arrs){ r.set(a,o); o+=a.length; } return r; }
+
+// --- hashing wrappers ---
+function sha256(b){ return _sha256(b); }
+function dsha256(b){ return _sha256(_sha256(b)); }
+function ripemd160(b){ return _ripemd160(b); }
+function hash160(b){ return _ripemd160(_sha256(b)); }
+function hmacSha512(key, msg){ return _hmac(_sha512, key, msg); }
+
+// --- base58 (Bitcoin alphabet) ---
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function base58encode(bytes){
+  let zeros = 0; while(zeros<bytes.length && bytes[zeros]===0) zeros++;
+  // Convert to big-endian bigint
+  let n = 0n; for(const b of bytes) n = (n<<8n) | BigInt(b);
+  let out = "";
+  while(n>0n){ const r = Number(n % 58n); n = n / 58n; out = B58[r] + out; }
+  for(let i=0;i<zeros;i++) out = "1" + out;
+  return out;
+}
+function base58check(prefix, payload){
+  const data = concat(prefix, payload);
+  const checksum = dsha256(data).slice(0,4);
+  return base58encode(concat(data, checksum));
+}
+function base58decode(s){
+  let n = 0n;
+  for(const c of s){
+    const i = B58.indexOf(c);
+    if(i < 0) throw new Error("invalid base58 character: " + c);
+    n = n * 58n + BigInt(i);
+  }
+  let leadZeros = 0;
+  for(const c of s){ if(c === "1") leadZeros++; else break; }
+  const bytes = [];
+  while(n > 0n){ bytes.unshift(Number(n & 0xffn)); n >>= 8n; }
+  const out = new Uint8Array(leadZeros + bytes.length);
+  for(let i=0;i<bytes.length;i++) out[leadZeros+i] = bytes[i];
+  return out;
+}
+function base58checkDecode(s){
+  const full = base58decode(s);
+  if(full.length < 5) throw new Error("base58check string too short");
+  const payload = full.slice(0, full.length - 4);
+  const check = full.slice(full.length - 4);
+  const expected = dsha256(payload).slice(0, 4);
+  for(let i=0;i<4;i++) if(check[i] !== expected[i]) throw new Error("base58check checksum mismatch");
+  return payload;
+}
+function wifDecode(wif){
+  const d = base58checkDecode(wif);
+  if(d[0] !== 0x80) throw new Error("not a mainnet WIF (expected prefix 0x80, got 0x" + d[0].toString(16) + ")");
+  if(d.length === 34 && d[33] === 0x01) return { priv: d.slice(1, 33), compressed: true };
+  if(d.length === 33) return { priv: d.slice(1, 33), compressed: false };
+  throw new Error("unexpected WIF length: " + d.length);
+}
+
+// --- WIF (Wallet Import Format) — mainnet compressed ---
+function privkeyToWIF(privBytes32){
+  // 0x80 = mainnet prefix, append 0x01 for compressed pubkey flag
+  return base58check(new Uint8Array([0x80]), concat(privBytes32, new Uint8Array([0x01])));
+}
+
+// --- bech32 (BIP173) for P2WPKH (witness v0, hrp="bc") ---
+const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+function bech32Polymod(values){
+  const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+  let chk = 1;
+  for(const v of values){
+    const b = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    for(let i=0;i<5;i++) if((b>>i)&1) chk ^= GEN[i];
+  }
+  return chk;
+}
+function bech32HrpExpand(hrp){
+  const out = [];
+  for(let i=0;i<hrp.length;i++) out.push(hrp.charCodeAt(i) >> 5);
+  out.push(0);
+  for(let i=0;i<hrp.length;i++) out.push(hrp.charCodeAt(i) & 31);
+  return out;
+}
+function bech32CreateChecksum(hrp, data){
+  const values = bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]);
+  const polymod = bech32Polymod(values) ^ 1; // BIP173 constant (bech32, not bech32m)
+  const out = [];
+  for(let i=0;i<6;i++) out.push((polymod >> (5*(5-i))) & 31);
+  return out;
+}
+function bech32Encode(hrp, data){
+  const cs = bech32CreateChecksum(hrp, data);
+  let out = hrp + "1";
+  for(const d of data.concat(cs)) out += BECH32_CHARSET[d];
+  return out;
+}
+function convertBits(data, fromBits, toBits, pad){
+  let acc = 0, bits = 0;
+  const out = [];
+  const maxv = (1<<toBits)-1;
+  for(const v of data){
+    acc = (acc << fromBits) | v;
+    bits += fromBits;
+    while(bits >= toBits){ bits -= toBits; out.push((acc >> bits) & maxv); }
+  }
+  if(pad){ if(bits) out.push((acc << (toBits-bits)) & maxv); }
+  else if(bits>=fromBits || ((acc << (toBits-bits)) & maxv)) throw new Error("bech32 convertBits failure");
+  return out;
+}
+function pubkeyToP2WPKH(pubkeyCompressed){
+  const h160 = hash160(pubkeyCompressed);
+  const program = convertBits(Array.from(h160), 8, 5, true);
+  return bech32Encode("bc", [0].concat(program)); // 0 = witness version v0
+}
+function pubkeyToP2PKH(pubkeyCompressed){
+  // Legacy "1..." address: base58check(0x00 || hash160(pubkey))
+  return base58check(new Uint8Array([0x00]), hash160(pubkeyCompressed));
+}
+function pubkeyToP2SHP2WPKH(pubkeyCompressed){
+  // Nested SegWit "3...": redeemScript = OP_0 0x14 <hash160(pub)>; addr = base58check(0x05 || hash160(redeemScript))
+  const h160 = hash160(pubkeyCompressed);
+  const redeemScript = concat(new Uint8Array([0x00, 0x14]), h160);
+  return base58check(new Uint8Array([0x05]), hash160(redeemScript));
+}
+
+// --- BIP39: entropy <-> mnemonic, mnemonic -> seed ---
+function entropyToMnemonic(entropy){
+  if(entropy.length !== 16 && entropy.length !== 32) throw new Error("entropy must be 128 or 256 bits");
+  const csLen = entropy.length / 4; // bits
+  const hash = sha256(entropy);
+  // Concatenate entropy bits + first csLen bits of hash
+  let bits = "";
+  for(const b of entropy) bits += b.toString(2).padStart(8, "0");
+  const hashBits = Array.from(hash).map(b=>b.toString(2).padStart(8,"0")).join("");
+  bits += hashBits.slice(0, csLen);
+  const words = [];
+  for(let i=0;i<bits.length;i+=11){
+    const idx = parseInt(bits.slice(i, i+11), 2);
+    words.push(BIP39_WORDLIST[idx]);
+  }
+  return words.join(" ");
+}
+function mnemonicToEntropy(mnemonic){
+  const words = mnemonic.normalize("NFKD").trim().split(/\s+/);
+  if(![12,15,18,21,24].includes(words.length)) throw new Error("invalid word count");
+  let bits = "";
+  for(const w of words){
+    const i = BIP39_WORDLIST.indexOf(w);
+    if(i<0) throw new Error("unknown word: " + w);
+    bits += i.toString(2).padStart(11, "0");
+  }
+  const csLen = bits.length % 32;
+  const entropyBits = bits.slice(0, bits.length - csLen);
+  const csBits = bits.slice(-csLen);
+  const entropy = new Uint8Array(entropyBits.length / 8);
+  for(let i=0;i<entropy.length;i++) entropy[i] = parseInt(entropyBits.slice(i*8, i*8+8), 2);
+  // verify checksum
+  const hash = sha256(entropy);
+  const hashBits = Array.from(hash).map(b=>b.toString(2).padStart(8,"0")).join("");
+  if(hashBits.slice(0, csLen) !== csBits) throw new Error("invalid mnemonic checksum");
+  return entropy;
+}
+function validateMnemonic(mnemonic){
+  try { mnemonicToEntropy(mnemonic); return true; } catch(e){ return false; }
+}
+function mnemonicToSeed(mnemonic, passphrase){
+  const m = utf8(mnemonic.trim());
+  const s = utf8("mnemonic" + (passphrase || ""));
+  return _pbkdf2(_sha512, m, s, { c: 2048, dkLen: 64 });
+}
+
+// --- BIP32 master + child derivation (private) ---
+// secp256k1 curve order
+const SECP_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+function bytesToBigInt(b){ let n=0n; for(const x of b) n = (n<<8n) | BigInt(x); return n; }
+function bigIntToBytes32(n){ const out=new Uint8Array(32); for(let i=31;i>=0;i--){ out[i]=Number(n & 0xffn); n >>= 8n; } return out; }
+function masterFromSeed(seed){
+  const I = hmacSha512(utf8("Bitcoin seed"), seed);
+  return { priv: I.slice(0,32), chain: I.slice(32,64), depth: 0, childNumber: 0 };
+}
+function ckdPriv(parent, index){
+  const indexBE = new Uint8Array(4);
+  indexBE[0]=(index>>>24)&0xff; indexBE[1]=(index>>>16)&0xff; indexBE[2]=(index>>>8)&0xff; indexBE[3]=index&0xff;
+  let data;
+  if(index >= 0x80000000){
+    // hardened: 0x00 || parent_priv || index
+    data = concat(new Uint8Array([0]), parent.priv, indexBE);
+  } else {
+    // non-hardened: parent_pubkey_compressed || index
+    const pub = nobleSecp256k1.Point.fromPrivateKey(parent.priv).toRawBytes(true);
+    data = concat(pub, indexBE);
+  }
+  const I = hmacSha512(parent.chain, data);
+  const IL = bytesToBigInt(I.slice(0,32));
+  const IR = I.slice(32,64);
+  if(IL >= SECP_N) throw new Error("invalid IL");
+  const parentNum = bytesToBigInt(parent.priv);
+  let childNum = (IL + parentNum) % SECP_N;
+  if(childNum === 0n) throw new Error("invalid child");
+  return { priv: bigIntToBytes32(childNum), chain: IR, depth: parent.depth+1, childNumber: index };
+}
+function derivePath(master, path){
+  // e.g. "m/84'/0'/0'/0/0"
+  const parts = path.split("/");
+  if(parts[0] !== "m") throw new Error("path must start with m/");
+  let node = master;
+  for(let i=1;i<parts.length;i++){
+    let seg = parts[i];
+    let hardened = false;
+    if(seg.endsWith("'") || seg.endsWith("h")){ hardened = true; seg = seg.slice(0,-1); }
+    let idx = parseInt(seg, 10);
+    if(hardened) idx += 0x80000000;
+    node = ckdPriv(node, idx);
+  }
+  return node;
+}
+
+// --- BIP84 derivation helper (m/84'/0'/0'/0/0) ---
+const BIP84_PATH = "m/84'/0'/0'/0/0";
+function privToPubCompressed(priv32){
+  return nobleSecp256k1.Point.fromPrivateKey(priv32).toRawBytes(true);
+}
+function derivationFromSeed(seed){
+  const master = masterFromSeed(seed);
+  const child = derivePath(master, BIP84_PATH);
+  const pub = privToPubCompressed(child.priv);
+  const address = pubkeyToP2WPKH(pub);
+  const wif = privkeyToWIF(child.priv);
+  return { wif, address, path: BIP84_PATH };
+}
+
+// =====================================================================
+// APP LOGIC
+// =====================================================================
+const TOOL_VERSION = "1.0.0";
+const PASSPHRASE_METHOD = "PBKDF2-SHA512 (100000 rounds)";
+const PASSPHRASE_C = 100000;
+const PASSPHRASE_DEFAULT_SALT = "v4call";
+
+let currentKeys = {};
+
+function showOutput(){
+  document.getElementById("output").classList.remove("hidden");
+  document.getElementById("output").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+const ADDR_TYPES = {
+  segwit: { name: "Native SegWit (P2WPKH, bech32, hrp=bc)", encode: pubkeyToP2WPKH },
+  legacy: { name: "Legacy (P2PKH, base58, prefix 0x00)", encode: pubkeyToP2PKH }
+};
+function getAddrType(name){
+  const el = document.querySelector('input[name="' + name + '"]:checked');
+  return (el && el.value) || "segwit";
+}
+
+function generateRandom(){
+  try {
+    const priv = nobleSecp256k1.utils.randomPrivateKey();
+    const pub = privToPubCompressed(priv);
+    const t = getAddrType("random-addr");
+    const address = ADDR_TYPES[t].encode(pub);
+    const wif = privkeyToWIF(priv);
+    currentKeys = {
+      privateKey: wif, publicAddress: address, type: "random",
+      meta: { mode: "Random", addressType: ADDR_TYPES[t].name, path: "(direct — no derivation)" }
+    };
+    displayKeys();
+  } catch(e){ alert("Error generating keys: " + e.message); }
+}
+
+function generateFromPassphrase(){
+  const passphrase = document.getElementById("passphrase").value.trim();
+  if(!passphrase){ alert("Please enter a passphrase"); return; }
+  const saltInput = document.getElementById("salt").value.trim();
+  const saltUsed = saltInput || PASSPHRASE_DEFAULT_SALT;
+  try {
+    // PBKDF2-SHA512(passphrase_NFKD, salt_NFKD, 100000 iterations, 32 bytes)
+    const priv = _pbkdf2(_sha512, utf8(passphrase), utf8(saltUsed),
+                         { c: PASSPHRASE_C, dkLen: 32 });
+    if(!nobleSecp256k1.utils.isValidPrivateKey(priv)){
+      throw new Error("Derived key is outside curve order — try a different passphrase/salt");
+    }
+    const pub = privToPubCompressed(priv);
+    const t = getAddrType("passphrase-addr");
+    const address = ADDR_TYPES[t].encode(pub);
+    const wif = privkeyToWIF(priv);
+    currentKeys = {
+      privateKey: wif, publicAddress: address, type: "passphrase",
+      passphrase, salt: saltInput, saltUsed,
+      meta: {
+        mode: "Passphrase",
+        addressType: ADDR_TYPES[t].name,
+        method: PASSPHRASE_METHOD,
+        saltUsed,
+        saltSource: saltInput ? "user-provided" : "default (\"" + PASSPHRASE_DEFAULT_SALT + "\")",
+        path: "(direct — no BIP32 derivation)"
+      }
+    };
+    displayKeys();
+  } catch(e){ alert("Error: " + e.message); }
+}
+
+// --- Recovery: try multiple derivation paths × first 5 addresses each ---
+const RECOVERY_PATHS = [
+  { name: "BIP44 Legacy",            tmpl: "m/44'/0'/0'/0/", note: "\"1...\" addresses — most likely for 2014–2016 Android wallets (Mycelium, Schildbach-era)", encode: pubkeyToP2PKH      },
+  { name: "BIP49 Nested SegWit",     tmpl: "m/49'/0'/0'/0/", note: "\"3...\" addresses — became common after 2017",                                              encode: pubkeyToP2SHP2WPKH },
+  { name: "BIP84 Native SegWit",     tmpl: "m/84'/0'/0'/0/", note: "\"bc1...\" addresses — modern, didn't exist before 2017",                                    encode: pubkeyToP2WPKH     },
+  { name: "Non-standard (early Android)", tmpl: "m/0'/0/",   note: "\"1...\" addresses — used by some early BitcoinJ-based wallets",                             encode: pubkeyToP2PKH      }
+];
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+function runRecovery(){
+  const m = document.getElementById("recovery-mnemonic").value.trim();
+  if(!m){ alert("Paste 12 or 24 words first."); return; }
+  if(!validateMnemonic(m)){
+    alert("These words don't form a valid BIP39 mnemonic.\n\nEither:\n  • a typo or word in the wrong place,\n  • the wrong word count (must be exactly 12 or 24),\n  • or your wallet wasn't BIP39 (Schildbach's pre-mnemonic format, Electrum's own seed, etc.).\n\nFor non-BIP39 seeds or fuzzy recovery (typos, wrong order, missing words), try btcrecover: github.com/3rdIteration/btcrecover");
+    return;
+  }
+  try {
+    const seed = mnemonicToSeed(m, "");
+    const master = masterFromSeed(seed);
+    const sections = RECOVERY_PATHS.map(p => {
+      const rows = [];
+      for(let i=0;i<5;i++){
+        const node = derivePath(master, p.tmpl + i);
+        const pub = privToPubCompressed(node.priv);
+        rows.push({
+          index: i,
+          path: p.tmpl + i,
+          address: p.encode(pub),
+          wif: privkeyToWIF(node.priv)
+        });
+      }
+      return { name: p.name, note: p.note, tmpl: p.tmpl + "{0..4}", rows };
+    });
+    renderRecovery(sections);
+  } catch(e){ alert("Recovery failed: " + e.message); }
+}
+
+// =====================================================================
+// Bitcoin Message Signing (BIP137-style, Electrum/Sparrow/bitcoind compatible)
+// =====================================================================
+function utf8Raw(s){ return new TextEncoder().encode(s); }
+function varintEncode(n){
+  if(n < 0xfd) return new Uint8Array([n]);
+  if(n < 0x10000) return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
+  if(n < 0x100000000) return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >>> 24) & 0xff]);
+  throw new Error("message too long");
+}
+const BTC_MSG_MAGIC = utf8Raw("Bitcoin Signed Message:\n");
+function bitcoinMessageHash(message){
+  const msgBytes = utf8Raw(message);
+  return dsha256(concat(varintEncode(BTC_MSG_MAGIC.length), BTC_MSG_MAGIC, varintEncode(msgBytes.length), msgBytes));
+}
+function bytesToBase64(b){
+  let s = ""; for(const x of b) s += String.fromCharCode(x);
+  return btoa(s);
+}
+function base64ToBytes(s){
+  const bin = atob(s.trim());
+  const r = new Uint8Array(bin.length);
+  for(let i=0;i<r.length;i++) r[i] = bin.charCodeAt(i);
+  return r;
+}
+
+// Wire up noble-secp256k1's sync hash hooks (needed for signSync's RFC6979 deterministic k)
+nobleSecp256k1.utils.sha256Sync = (msg) => _sha256(msg);
+nobleSecp256k1.utils.hmacSha256Sync = (key, ...msgs) => {
+  let combined;
+  if(msgs.length === 1) combined = msgs[0];
+  else { let total = 0; for(const m of msgs) total += m.length; combined = new Uint8Array(total); let o = 0; for(const m of msgs){ combined.set(m, o); o += m.length; } }
+  return _hmac(_sha256, key, combined);
+};
+
+function signBitcoinMessage(wifString, message){
+  const { priv, compressed } = wifDecode(wifString);
+  if(!compressed) throw new Error("WIF must be for a compressed key (this tool only generates compressed)");
+  const msgHash = bitcoinMessageHash(message);
+  const out = nobleSecp256k1.signSync(msgHash, priv, { recovered: true, der: false, canonical: true });
+  const sigBytes = out[0];
+  const recovery = out[1];
+  // Header = 31 + recoveryId (compressed-key flag set). Electrum-compatible — verifier figures out
+  // address type by trying P2PKH / P2WPKH / P2SH-P2WPKH against the recovered pubkey.
+  const sig65 = new Uint8Array(65);
+  sig65[0] = 31 + recovery;
+  sig65.set(sigBytes, 1);
+  return bytesToBase64(sig65);
+}
+
+function verifyBitcoinMessage(address, message, signatureB64){
+  let sig65;
+  try { sig65 = base64ToBytes(signatureB64); }
+  catch(e){ throw new Error("invalid base64 in signature"); }
+  if(sig65.length !== 65) throw new Error("signature must decode to 65 bytes, got " + sig65.length);
+  const header = sig65[0];
+  if(header < 27 || header > 42) throw new Error("invalid header byte: " + header + " (expected 27..42)");
+  const recovery = (header - 27) & 3;
+  const sigBytes = sig65.slice(1);
+  const msgHash = bitcoinMessageHash(message);
+  let recoveredUncompressed;
+  try {
+    // noble-secp256k1's normalizeSignature only accepts DER or Signature instances,
+    // so build a Signature from the 64-byte compact form first.
+    const sig = nobleSecp256k1.Signature.fromCompact(sigBytes);
+    recoveredUncompressed = nobleSecp256k1.recoverPublicKey(msgHash, sig, recovery);
+  } catch(e){ throw new Error("could not recover public key: " + e.message); }
+  const point = nobleSecp256k1.Point.fromHex(recoveredUncompressed);
+  const pubCompressed = point.toRawBytes(true);
+  const p2pkh = pubkeyToP2PKH(pubCompressed);
+  const p2wpkh = pubkeyToP2WPKH(pubCompressed);
+  const p2sh = pubkeyToP2SHP2WPKH(pubCompressed);
+  if(address === p2pkh)  return { valid: true, addressType: "Legacy (P2PKH, \"1...\")" };
+  if(address === p2wpkh) return { valid: true, addressType: "Native SegWit (P2WPKH, \"bc1...\")" };
+  if(address === p2sh)   return { valid: true, addressType: "Nested SegWit (P2SH-P2WPKH, \"3...\")" };
+  return {
+    valid: false,
+    hint: "Recovered pubkey produces:\n  legacy:  " + p2pkh + "\n  bech32:  " + p2wpkh + "\n  nested:  " + p2sh + "\nNone match the address you provided.\n\nEither the signature is for a different address, the message was modified, or the signer used a different private key."
+  };
+}
+
+function buildProofJson(address, addressType, message, signature){
+  return JSON.stringify({
+    format: "v4call-btc-proof-v1",
+    address: address,
+    addressType: addressType,
+    message: message,
+    signature: signature
+  }, null, 2);
+}
+
+function renderRecovery(sections){
+  const body = document.getElementById("recovery-body");
+  body.innerHTML = "";
+  for(const s of sections){
+    const card = document.createElement("div");
+    card.className = "rec-section";
+    let html = "<div class=\"rs-head\">";
+    html += "<div class=\"rs-title\">" + escapeHtml(s.name) + "</div>";
+    html += "<div class=\"rs-path mono\">" + escapeHtml(s.tmpl) + "</div>";
+    html += "</div>";
+    html += "<div class=\"rs-note\">" + escapeHtml(s.note) + "</div>";
+    html += "<div class=\"rs-rows\"></div>";
+    card.innerHTML = html;
+    const rowsEl = card.querySelector(".rs-rows");
+    for(const r of s.rows){
+      const row = document.createElement("div");
+      row.className = "rs-row";
+      let inner = "<div class=\"rs-row-head\"><span class=\"rs-row-idx\">[" + r.index + "]</span> <span class=\"rs-row-path mono\">" + escapeHtml(r.path) + "</span></div>";
+      inner += "<div class=\"rs-line\"><span class=\"rs-line-label\">Address</span><span class=\"rs-line-val mono\">" + escapeHtml(r.address) + "</span></div>";
+      inner += "<div class=\"rs-line\"><span class=\"rs-line-label\">WIF</span><span class=\"rs-line-val mono rs-wif\">" + escapeHtml(r.wif) + "</span></div>";
+      row.innerHTML = inner;
+      rowsEl.appendChild(row);
+    }
+    body.appendChild(card);
+  }
+  const out = document.getElementById("recovery-output");
+  out.classList.remove("hidden");
+  out.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function generateRandomMnemonic(wordCount){
+  try {
+    const bits = wordCount === 24 ? 32 : 16;
+    const entropy = nobleSecp256k1.utils.randomBytes(bits);
+    const mnemonic = entropyToMnemonic(entropy);
+    document.getElementById("mnemonic").value = mnemonic;
+    setTimeout(() => generateFromMnemonic(), 100);
+  } catch(e){ alert("Error generating mnemonic: " + e.message); }
+}
+
+function generateFromMnemonic(){
+  const m = document.getElementById("mnemonic").value.trim();
+  if(!m){ alert("Please enter or generate a mnemonic"); return; }
+  const words = m.split(/\s+/);
+  if(words.length !== 12 && words.length !== 24){
+    alert("Please enter exactly 12 or 24 words"); return;
+  }
+  if(!validateMnemonic(m)){
+    alert("Invalid mnemonic — please check spelling and word count."); return;
+  }
+  try {
+    const seed = mnemonicToSeed(m, ""); // no BIP39 passphrase in this build
+    const d = derivationFromSeed(seed);
+    currentKeys = {
+      privateKey: d.wif, publicAddress: d.address,
+      mnemonic: m, type: "mnemonic",
+      meta: {
+        mode: "BIP39 Mnemonic",
+        standard: "BIP39 → BIP32 → BIP84",
+        path: d.path,
+        addressType: "Native SegWit (P2WPKH, bech32)"
+      }
+    };
+    displayKeys();
+  } catch(e){ alert("Error generating from mnemonic: " + e.message); }
+}
+
+function metaLines(){
+  const m = currentKeys.meta || {};
+  const lines = [
+    "Tool Version: v4call-bitcoin-gen " + TOOL_VERSION,
+    "Network: Bitcoin Mainnet",
+    "Address Type: " + (m.addressType || "Native SegWit (P2WPKH, bech32, hrp=bc)"),
+  ];
+  if(m.mode) lines.push("Mode: " + m.mode);
+  if(m.standard) lines.push("Standard: " + m.standard);
+  if(m.path) lines.push("Path: " + m.path);
+  if(m.method) lines.push("Method: " + m.method);
+  if(m.saltUsed !== undefined) lines.push("Salt: " + JSON.stringify(m.saltUsed) + " (" + m.saltSource + ")");
+  return lines;
+}
+
+function displayKeys(){
+  if(!currentKeys.privateKey) return;
+  document.getElementById("private-key").textContent = currentKeys.privateKey;
+  document.getElementById("public-address").textContent = currentKeys.publicAddress;
+  const mnemonicSection = document.getElementById("mnemonic-output");
+  if(currentKeys.mnemonic){
+    document.getElementById("mnemonic-text").textContent = currentKeys.mnemonic;
+    mnemonicSection.classList.remove("hidden");
+  } else {
+    mnemonicSection.classList.add("hidden");
+  }
+  document.getElementById("meta-block").textContent = metaLines().join("\n");
+  showOutput();
+}
+
+function copyToClipboard(ev, elementId){
+  const text = document.getElementById(elementId).textContent;
+  const btn = ev.currentTarget;
+  const orig = btn.innerHTML;
+  const flash = () => {
+    btn.innerHTML = "✓ Copied!";
+    setTimeout(() => { btn.innerHTML = orig; }, 1200);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(flash, () => fallbackCopy(text, flash));
+  } else { fallbackCopy(text, flash); }
+}
+function fallbackCopy(text, cb){
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.left = "-9999px";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); cb && cb(); } catch(e){ alert("Copy failed — select text manually."); }
+  document.body.removeChild(ta);
+}
+function copyAll(ev){
+  let text = "Bitcoin Keypair\n";
+  text += metaLines().map(l => l).join("\n") + "\n\n";
+  if(currentKeys.mnemonic) text += "Mnemonic (BIP39): " + currentKeys.mnemonic + "\n";
+  text += "Private Key (WIF): " + currentKeys.privateKey + "\n";
+  text += "Public Address: " + currentKeys.publicAddress + "\n";
+  const btn = ev.currentTarget;
+  const orig = btn.innerHTML;
+  const flash = () => { btn.innerHTML = "✓ Copied All!"; setTimeout(()=>{ btn.innerHTML = orig; }, 1500); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(flash, () => fallbackCopy(text, flash));
+  } else { fallbackCopy(text, flash); }
+}
+
+function doSign(){
+  const wif = document.getElementById("sign-wif").value.trim();
+  const msg = document.getElementById("sign-message").value;
+  if(!wif){ alert("Paste a WIF private key (or click 'Use last generated WIF')."); return; }
+  if(!msg){ alert("Type a message to sign."); return; }
+  try {
+    const t = (document.querySelector('input[name="sign-addr"]:checked') || {}).value || "segwit";
+    const { priv } = wifDecode(wif);
+    const pub = privToPubCompressed(priv);
+    const address = ADDR_TYPES[t].encode(pub);
+    const sig = signBitcoinMessage(wif, msg);
+    const proofJson = buildProofJson(address, t === "legacy" ? "P2PKH" : "P2WPKH", msg, sig);
+    document.getElementById("sign-address-out").textContent = address;
+    document.getElementById("sign-signature-out").textContent = sig;
+    document.getElementById("sign-json-out").textContent = proofJson;
+    const out = document.getElementById("sign-output");
+    out.classList.remove("hidden");
+    out.scrollIntoView({ behavior:"smooth", block:"start" });
+  } catch(e){ alert("Sign failed: " + e.message); }
+}
+
+function doVerify(){
+  const addr = document.getElementById("verify-address").value.trim();
+  const msg = document.getElementById("verify-message").value;
+  const sig = document.getElementById("verify-signature").value.trim();
+  const out = document.getElementById("verify-output");
+  out.classList.remove("hidden");
+  if(!addr || !sig){
+    out.innerHTML = '<div class="verify-bad">✗ Address and signature are required.</div>';
+    return;
+  }
+  try {
+    const r = verifyBitcoinMessage(addr, msg, sig);
+    if(r.valid){
+      out.innerHTML = '<div class="verify-ok">✓ VALID — this signer controls <span class="mono">' + escapeHtml(addr) + '</span><div class="verify-sub">' + escapeHtml(r.addressType) + '</div></div>';
+    } else {
+      out.innerHTML = '<div class="verify-bad">✗ Signature does NOT match this address.</div><pre class="verify-hint">' + escapeHtml(r.hint || "") + '</pre>';
+    }
+  } catch(e){
+    out.innerHTML = '<div class="verify-bad">✗ Verification error: ' + escapeHtml(e.message) + '</div>';
+  }
+  out.scrollIntoView({ behavior:"smooth", block:"start" });
+}
+
+function pasteProofJson(){
+  const text = prompt("Paste the proof JSON below:");
+  if(!text) return;
+  try {
+    const j = JSON.parse(text);
+    if(!j.address || j.signature == null) throw new Error("missing address or signature");
+    document.getElementById("verify-address").value = j.address || "";
+    document.getElementById("verify-message").value = j.message || "";
+    document.getElementById("verify-signature").value = j.signature || "";
+  } catch(e){ alert("Invalid proof JSON: " + e.message); }
+}
+
+function useLastWif(){
+  if(currentKeys && currentKeys.privateKey){
+    document.getElementById("sign-wif").value = currentKeys.privateKey;
+    // also try to match the address type
+    if(currentKeys.meta && currentKeys.meta.addressType){
+      const t = /Legacy/i.test(currentKeys.meta.addressType) ? "legacy" : "segwit";
+      const el = document.querySelector('input[name="sign-addr"][value="' + t + '"]');
+      if(el) el.checked = true;
+    }
+  } else {
+    alert("Generate a keypair first.");
+  }
+}
+
+function copyText(targetId, btn){
+  const text = document.getElementById(targetId).textContent;
+  const orig = btn.innerHTML;
+  const flash = () => { btn.innerHTML = "✓ Copied!"; setTimeout(()=>{ btn.innerHTML = orig; }, 1200); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(flash, () => fallbackCopy(text, flash));
+  } else { fallbackCopy(text, flash); }
+}
+
+function init(){
+  document.addEventListener("keydown", function(e){
+    const id = document.activeElement && document.activeElement.id;
+    if(e.key === "Enter" && (id === "passphrase" || id === "salt")){
+      e.preventDefault(); generateFromPassphrase();
+    }
+    if(e.key === "Enter" && e.ctrlKey && id === "mnemonic"){
+      e.preventDefault(); generateFromMnemonic();
+    }
+  });
+  document.getElementById("btn-random").addEventListener("click", generateRandom);
+  document.getElementById("btn-passphrase").addEventListener("click", generateFromPassphrase);
+  document.getElementById("btn-mnemonic-12").addEventListener("click", () => generateRandomMnemonic(12));
+  document.getElementById("btn-mnemonic-24").addEventListener("click", () => generateRandomMnemonic(24));
+  document.getElementById("btn-from-mnemonic").addEventListener("click", generateFromMnemonic);
+  document.getElementById("btn-recovery").addEventListener("click", runRecovery);
+  document.getElementById("btn-sign").addEventListener("click", doSign);
+  document.getElementById("btn-verify").addEventListener("click", doVerify);
+  document.getElementById("btn-paste-proof").addEventListener("click", pasteProofJson);
+  document.getElementById("btn-use-last-wif").addEventListener("click", useLastWif);
+  document.querySelectorAll("[data-copy-text]").forEach(b => {
+    b.addEventListener("click", () => copyText(b.getAttribute("data-copy-text"), b));
+  });
+  document.getElementById("btn-copy-all").addEventListener("click", copyAll);
+  document.querySelectorAll("[data-copy]").forEach(b => {
+    b.addEventListener("click", ev => copyToClipboard(ev, b.getAttribute("data-copy")));
+  });
+  console.log("[bitcoin-gen] ready — " + TOOL_VERSION);
+}
+window.addEventListener("DOMContentLoaded", init);
+
+</script>
+</body>
+</html>

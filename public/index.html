@@ -1019,11 +1019,16 @@ let activeRoomSocket = null;     // non-null while participating in a federated 
 let activeRoomServer = null;     // domain of the foreign server, for UI
 
 // Room-level events that must fire from whichever socket hosts the room.
+// v0.16.19 — added 'room-attachment' and 'room-attachments-history' so
+// ipfs-gate room attachments work for federated members (they were silently
+// dropped before; the host server emitted them on the temp socket but the
+// forwarder below didn't propagate to addAttachmentBubble's listener).
 const FEDERATED_ROOM_EVENTS = [
   'offer', 'answer', 'ice-candidate',
   'user-joined', 'user-left',
   'room-users', 'room-users-resync',
   'room-info', 'room-history',
+  'room-attachment', 'room-attachments-history',
   'chat-message',
   'peer-hung-up',
   'call-receipt', 'payout-failed',

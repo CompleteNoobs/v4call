@@ -161,41 +161,109 @@ If you want to investigate further before the user's diagnostic returns:
 
 ---
 
-## 3. The NEXT quest (queued, not started)
+## 3. The NEXT quest — IPFS-gate room attachments over WSS
 
-### IPFS-gate room attachments over WSS federation
+### Core delivery — FIXED v0.16.19 (this session)
 
-User reports: **ipfs-gate DMs work great over WSS. ipfs-gate ROOM
-attachments do NOT work over WSS.** (May have been working over Nostr —
-user can't recall which fed was active during the previous "it works" test.)
+**Bug found.** Single-line fix in `public/index.html`. The
+`FEDERATED_ROOM_EVENTS` whitelist (line ~1022) didn't include
+`'room-attachment'` or `'room-attachments-history'`. When a federated
+member is in a room hosted on a different v4call server, their browser
+connects to the host server via a temporary Socket.io connection
+(`activeRoomSocket`). The forwarder loop at line ~1050 propagates events
+from the temp socket to the main socket's listeners, but only for events
+in `FEDERATED_ROOM_EVENTS`. The host server WAS emitting both
+attachment events correctly on the temp socket — they were just being
+silently dropped on the client side.
 
-Open questions for you to research and dump findings into
-`grok/ipfs-room-wss-research.md`:
+**Why same-server worked:** the same-server path doesn't go through
+the temp socket at all (`rsock()` returns the main `socket`), so the
+listener wired up at line ~4493 fires normally.
 
-1. **What is the federation envelope for room attachments today?**
-   Check `server.js` for `room-attachment` socket handler and any
-   federation case that handles it cross-server. There is likely NO
-   `case 'room-attachment'` in the federation switch — that would
-   explain why it works locally (Socket.io broadcast to room) but not
-   cross-server.
+**Why DM attachments worked cross-server:** DMs use a fundamentally
+different routing path — federation switch `case 'dm-attachment'` at
+line ~5821 of server.js. They never went through the temp-socket
+whitelist.
 
-2. **What's the parallel DM-attachment design?** Look for
-   `case 'dm-attachment':` in `server.js` federation handler. v0.16.18
-   added it. The room-attachment equivalent should follow the same
-   pattern: forward the encrypted envelope (CID, per-recipient AES key
-   wraps, signature, etc.) to the host server of any federated room
-   member, who then delivers via local broadcast.
+**Fix applied:** `room-attachment` and `room-attachments-history`
+added to `FEDERATED_ROOM_EVENTS` with an inline comment explaining
+the bug for future readers. Symmetric for sender and recipient: the
+sender's federated bubble render (their own copy via per_recipient
+self-encrypt) works the same way the recipient render does.
 
-3. **What's the room-membership model for federated rooms?**
-   Per v0.16, cross-server room joins happen via direct browser → host
-   server Socket.io (not via federation). So the host server already
-   has every federated member's socket in `rooms[roomName].members`.
-   That means: as long as the host server handles `room-attachment`
-   correctly and broadcasts to the room socket.id list, federated
-   members already receive it via their own temp Socket.io. Maybe the
-   only gap is the away-notification (the `attachment-notification`
-   event for users online but not in the room) which IS a local
-   socket emit and doesn't reach federated users.
+**Server-side: no changes needed.** The host server's
+`room-attachment` handler (server.js:4771) already does the right
+thing: validates sender is a room member, broadcasts `io.to(room)`,
+persists. Federated members are real members of the host's
+Socket.io room (they did `socket.join(room)` via their temp socket
+during the federated room-join flow per v0.16). The broadcast
+already reaches them; the only gap was on the receiving client.
+
+**Deploy:** index.html changed → full rebuild:
+`docker compose down && docker compose build --no-cache && docker compose up -d`
+on each of the three servers. Test scenario: noblemage@v4call.com in
+#test1 with cnoobz@hive-book.com → upload a JPEG via 📎 →
+cnoobz should see the bubble inline. Same in the reverse direction.
+History replay test: cnoobz leaves and rejoins #test1 → the
+attachment should reappear via `room-attachments-history`.
+
+### Known gaps left (not yet fixed — research for Grok)
+
+These were called out in the v0.16.16 design (CLAUDE.md) as
+"deferred to v0.3+" but Grok should research the right shape now so
+the next quest cycle has answers ready.
+
+**Gap 1: Cross-server away-notification.** When a federated member
+is online (on their home server lobby) but NOT currently in the
+room, the host server's `attachment-notification` emit (server.js
+~line 4804) only reaches sockets in its own `lobbyUsers` map. Local
+non-room members get the dot on the room card; federated non-room
+members get nothing. Needs a new federation envelope type to
+forward "you have an unread attachment in #room" to the recipient's
+home server, which then emits `attachment-notification` to their
+local lobby socket. Pattern: mirror `case 'dm-attachment'` shape
+but lightweight — no payload, just the room name + sender + cid.
+
+**Gap 2: Federated sender's recipient picker for cross-server members.**
+When the sender attaches a file, the recipient list is the union of
+in-room members + the room's full allowlist. For federated rooms,
+allowlist entries are in canonical `user@server` form (per v0.16
+design). The picker async-fetches missing pubkeys via the cached
+`fetchPubKey` helper. Worth confirming that path works for
+federated entries — they're just Hive accounts (server-agnostic)
+so it SHOULD work, but verify with a fresh test now that the core
+delivery is fixed.
+
+### Research for Grok — drop in `grok/ipfs-room-wss-research.md`
+
+Items 4 + 5 from the original question list are still valuable
+context for future quests. Drop a single research file covering:
+
+1. The two gaps above — Gap 1 in particular needs a wire-protocol
+   sketch. Should it be a new fed envelope type `room-attachment-notify`,
+   piggyback on the existing `presence` push, or bundle into a
+   new generic `room-event-notify` for future similar features?
+2. **Future fileformats** — mp3 with browser playback, mp4, pdf,
+   txt, tar/zip. User explicitly asked to capture facts NOW that
+   will help when these land. Facts to write down:
+   - ipfs-gate (separate repo) currently rejects non-JPEG in v0.1.
+     That must change first. Note this dependency.
+   - v4call encryption is content-agnostic (AES-GCM over raw bytes
+     + header JSON with filename + mime). Browser playback uses
+     Blob → object URL → `<audio>` / `<video>`. Range requests on
+     encrypted blobs are tricky — full download before playback is
+     the simplest first cut.
+   - PDF preview: `<iframe src="blob:...#toolbar=0">` works
+     in modern browsers; falls back to download.
+   - tar/zip: download only; no browser native unpack. Add
+     a "what's inside" preview only if there's demand.
+   - mp3/mp4 streaming-while-downloading is complex with encryption;
+     defer.
+3. **Federation `protocol_version` question.** Adding the
+   `room-attachment-notify` envelope (Gap 1) is additive — older
+   peers silently drop it. So NO bump needed for the gap-1 fix.
+   But document this so any future structural change knows the
+   bumping rule. Cross-reference Lesson 8 in FED-RECOVERY-NOTES.md.
 
 4. **Future fileformats — mp3 with browser playback, mp4, pdf, txt,
    tar/zip.** User explicitly asked us to capture data NOW that will
@@ -259,21 +327,35 @@ Claude scans this file at the start of each session.
 
 ## 5. Open items at session end (2026-05-28)
 
-- [x] **v4call.com verify-timeout flap** — diagnostic confirmed
-      network healthy (~70ms), fix landed (timeout bump + cache
-      TTL category split). User needs to rebuild + restart all
-      three servers. Item 1B in KNOWN-ISSUES-AND-RISKS.txt is
-      CLOSED.
-- [ ] **User to deploy v0.16.19 to all three servers** —
-      `docker compose down && docker compose build --no-cache &&
-      docker compose up -d`. Watch logs for `[federation] ✗ Peer
-      verification failed` — should appear at most every 30s
-      during a real blip, not every 2s.
-- [ ] **Grok research task (optional):** ipfs-room-wss-research.md
-      covering the 5 questions in section 3 above. No diff yet.
-- [ ] **Grok research task (optional):** file-types-future-notes.md
-      covering mp3 playback, mp4, pdf, txt, tar/zip — facts and
-      trade-offs to inform the future quest.
+- [x] **v4call.com verify-timeout flap** — fix landed; user's
+      latest logs confirm one transient ✗ recovered on the very
+      next reconnect (cache-TTL split working as designed). Item
+      1B in KNOWN-ISSUES-AND-RISKS.txt CLOSED.
+- [x] **IPFS-gate room attachments over WSS** — bug found
+      (`FEDERATED_ROOM_EVENTS` whitelist missing two events),
+      one-line fix landed in `public/index.html`. Untested in
+      production yet but cause is unambiguous.
+- [ ] **User to deploy v0.16.19 to all three servers** — three
+      changes in this version (call-precheck parity, verify-flap
+      fix, room-attachment whitelist fix): `docker compose down
+      && docker compose build --no-cache && docker compose up
+      -d`. Watch for `[federation] ✗ Peer verification failed`
+      → should be every 30s max, not every 2s. Test room
+      attachments cross-server: noblemage@v4call.com sends a
+      JPEG in #test1 → cnoobz@hive-book.com sees it inline.
+- [ ] **Grok research task (now refocused):** drop a single
+      `grok/ipfs-room-wss-research.md` covering:
+        - Gap 1: cross-server away-notification — wire-protocol
+          sketch (new fed envelope vs piggyback on presence vs
+          generic room-event-notify).
+        - Gap 2: federated sender's recipient picker — verify
+          it works for `user@server` allowlist entries.
+        - Future file types: mp3 / mp4 / pdf / txt / tar / zip
+          — facts and trade-offs (see Section 3 for the seed
+          list).
+        - protocol_version question: confirm additive envelope
+          types don't need a bump; cross-reference Lesson 8 in
+          FED-RECOVERY-NOTES.md.
 
 If Grok wants to take either research item, drop the file in `grok/`
 and add a one-liner under "Grok notes for Claude" below.
@@ -282,5 +364,14 @@ and add a one-liner under "Grok notes for Claude" below.
 
 ## Grok notes for Claude
 
-(empty — Grok adds entries here when there's something for Claude
-to pick up next session)
+**2026-05-28 (Grok):** Completed the IPFS room attachments over WSS federation research. Full findings + gap analysis + minimal design sketch in `grok/ipfs-room-wss-research.md`.
+
+Key headline from the research:
+- Live in-room delivery may already "just work" for people inside the room once a few events are added to `FEDERATED_ROOM_EVENTS` on the client (`room-attachment`, `attachment-notification`, possibly history).
+- The real new work is the away-notification path for federated room members who are not currently in the room tab (the server code explicitly skips them today).
+- No new heavy federation envelope forwarding is needed for the core live case (unlike DM attachments), because of the direct temp-socket room model.
+- Protocol: additive only, no v0.4 bump required.
+
+Ready for review / green light on next steps. No diffs produced (per instructions).
+
+Also captured future file-format considerations in the same doc (pulled from the briefing + code).
