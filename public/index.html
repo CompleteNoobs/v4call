@@ -708,7 +708,7 @@
             <span id="dm-panel-rate" class="loading">checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
-            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
+            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
             <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
           </div>
         </div>
@@ -829,11 +829,11 @@
 <div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
     <h3 id="att-modal-title" style="color:var(--accent);">📎 Send Attachment</h3>
-    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg, gate-capped size, 7-day TTL.</p>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg + mp4/webm, gate-capped size, 7-day TTL.</p>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image or audio)</div>
-      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image, audio, or video)</div>
+      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm" style="font-size:0.78rem;color:var(--text);width:100%;"/>
       <div id="att-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
     </div>
 
@@ -946,7 +946,7 @@
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
       <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
       <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
-      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio, gate-capped size)">📎 Attach</button>
+      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video, gate-capped size)">📎 Attach</button>
       <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
@@ -3717,7 +3717,14 @@ function decryptMsg(ciphertext) {
 //   upload-proof: ipfs-gate:upload-proof:v1:<sha256hex>:<reservation_id>:<uploader>
 //   envelope-sig: <cid>|<size>|<sender>|<created>|<expires>|<room>|<kind>|<recipients_sorted_csv>
 // Inner blob: [12-byte nonce][AES-GCM( [4-byte BE len][JSON header][file bytes] )]
-const ATTACH_MAX_BYTES = 10 * 1024 * 1024;
+// v0.16.21 — Size cap is now learned from the gate's `/` response
+// (`max_size_mb` field, populated by refreshAttachCostLine). The const is
+// kept as the initial fallback for when the gate is unreachable or hasn't
+// been queried yet. Without this, changing MAX_FILE_SIZE_MB on the gate's
+// .env had no effect on v4call's client — the old 10 MB const was the
+// real limit. Caught 2026-06-03 after gate-side bump to 25 MB failed to
+// take effect in the picker.
+let attachMaxBytes = 10 * 1024 * 1024;
 // v0.16.17 — `mode` is 'room' (existing) or 'dm' (new). dmTarget/dmRate/
 // dmCurrency/dmEscrow populated only in 'dm' mode and copied from the open
 // DM panel so the modal reflects the same paid-DM gate the panel sees.
@@ -3829,7 +3836,14 @@ const ATTACH_ALLOWED_MIMES = [
   // file before playback.
   'audio/mpeg',
   'audio/wav',
-  'audio/ogg'
+  'audio/ogg',
+  // Video family (Phase 4) — render via <video controls> with object URL.
+  // Same "decrypt-then-play" model as audio: the whole file is in memory
+  // before the player starts, so no streaming-while-decrypting headaches.
+  // Size cap from the gate is the practical limit; raise gate's
+  // MAX_FILE_SIZE_MB if you want longer clips.
+  'video/mp4',
+  'video/webm'
 ];
 function mimeToKind(mime) {
   if (typeof mime !== 'string') return 'file';
@@ -3838,7 +3852,8 @@ function mimeToKind(mime) {
   if (mime === 'image/svg+xml') return 'file';
   if (mime.startsWith('audio/')) return 'audio';
   if (mime.startsWith('image/')) return 'image';
-  // Future kinds (video, pdf, text) land here as the renderer + allowlist
+  if (mime.startsWith('video/')) return 'video';
+  // Future kinds (pdf, text) land here as the renderer + allowlist
   // expand. Unknown types fall back to a generic download card.
   return 'file';
 }
@@ -3916,7 +3931,15 @@ async function refreshAttachCostLine(gatewayUrl) {
     const amount = p.amount ?? '?';
     const cur = p.currency || '?';
     const days = p.ttl_days ?? '?';
-    line.textContent = `≈ ${amount} ${cur} for ${days} day${days === 1 ? '' : 's'}`;
+    // v0.16.21 — Pick up the gate's actual MAX_FILE_SIZE_MB so the
+    // client cap tracks operator config. Defaults to the boot-time
+    // const (10 MB) when the gate doesn't advertise it.
+    const maxMb = Number(j.max_size_mb);
+    if (Number.isFinite(maxMb) && maxMb > 0) {
+      attachMaxBytes = Math.floor(maxMb * 1024 * 1024);
+    }
+    const sizeStr = Number.isFinite(maxMb) && maxMb > 0 ? `, ≤ ${maxMb} MB` : '';
+    line.textContent = `≈ ${amount} ${cur} for ${days} day${days === 1 ? '' : 's'}${sizeStr}`;
   } catch (e) {
     line.textContent = `⚠ could not reach ${gatewayUrl}`;
   }
@@ -4070,8 +4093,10 @@ document.addEventListener('change', (e) => {
       meta.style.color = 'var(--danger)';
       return;
     }
-    if (f.size > ATTACH_MAX_BYTES) {
-      meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap.`; meta.style.color = 'var(--danger)';
+    if (f.size > attachMaxBytes) {
+      const capMb = (attachMaxBytes / 1024 / 1024).toFixed(0);
+      meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap (${capMb} MB).`;
+      meta.style.color = 'var(--danger)';
       return;
     }
     meta.textContent = `${f.name} — ${(f.size / 1024).toFixed(1)} KB`; meta.style.color = 'var(--subtext)';
@@ -4109,7 +4134,11 @@ async function confirmSendAttachment() {
   const file = attachState.file || document.getElementById('att-file-input').files?.[0];
   if (!file) { setAttachStatus('⚠ Pick a file first.', true); return; }
   if (!isMimeAllowed(file.type)) { setAttachStatus(`⚠ ${file.type || 'unknown type'} not accepted. v0.2 supports: ${ATTACH_ALLOWED_MIMES.join(', ')}.`, true); return; }
-  if (file.size > ATTACH_MAX_BYTES) { setAttachStatus('⚠ Over gate size cap.', true); return; }
+  if (file.size > attachMaxBytes) {
+    const capMb = (attachMaxBytes / 1024 / 1024).toFixed(0);
+    setAttachStatus(`⚠ ${(file.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap (${capMb} MB).`, true);
+    return;
+  }
   attachState.file = file;
   const selSel = document.getElementById('att-gateway-select').value;
   const gwRaw = (selSel === '__custom__')
@@ -4416,7 +4445,10 @@ function addAttachmentBubble(env) {
     <div class="att-bubble${iAmRecipient ? '' : ' locked'}">
       <div class="att-row">
         <span class="att-icon">${iAmRecipient
-          ? (env.kind_hint === 'audio' ? '🎵' : env.kind_hint === 'image' ? '📷' : '📎')
+          ? (env.kind_hint === 'audio' ? '🎵'
+             : env.kind_hint === 'video' ? '🎬'
+             : env.kind_hint === 'image' ? '📷'
+             : '📎')
           : '🔒'}</span>
         <span class="att-filename">${escapeHtml(env.original_filename || env.cid)}</span>
       </div>
@@ -4534,6 +4566,22 @@ function addAttachmentBubble(env) {
         audio.style.width = '100%';
         audio.style.maxWidth = '320px';
         thumbWrap.appendChild(audio);
+      } else if (kind === 'video') {
+        // Standard HTML5 video player. Same decrypt-then-play model as
+        // audio — the blob is already in memory before playback starts,
+        // so no streaming/range-request gymnastics. Capped by the gate's
+        // MAX_FILE_SIZE_MB in practice; raise it if you want longer clips.
+        const video = document.createElement('video');
+        video.controls = true;
+        video.preload = 'metadata';
+        video.src = url;
+        video.title = filename;
+        video.style.width = '100%';
+        video.style.maxWidth = '480px';
+        video.style.maxHeight = '360px';
+        video.style.borderRadius = '6px';
+        video.style.background = '#000';
+        thumbWrap.appendChild(video);
       } else {
         thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — no inline preview; save to view</div>`;
       }
