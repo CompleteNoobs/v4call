@@ -3934,7 +3934,12 @@ async function refreshAttachCostLine(gatewayUrl) {
     // v0.16.21 — Pick up the gate's actual MAX_FILE_SIZE_MB so the
     // client cap tracks operator config. Defaults to the boot-time
     // const (10 MB) when the gate doesn't advertise it.
-    const maxMb = Number(j.max_size_mb);
+    //
+    // v0.16.22 — Fix: field lives under `payment.max_size_mb`, NOT at
+    // top level. Caught 2026-06-03 when user bumped gate to 30 MB but
+    // v4call kept enforcing 10 MB. Also handle top-level as a fallback
+    // in case a future gate version moves it.
+    const maxMb = Number(p.max_size_mb ?? j.max_size_mb);
     if (Number.isFinite(maxMb) && maxMb > 0) {
       attachMaxBytes = Math.floor(maxMb * 1024 * 1024);
     }
