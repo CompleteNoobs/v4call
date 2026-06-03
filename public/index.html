@@ -170,6 +170,35 @@
     .room-card.has-unread-attachment .room-card-name::after{content:' 📎';font-size:0.78rem;}
     .lobby-tab-content{display:none;flex:1;flex-direction:column;overflow:hidden;}
     .lobby-tab-content.active{display:flex;}
+    /* Uploads-management tab (v0.17 — desktop only) */
+    .uploads-header{padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);display:flex;flex-direction:column;gap:4px;}
+    .uploads-quota-mine{color:var(--text);font-weight:600;}
+    .uploads-quota-shared{color:var(--muted);font-size:0.66rem;}
+    .uploads-refresh-btn{align-self:flex-start;margin-top:4px;background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;padding:4px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;}
+    .uploads-refresh-btn:hover{border-color:var(--accent);}
+    #uploads-list{flex:1;overflow-y:auto;padding:8px 12px;display:flex;flex-direction:column;gap:8px;}
+    #uploads-list::-webkit-scrollbar{width:3px;}
+    #uploads-list::-webkit-scrollbar-thumb{background:var(--border);}
+    .upl-row{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:var(--surface);display:flex;flex-direction:column;gap:5px;}
+    .upl-row.inactive{opacity:0.55;}
+    .upl-top{display:flex;align-items:center;gap:8px;}
+    .upl-icon{font-size:1.1rem;}
+    .upl-name{font-family:'IBM Plex Mono',monospace;font-size:0.74rem;color:var(--text);word-break:break-all;flex:1;}
+    .upl-mode{font-size:0.58rem;padding:1px 6px;border-radius:3px;font-family:'IBM Plex Mono',monospace;}
+    .upl-mode.encrypted{color:var(--green);background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.2);}
+    .upl-mode.public{color:var(--accent);background:rgba(245,166,35,0.1);border:1px solid rgba(245,166,35,0.2);}
+    .upl-meta{display:flex;flex-wrap:wrap;gap:10px;font-family:'IBM Plex Mono',monospace;font-size:0.64rem;color:var(--muted);align-items:center;}
+    .upl-status{font-size:0.6rem;padding:1px 5px;border-radius:3px;font-family:'IBM Plex Mono',monospace;}
+    .upl-status.active{color:var(--green);}
+    .upl-status.expired{color:var(--muted);}
+    .upl-status.removed{color:var(--danger);}
+    .upl-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+    .upl-btn{background:var(--bg);border:1px solid var(--border);color:var(--subtext);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.64rem;font-weight:600;padding:3px 9px;border-radius:5px;transition:all 0.2s;}
+    .upl-btn:hover{border-color:var(--accent);color:var(--accent);}
+    .upl-btn.danger:hover{border-color:var(--danger);color:var(--danger);}
+    .upl-publink{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--accent);word-break:break-all;flex:1;min-width:140px;}
+    .upl-confirm{font-family:'IBM Plex Mono',monospace;font-size:0.64rem;color:var(--danger);display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
+    .uploads-empty,.uploads-status{padding:16px 12px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--muted);text-align:center;line-height:1.6;}
     #lobby-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
     #lobby-messages::-webkit-scrollbar{width:3px;}
     #lobby-messages::-webkit-scrollbar-thumb{background:var(--border);}
@@ -695,6 +724,7 @@
       <button class="lobby-tab active" onclick="switchLobbyTab('lobby')">📢 Local Lobby</button>
       <button class="lobby-tab" onclick="switchLobbyTab('active')">🚪 Active Rooms</button>
       <button class="lobby-tab" onclick="switchLobbyTab('included')">✉️ Included Rooms</button>
+      <button class="lobby-tab" onclick="switchLobbyTab('uploads')">📦 Uploads</button>
     </div>
     <div class="lobby-tab-content" id="tab-dm">
       <div id="dm-picker">
@@ -736,6 +766,14 @@
     </div>
     <div class="lobby-tab-content" id="tab-included">
       <div id="included-rooms-list"><div id="no-included-msg">No included rooms (allowlisted but empty).</div></div>
+    </div>
+    <div class="lobby-tab-content" id="tab-uploads">
+      <div class="uploads-header">
+        <span class="uploads-quota-mine" id="uploads-quota-mine">Your uploads: —</span>
+        <span class="uploads-quota-shared" id="uploads-quota-shared"></span>
+        <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
+      </div>
+      <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
     </div>
   </div>
   <button id="right-strip" class="sidebar-strip panel-closed" title="Show/hide rooms panel"><span class="strip-ch">&#8249;</span><span class="strip-lbl">ROOMS</span></button>
@@ -1630,7 +1668,7 @@ function switchLobbyTab(tab) {
   document.querySelectorAll('.lobby-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.lobby-tab-content').forEach(c => c.classList.remove('active'));
   const btns = document.querySelectorAll('.lobby-tab');
-  const tabIdx = { dm: 0, lobby: 1, active: 2, included: 3 }[tab];
+  const tabIdx = { dm: 0, lobby: 1, active: 2, included: 3, uploads: 4 }[tab];
   if (tabIdx !== undefined) {
     btns[tabIdx].classList.add('active');
     btns[tabIdx].classList.remove('has-unread');
@@ -1638,6 +1676,7 @@ function switchLobbyTab(tab) {
   const content = document.getElementById('tab-' + tab);
   if (content) content.classList.add('active');
   if (tab === 'dm') renderDmUserList();
+  if (tab === 'uploads') loadUploadsList();
 }
 
 function renderDmUserList() {
@@ -4015,6 +4054,223 @@ async function refreshAttachCostLine(gatewayUrl) {
     line.textContent = `⚠ could not reach ${gatewayUrl}`;
   }
 }
+
+// ──────────────────────────────────────────────────────────────
+// Uploads-management tab (v0.17 — desktop only). Lists the logged-in
+// user's ipfs-gate uploads, shows their footprint + shared gate space,
+// and lets them delete/unpin. Source of truth is the GATE (it's the only
+// thing that knows what's actually still pinned); v4call just renders.
+// All requests are posting-key signed (same `signRaw` pattern as the
+// upload-proof flow); the gate verifies the supplied pubkey belongs to the
+// Hive account (live get_accounts check) before answering — that membership
+// check is what stops one user from listing/deleting another's uploads.
+// Contracts: feature_plans/uploads-tab-gate-briefing.md ("Gate reply — IMPLEMENTED").
+// ──────────────────────────────────────────────────────────────
+
+// Cache the signed list-request so repeatedly opening the tab (or hitting
+// Refresh) doesn't pop a Keychain prompt every time. The sig is valid within
+// the gate's freshness window (±300s); we reuse ours for 240s to stay safely
+// inside it. Delete always fresh-signs (a Keychain prompt on a destructive
+// action is appropriate, not annoying).
+let _uplListSig = null; // { ts, sig, pubkey, account, signedAt }
+
+function attachKindIcon(kind) {
+  return kind === 'audio' ? '🎵'
+       : kind === 'video' ? '🎬'
+       : kind === 'image' ? '📷'
+       : kind === 'pdf'   ? '📄'
+       : kind === 'text'  ? '📝'
+       : kind === 'file'  ? '📦'
+       : '📎';
+}
+
+async function getListRequestSig() {
+  if (_uplListSig && _uplListSig.account === myUsername
+      && (Date.now() - _uplListSig.signedAt) < 240000) {
+    return _uplListSig;
+  }
+  const ts  = Math.floor(Date.now() / 1000);
+  const msg = `ipfs-gate:list-uploads:v1:${myUsername}:${ts}`;
+  const sig = await signRaw(msg);
+  if (!sig) throw new Error('could not sign the request (Keychain declined or no key)');
+  _uplListSig = { ts, sig, pubkey: myPubKey, account: myUsername, signedAt: Date.now() };
+  return _uplListSig;
+}
+
+async function loadUploadsList(forceResign) {
+  const listEl = document.getElementById('uploads-list');
+  if (!listEl) return;
+  if (!myUsername) { listEl.innerHTML = '<div class="uploads-status">Log in first.</div>'; return; }
+  if (forceResign) _uplListSig = null;
+  const gw = getRememberedGateway();
+  listEl.innerHTML = `<div class="uploads-status">… loading your uploads from ${escapeHtml(gw)}</div>`;
+  let s;
+  try { s = await getListRequestSig(); }
+  catch (e) { listEl.innerHTML = `<div class="uploads-status">⚠ ${escapeHtml(e.message)}</div>`; return; }
+  const qs = `hive_account=${encodeURIComponent(myUsername)}&ts=${s.ts}`
+           + `&pubkey=${encodeURIComponent(s.pubkey)}&sig=${encodeURIComponent(s.sig)}`;
+  let resp;
+  try {
+    resp = await fetch(`${gw}/uploads/by-user?${qs}`, { method: 'GET' });
+  } catch (e) {
+    listEl.innerHTML = `<div class="uploads-status">⚠ could not reach the gate at ${escapeHtml(gw)}. Check the gateway URL in the 📎 Attach modal.</div>`;
+    return;
+  }
+  if (resp.status === 401) { _uplListSig = null; listEl.innerHTML = '<div class="uploads-status">⚠ the gate rejected your signature (401). Hit Refresh to re-sign.</div>'; return; }
+  if (resp.status === 422) { _uplListSig = null; listEl.innerHTML = '<div class="uploads-status">⚠ the gate could not verify your Hive identity right now (422 — a Hive node was unreachable). Try Refresh in a moment.</div>'; return; }
+  if (resp.status === 429) { listEl.innerHTML = '<div class="uploads-status">⚠ too many requests (429). Wait a minute, then Refresh.</div>'; return; }
+  if (!resp.ok) { listEl.innerHTML = `<div class="uploads-status">⚠ gate error (${resp.status}).</div>`; return; }
+  let data;
+  try { data = await resp.json(); }
+  catch (e) { listEl.innerHTML = '<div class="uploads-status">⚠ bad response from the gate.</div>'; return; }
+  renderUploadsList(data, gw);
+}
+
+function renderUploadsList(data, gw) {
+  const listEl   = document.getElementById('uploads-list');
+  const mineEl   = document.getElementById('uploads-quota-mine');
+  const sharedEl = document.getElementById('uploads-quota-shared');
+  const uploads  = Array.isArray(data.uploads) ? data.uploads : [];
+
+  // "Your usage" = what you're currently storing (active pins only). That's the
+  // number that matters for "should I delete something" — expired/removed rows
+  // aren't taking space. NB: the gate quota is SHARED-disk, not per-account
+  // (confirmed in the gate reply), so we show the user's own footprint as the
+  // primary figure and the shared gate space only as context.
+  const active    = uploads.filter(u => u.status === 'active');
+  const yourBytes = active.reduce((sum, u) => sum + (u.size_bytes || 0), 0);
+  mineEl.textContent = `Your uploads: ${bytesToHuman(yourBytes)} across ${active.length} file${active.length === 1 ? '' : 's'}`;
+
+  const q = data.quota || {};
+  sharedEl.textContent = q.limit_bytes
+    ? `Gate storage: ${bytesToHuman(q.used_bytes || 0)} of ${bytesToHuman(q.limit_bytes)} used (shared across all users)`
+    : '';
+
+  if (uploads.length === 0) {
+    listEl.innerHTML = '<div class="uploads-empty">No uploads yet. Send an attachment (📎) or use Public upload to put a file on the gate.</div>';
+    return;
+  }
+  // Most-recent first (gate already sorts, but be defensive).
+  uploads.sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0));
+  listEl.innerHTML = '';
+  uploads.forEach(u => listEl.appendChild(buildUploadRow(u, gw)));
+}
+
+function buildUploadRow(u, gw) {
+  const row      = document.createElement('div');
+  const isActive = u.status === 'active';
+  row.className  = 'upl-row' + (isActive ? '' : ' inactive');
+  row.dataset.cid = u.cid;
+
+  const isPublic = u.mode === 'public';
+  // Encrypted uploads: the gate never saw plaintext, so it has no mime/filename
+  // (🔒). Public uploads carry a claimed mime → derive the kind icon from it.
+  const kind = u.mime ? mimeToKind(u.mime) : null;
+  const icon = isPublic ? attachKindIcon(kind) : '🔒';
+  const name = u.mime ? `${u.mime} file` : 'encrypted upload';
+
+  const statusCls = u.status === 'active' ? 'active'
+                  : u.status === 'expired' ? 'expired'
+                  : 'removed';
+  const statusTxt = u.status === 'active'   ? (u.expires_at ? 'expires in ' + (timeUntilExpiry(u.expires_at) || '?') : 'pinned')
+                  : u.status === 'expired'  ? 'expired'
+                  : u.status === 'banned'   ? 'removed (banned)'
+                  : u.status === 'takedown' ? 'removed by operator'
+                  : u.status === 'refunded' ? 'refunded'
+                  : (u.status || 'unknown');
+
+  let uploadedTxt = '';
+  try { uploadedTxt = u.uploaded_at ? new Date(u.uploaded_at).toLocaleString() : ''; } catch (_) {}
+
+  row.innerHTML = `
+    <div class="upl-top">
+      <span class="upl-icon">${icon}</span>
+      <span class="upl-name">${escapeHtml(name)}</span>
+      <span class="upl-mode ${isPublic ? 'public' : 'encrypted'}">${isPublic ? 'public' : 'encrypted'}</span>
+    </div>
+    <div class="upl-meta">
+      <span>${bytesToHuman(u.size_bytes || 0)}</span>
+      <span title="${escapeHtml(u.cid)}">cid:${escapeHtml(String(u.cid).slice(0, 12))}…</span>
+      ${uploadedTxt ? `<span>↑ ${escapeHtml(uploadedTxt)}</span>` : ''}
+      <span class="upl-status ${statusCls}">${escapeHtml(statusTxt)}</span>
+    </div>
+    ${isPublic && u.public_url ? `<div class="upl-actions"><span class="upl-publink">${escapeHtml(u.public_url)}</span><button class="upl-btn" data-act="copy">📋 Copy link</button><button class="upl-btn" data-act="open">↗ Open</button></div>` : ''}
+    <div class="upl-actions upl-action-bar">
+      ${isActive ? '<button class="upl-btn danger" data-act="delete">🗑 Delete / unpin</button>' : ''}
+    </div>
+  `;
+
+  // Event wiring via listeners (no inline onclick with dynamic data — XSS
+  // hygiene, matches the v0.16 data-action pattern).
+  row.querySelectorAll('[data-act]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const act = btn.getAttribute('data-act');
+      if (act === 'copy') {
+        navigator.clipboard?.writeText(u.public_url).then(() => {
+          btn.textContent = '✓ Copied';
+          setTimeout(() => { btn.textContent = '📋 Copy link'; }, 1500);
+        });
+      } else if (act === 'open') {
+        window.open(u.public_url, '_blank', 'noopener');
+      } else if (act === 'delete') {
+        promptDeleteUpload(row, u, gw);
+      }
+    });
+  });
+  return row;
+}
+
+function promptDeleteUpload(row, u, gw) {
+  const bar = row.querySelector('.upl-action-bar');
+  if (!bar) return;
+  const warn = u.mode === 'public'
+    ? 'Unpin this? Anyone with the link gets a 404 afterwards.'
+    : "Unpin this? Recipients won't be able to fetch it anymore.";
+  bar.innerHTML = `<span class="upl-confirm">${escapeHtml(warn)}
+      <button class="upl-btn danger" data-c="yes">Confirm</button>
+      <button class="upl-btn" data-c="no">Cancel</button></span>`;
+  bar.querySelector('[data-c="no"]').addEventListener('click', () => {
+    bar.innerHTML = '<button class="upl-btn danger" data-act="delete">🗑 Delete / unpin</button>';
+    bar.querySelector('[data-act="delete"]').addEventListener('click', () => promptDeleteUpload(row, u, gw));
+  });
+  bar.querySelector('[data-c="yes"]').addEventListener('click', () => deleteUpload(row, u, gw));
+}
+
+async function deleteUpload(row, u, gw) {
+  const bar = row.querySelector('.upl-action-bar');
+  if (bar) bar.innerHTML = '<span class="upl-confirm">… unpinning</span>';
+  const ts  = Math.floor(Date.now() / 1000);
+  const msg = `ipfs-gate:delete-pin:v1:${u.cid}:${myUsername}:${ts}`;
+  let sig = '';
+  try { sig = await signRaw(msg); } catch (_) {}
+  if (!sig) { if (bar) bar.innerHTML = '<span class="upl-confirm">⚠ signing declined</span>'; return; }
+  let resp;
+  try {
+    resp = await fetch(`${gw}/uploads/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cid: u.cid, hive_account: myUsername, ts, pubkey: myPubKey, sig })
+    });
+  } catch (e) {
+    if (bar) bar.innerHTML = '<span class="upl-confirm">⚠ could not reach the gate</span>';
+    return;
+  }
+  if (resp.status === 404) { markRowRemoved(row, true); return; }
+  if (!resp.ok) { if (bar) bar.innerHTML = `<span class="upl-confirm">⚠ delete failed (${resp.status})</span>`; return; }
+  let j = {};
+  try { j = await resp.json(); } catch (_) {}
+  markRowRemoved(row, j.fully_unpinned);
+  // Re-pull the list so the footprint number + this row's status reflect truth.
+  // Reuses the cached list sig (no extra Keychain prompt).
+  loadUploadsList();
+}
+
+function markRowRemoved(row, fullyUnpinned) {
+  row.classList.add('inactive');
+  const bar = row.querySelector('.upl-action-bar');
+  if (bar) bar.innerHTML = `<span class="upl-confirm" style="color:var(--green);">✓ unpinned${fullyUnpinned === false ? ' (other copies remain)' : ''}</span>`;
+}
+
 function openAttachModal() {
   if (!currentRoom) return;
   if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }

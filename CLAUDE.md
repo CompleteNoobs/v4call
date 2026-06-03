@@ -2,6 +2,8 @@
 
 > **⚠️ This project was vibe-coded with Claude Opus 4.6 → 4.7. The author is a tinkerer, not a developer. Use at your own risk — review the code before trusting it with real money.**
 
+> **🖥️ CURRENT DEVELOPMENT FOCUS (2026-06-03): desktop browser UI only.** All active feature work (starting with the uploads-management tab) targets the desktop browser experience. **Mobile UI is explicitly deferred** — do not spend effort on the `@media (max-width:720px)` bottom-tab nav, mobile layout parity, or touch affordances for new features until the author lifts this hold. Existing mobile behaviour is left as-is; new features may surface desktop-only (e.g. via the `#lobby-tabs` strip) without a mobile equivalent for now. Revisit mobile after the desktop feature set settles.
+
 ## What This Is
 
 v4call is a decentralised paid video, voice, and text communication platform built on the Hive blockchain. Users set their own rates for receiving calls and messages. Callers pay with HBD or custom Hive-Engine tokens. Unused credit is refunded automatically. The server operator earns a platform fee from each paid interaction. Multiple server operators can federate so users on different servers see, call, and message each other.
