@@ -708,7 +708,7 @@
             <span id="dm-panel-rate" class="loading">checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
-            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.1: jpeg, ≤10MB)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
+            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: jpeg + mp3, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
             <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
           </div>
         </div>
@@ -829,11 +829,11 @@
 <div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
     <h3 id="att-modal-title" style="color:var(--accent);">📎 Send Attachment</h3>
-    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.1: jpeg only, ≤10MB, 7-day TTL.</p>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg + mp3, ≤10MB (gate-configurable), 7-day TTL.</p>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image/jpeg)</div>
-      <input id="att-file-input" type="file" accept="image/jpeg" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image/jpeg or audio/mpeg)</div>
+      <input id="att-file-input" type="file" accept="image/jpeg,audio/mpeg" style="font-size:0.78rem;color:var(--text);width:100%;"/>
       <div id="att-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
     </div>
 
@@ -946,7 +946,7 @@
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
       <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
       <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
-      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.1: jpeg, ≤10MB)">📎 Attach</button>
+      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: jpeg + mp3, gate-capped size)">📎 Attach</button>
       <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
@@ -3793,7 +3793,7 @@ async function verifyEnvelopeSig(env) {
 async function buildInnerBlob({ file, sender }) {
   const fileBytes = new Uint8Array(await file.arrayBuffer());
   const header = JSON.stringify({
-    v: 1, filename: file.name, mime: file.type || 'image/jpeg',
+    v: 1, filename: file.name, mime: file.type || 'application/octet-stream',
     original_size: fileBytes.length, sender
   });
   const headerBytes = new TextEncoder().encode(header);
@@ -3809,6 +3809,32 @@ function buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader 
   if (!/^[a-z0-9][a-z0-9.\-]*$/.test(u)) throw new Error('bad uploader');
   return `ipfs-gate:upload-proof:v1:${ciphertextSha256Hex}:${reservationId}:${u}`;
 }
+// v0.16.20 — Phase 1 of multi-format attachments (MP3 support).
+// Single source of truth for what plaintext MIMEs v4call's client accepts +
+// how each maps to a renderer kind_hint. Extends naturally for Phase 2+
+// (audio family, image family, video, pdf, text, file). The ipfs-gate is
+// content-agnostic (see feature_plans/mp3-room-attachment-briefing.md →
+// the report MULTIFORMAT-V0.2-OPTIONS.md / MP3-SUPPORT-OPTIONS.md on the
+// gate side); these tables are the client-side gate.
+const ATTACH_ALLOWED_MIMES = [
+  'image/jpeg',
+  'audio/mpeg'
+];
+function mimeToKind(mime) {
+  if (typeof mime !== 'string') return 'file';
+  // Security: SVG can carry <script>. Never inline-render it. Treat as
+  // download-only by tagging it 'file' even though MIME starts with image/.
+  if (mime === 'image/svg+xml') return 'file';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.startsWith('image/')) return 'image';
+  // Future kinds (video, pdf, text) land here as the renderer + allowlist
+  // expand. Unknown types fall back to a generic download card.
+  return 'file';
+}
+function isMimeAllowed(mime) {
+  return ATTACH_ALLOWED_MIMES.includes(mime);
+}
+
 function buildEnvelopeSigInput(env) {
   const { cid, size_bytes, sender, created_at, expires_at, kind_hint, per_recipient } = env;
   const recipients = Object.keys(per_recipient || {}).map(s => s.toLowerCase()).sort();
@@ -4028,12 +4054,13 @@ document.addEventListener('change', (e) => {
     const f = e.target.files?.[0];
     const meta = document.getElementById('att-file-meta');
     if (!f) { meta.textContent = ''; return; }
-    if (f.type !== 'image/jpeg' && !/\.jpe?g$/i.test(f.name)) {
-      meta.textContent = '⚠ v0.1 supports image/jpeg only.'; meta.style.color = 'var(--danger)';
+    if (!isMimeAllowed(f.type)) {
+      meta.textContent = `⚠ ${f.type || 'unknown type'} not accepted. v0.2 supports: ${ATTACH_ALLOWED_MIMES.join(', ')}.`;
+      meta.style.color = 'var(--danger)';
       return;
     }
     if (f.size > ATTACH_MAX_BYTES) {
-      meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds 10 MB cap.`; meta.style.color = 'var(--danger)';
+      meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap.`; meta.style.color = 'var(--danger)';
       return;
     }
     meta.textContent = `${f.name} — ${(f.size / 1024).toFixed(1)} KB`; meta.style.color = 'var(--subtext)';
@@ -4070,8 +4097,8 @@ async function confirmSendAttachment() {
   if (!attachState) return;
   const file = attachState.file || document.getElementById('att-file-input').files?.[0];
   if (!file) { setAttachStatus('⚠ Pick a file first.', true); return; }
-  if (file.type !== 'image/jpeg' && !/\.jpe?g$/i.test(file.name)) { setAttachStatus('⚠ jpeg only.', true); return; }
-  if (file.size > ATTACH_MAX_BYTES) { setAttachStatus('⚠ Over 10 MB.', true); return; }
+  if (!isMimeAllowed(file.type)) { setAttachStatus(`⚠ ${file.type || 'unknown type'} not accepted. v0.2 supports: ${ATTACH_ALLOWED_MIMES.join(', ')}.`, true); return; }
+  if (file.size > ATTACH_MAX_BYTES) { setAttachStatus('⚠ Over gate size cap.', true); return; }
   attachState.file = file;
   const selSel = document.getElementById('att-gateway-select').value;
   const gwRaw = (selSel === '__custom__')
@@ -4266,20 +4293,27 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
 
   // 8) Build + sign envelope
   const created_at = new Date().toISOString();
+  // v0.16.20 — kind_hint is now derived from the file's MIME type via the
+  // shared mimeToKind table. Old envelopes signed with literal 'image' still
+  // verify against the same buildEnvelopeSigInput recipe because the value
+  // is included in the signed payload — the sig is whatever the sender
+  // wrote, and the receiver picks the renderer from that same value.
+  const kindHint   = mimeToKind(file.type);
+  const originalMime = file.type || 'application/octet-stream';
   const envelope = (mode === 'dm')
     ? {
         v: 1, type: 'dm-attachment', to_user: dmContext.target, cid,
         size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
         created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
-        kind_hint: 'image', per_recipient,
-        original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
+        kind_hint: kindHint, per_recipient,
+        original_size: plaintextSize, original_filename: file.name, original_mime: originalMime
       }
     : {
         v: 1, type: 'room-attachment', room: currentRoom, cid,
         size_bytes: blob.length, sender: myUsername, sender_pubkey: myPubKey,
         created_at, expires_at, gateway_hint: gateway_url || `${gatewayUrl}/ipfs/${cid}`,
-        kind_hint: 'image', per_recipient,
-        original_size: plaintextSize, original_filename: file.name, original_mime: file.type || 'image/jpeg'
+        kind_hint: kindHint, per_recipient,
+        original_size: plaintextSize, original_filename: file.name, original_mime: originalMime
       };
   setAttachStatus('Signing envelope (Keychain)…');
   envelope.envelope_sig = await signRaw(buildEnvelopeSigInput(envelope));
@@ -4370,7 +4404,9 @@ function addAttachmentBubble(env) {
     </div>
     <div class="att-bubble${iAmRecipient ? '' : ' locked'}">
       <div class="att-row">
-        <span class="att-icon">${iAmRecipient ? '📷' : '🔒'}</span>
+        <span class="att-icon">${iAmRecipient
+          ? (env.kind_hint === 'audio' ? '🎵' : env.kind_hint === 'image' ? '📷' : '📎')
+          : '🔒'}</span>
         <span class="att-filename">${escapeHtml(env.original_filename || env.cid)}</span>
       </div>
       <div class="att-meta-line">
@@ -4458,20 +4494,37 @@ function addAttachmentBubble(env) {
     const filename = header.filename || 'attachment';
     const blob = new Blob([fileBytes], { type: mime });
     const url = URL.createObjectURL(blob);
-    const isImage = /^image\//.test(mime);
+    // v0.16.20 — Pick renderer from the envelope's kind_hint (which the
+    // sender derived from the file's MIME at upload time, via mimeToKind),
+    // not from a re-derivation here. If the envelope says 'audio' the
+    // recipient renders an audio player even if some future MIME-prefix
+    // overlap would confuse a regex.
+    const kind = env.kind_hint || mimeToKind(mime);
     if (body) {
       body.innerHTML = '';
       const thumbWrap = document.createElement('div');
       thumbWrap.className = 'att-thumb-wrap';
-      if (isImage) {
+      if (kind === 'image') {
         const img = document.createElement('img');
         img.src = url;
         img.alt = filename;
         img.title = `${filename} — click to open full size`;
         img.onclick = () => window.open(url, '_blank', 'noopener,noreferrer');
         thumbWrap.appendChild(img);
+      } else if (kind === 'audio') {
+        // Standard HTML5 audio player. Works on iOS Safari + desktops with
+        // a single full-blob object URL — no MSE / range-request setup
+        // needed because v4call decrypts the whole file before playback.
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.src = url;
+        audio.title = filename;
+        audio.style.width = '100%';
+        audio.style.maxWidth = '320px';
+        thumbWrap.appendChild(audio);
       } else {
-        thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — non-image; save to view</div>`;
+        thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — no inline preview; save to view</div>`;
       }
       body.appendChild(thumbWrap);
       const actions = document.createElement('div');
