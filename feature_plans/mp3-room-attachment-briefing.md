@@ -2,6 +2,49 @@
 # (originally scoped MP3-only — expanded 2026-05-28 to cover the full
 # file-type taxonomy upfront, ship in phases)
 
+---
+
+## Gate-side gotchas discovered during shipping (2026-06-03)
+
+Three things the original gate-Claude report missed or got wrong, all
+caught during real production testing. Future Claude/Grok sessions
+working on the gate side should check these proactively:
+
+1. **`/` endpoint response shape — `max_size_mb` is nested under
+   `payment`, NOT top-level.** The report said top-level; the actual
+   shape is `{ payment: { currency, amount, max_size_mb, ttl_days } }`.
+   v4call's `refreshAttachCostLine` was patched in v0.16.22 to read
+   `p.max_size_mb ?? j.max_size_mb` (tolerates either future shape).
+   If the gate ever moves the field, v4call still works.
+
+2. **nginx `client_max_body_size` is a separate cap from
+   `MAX_FILE_SIZE_MB`.** The gate's app-level limit
+   (`MAX_FILE_SIZE_MB` in `.env`) does not affect what nginx in front
+   of the gate accepts. Default nginx is 1 MB; operators usually bump
+   to match the gate's cap when they first deploy. When raising the
+   gate cap later, **the nginx config must also be raised** — otherwise
+   uploads above the nginx limit fail with a browser-side "Failed to
+   fetch" (because nginx kills the connection mid-stream before the
+   request reaches the gate). Caught 2026-06-03 when user raised the
+   gate to 60 MB but nginx was still at 12 MB. Symptom: small uploads
+   work, anything over the nginx limit fails with a generic fetch
+   error AFTER the on-chain payment was already broadcast → orphan
+   payment → manual refund via `/admin/orphan-payments`.
+
+   **Rule of thumb**: nginx `client_max_body_size` should be ~1.5× the
+   gate's `MAX_FILE_SIZE_MB` to cover multipart envelope overhead +
+   AES-GCM padding. e.g. gate cap 60 MB → nginx 100M.
+
+3. **Browser "Failed to fetch" is the unavoidable error class for
+   connection-killed-mid-stream**. v4call can't catch it more cleanly
+   — fetch() just throws. The error UX v4call ships (tx_id +
+   reservation_id + "ask the operator to check /admin/orphan-payments")
+   is the right behaviour for this class. Don't try to "fix" it on
+   the v4call side — fix the upstream cap that's killing the
+   connection.
+
+---
+
 > Intended audience: a fresh Claude Code thread, started in
 > `~/CAI/ipfs-gate` (NOT in the v4call repo).
 > Author: Claude (v4call lead dev, 2026-05-28).

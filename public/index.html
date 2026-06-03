@@ -708,7 +708,7 @@
             <span id="dm-panel-rate" class="loading">checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
-            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
+            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
             <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
           </div>
         </div>
@@ -829,11 +829,11 @@
 <div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
     <h3 id="att-modal-title" style="color:var(--accent);">📎 Send Attachment</h3>
-    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg + mp4/webm, gate-capped size, 7-day TTL.</p>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg + mp4/webm + pdf, gate-capped size, 7-day TTL.</p>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image, audio, or video)</div>
-      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image, audio, video, or pdf)</div>
+      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm,application/pdf" style="font-size:0.78rem;color:var(--text);width:100%;"/>
       <div id="att-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
     </div>
 
@@ -946,7 +946,7 @@
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
       <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
       <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
-      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video, gate-capped size)">📎 Attach</button>
+      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf, gate-capped size)">📎 Attach</button>
       <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
@@ -3843,17 +3843,24 @@ const ATTACH_ALLOWED_MIMES = [
   // Size cap from the gate is the practical limit; raise gate's
   // MAX_FILE_SIZE_MB if you want longer clips.
   'video/mp4',
-  'video/webm'
+  'video/webm',
+  // Document family (Phase 5) — PDF only for v0.2. Renders via <iframe>
+  // pointing at the decrypted blob URL; the browser's built-in PDF
+  // viewer handles display. iOS Safari quirk: the iframe is empty and
+  // the user has to use the Open button to view the file (acceptable
+  // — Save/Open are always rendered alongside any kind).
+  'application/pdf'
 ];
 function mimeToKind(mime) {
   if (typeof mime !== 'string') return 'file';
   // Security: SVG can carry <script>. Never inline-render it. Treat as
   // download-only by tagging it 'file' even though MIME starts with image/.
   if (mime === 'image/svg+xml') return 'file';
+  if (mime === 'application/pdf') return 'pdf';
   if (mime.startsWith('audio/')) return 'audio';
   if (mime.startsWith('image/')) return 'image';
   if (mime.startsWith('video/')) return 'video';
-  // Future kinds (pdf, text) land here as the renderer + allowlist
+  // Future kinds (text) land here as the renderer + allowlist
   // expand. Unknown types fall back to a generic download card.
   return 'file';
 }
@@ -4453,6 +4460,7 @@ function addAttachmentBubble(env) {
           ? (env.kind_hint === 'audio' ? '🎵'
              : env.kind_hint === 'video' ? '🎬'
              : env.kind_hint === 'image' ? '📷'
+             : env.kind_hint === 'pdf' ? '📄'
              : '📎')
           : '🔒'}</span>
         <span class="att-filename">${escapeHtml(env.original_filename || env.cid)}</span>
@@ -4587,6 +4595,24 @@ function addAttachmentBubble(env) {
         video.style.borderRadius = '6px';
         video.style.background = '#000';
         thumbWrap.appendChild(video);
+      } else if (kind === 'pdf') {
+        // PDF inline preview via the browser's built-in viewer. blob:
+        // URLs are same-origin, so this works without CSP gymnastics.
+        // `#toolbar=0` hides Chrome's PDF toolbar for a cleaner inline
+        // look (ignored by Firefox/Safari but harmless). iOS Safari
+        // doesn't render PDF in iframes — users on iOS will see a
+        // blank-ish frame and need the Open button below, which is
+        // already shown for every kind.
+        const iframe = document.createElement('iframe');
+        iframe.src = url + '#toolbar=0';
+        iframe.title = filename;
+        iframe.style.width = '100%';
+        iframe.style.maxWidth = '480px';
+        iframe.style.height = '400px';
+        iframe.style.border = '1px solid var(--border)';
+        iframe.style.borderRadius = '6px';
+        iframe.style.background = '#fff';
+        thumbWrap.appendChild(iframe);
       } else {
         thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — no inline preview; save to view</div>`;
       }
