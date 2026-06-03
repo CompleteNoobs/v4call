@@ -708,7 +708,7 @@
             <span id="dm-panel-rate" class="loading">checking…</span>
           </div>
           <div style="display:flex;align-items:center;gap:6px;">
-            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
+            <button id="dm-attach-btn" onclick="openDmAttachModal()" title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf + text + archives, gate-capped size)" style="background:var(--bg);border:1px solid var(--border);color:var(--accent);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;font-weight:600;padding:5px 10px;border-radius:5px;transition:border-color 0.2s,color 0.2s;">📎 Attach</button>
             <button id="dm-panel-close" onclick="closeDmPanel()" title="Close">✕</button>
           </div>
         </div>
@@ -829,11 +829,11 @@
 <div id="attachment-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
   <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
     <h3 id="att-modal-title" style="color:var(--accent);">📎 Send Attachment</h3>
-    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg + mp4/webm + pdf + txt/md, gate-capped size, 7-day TTL.</p>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypts in your browser, pays the gate, pins to IPFS. v0.2: jpeg/png/gif/webp + mp3/wav/ogg + mp4/webm + pdf + txt/md + zip/tar/gz/7z/rar, gate-capped size, 7-day TTL.</p>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image, audio, video, pdf, or text)</div>
-      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm,application/pdf,text/plain,text/markdown,.txt,.md" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (image, audio, video, pdf, text, or archive)</div>
+      <input id="att-file-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,audio/mpeg,audio/wav,audio/ogg,video/mp4,video/webm,application/pdf,text/plain,text/markdown,application/zip,application/x-tar,application/gzip,application/x-7z-compressed,application/vnd.rar,.txt,.md,.zip,.tar,.gz,.tgz,.tar.gz,.7z,.rar" style="font-size:0.78rem;color:var(--text);width:100%;"/>
       <div id="att-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
     </div>
 
@@ -946,7 +946,7 @@
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
       <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
       <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
-      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf, gate-capped size)">📎 Attach</button>
+      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf + text + archives, gate-capped size)">📎 Attach</button>
       <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
     </div>
     <div id="call-cost-ticker">
@@ -3855,7 +3855,16 @@ const ATTACH_ALLOWED_MIMES = [
   // first chunk + "truncated, save to view full." Markdown renders as
   // raw text in v0.2 (no markdown library — keeps the bundle small).
   'text/plain',
-  'text/markdown'
+  'text/markdown',
+  // Generic file family (Phase 7) — download-only, no inline preview
+  // attempt. Common archive formats. Extension fallbacks in
+  // detectFileMime cover the cases where browsers don't reliably set
+  // the MIME (notably .tar.gz which often comes through as empty).
+  'application/zip',
+  'application/x-tar',
+  'application/gzip',
+  'application/x-7z-compressed',
+  'application/vnd.rar'
 ];
 
 // Inline preview cap for text files. Above this, the bubble shows the
@@ -3887,11 +3896,35 @@ function isMimeAllowed(mime) {
 // the extension is recognised — the existing fallback to
 // 'application/octet-stream' downstream still kicks in.
 function detectFileMime(file) {
-  if (file.type) return file.type;
+  // Strategy:
+  //   1. Multi-extension archives (.tar.gz etc) are always derived from
+  //      filename — browsers report these inconsistently (gzip, x-gzip,
+  //      octet-stream, empty are all observed).
+  //   2. If the browser gave us a useful MIME, use it. "application/
+  //      octet-stream" is the generic "I don't know" fallback and is
+  //      treated as if file.type were empty, so we fall through to
+  //      single-extension detection below instead of trusting it.
+  //   3. Single-extension fallbacks for types browsers don't reliably
+  //      tag (.md, .7z, .rar, etc).
+  //   4. If nothing matches, return whatever file.type was (possibly
+  //      empty, possibly octet-stream) so the caller sees the truth.
   const name = (file.name || '').toLowerCase();
+
+  if (/\.tar\.gz$/.test(name)  || /\.tgz$/.test(name))   return 'application/gzip';
+  if (/\.tar\.bz2$/.test(name) || /\.tbz2?$/.test(name)) return 'application/x-tar';
+  if (/\.tar\.xz$/.test(name)  || /\.txz$/.test(name))   return 'application/x-tar';
+
+  if (file.type && file.type !== 'application/octet-stream') return file.type;
+
   if (/\.(md|markdown)$/.test(name)) return 'text/markdown';
   if (/\.txt$/.test(name)) return 'text/plain';
-  return '';
+  if (/\.zip$/.test(name)) return 'application/zip';
+  if (/\.tar$/.test(name)) return 'application/x-tar';
+  if (/\.gz$/.test(name))  return 'application/gzip';
+  if (/\.7z$/.test(name))  return 'application/x-7z-compressed';
+  if (/\.rar$/.test(name)) return 'application/vnd.rar';
+
+  return file.type || '';
 }
 
 function buildEnvelopeSigInput(env) {
@@ -4494,6 +4527,7 @@ function addAttachmentBubble(env) {
              : env.kind_hint === 'image' ? '📷'
              : env.kind_hint === 'pdf' ? '📄'
              : env.kind_hint === 'text' ? '📝'
+             : env.kind_hint === 'file' ? '📦'
              : '📎')
           : '🔒'}</span>
         <span class="att-filename">${escapeHtml(env.original_filename || env.cid)}</span>
@@ -4682,7 +4716,11 @@ function addAttachmentBubble(env) {
           thumbWrap.appendChild(trunc);
         }
       } else {
-        thumbWrap.innerHTML = `<div class="att-thumb-loading">📄 ${escapeHtml(filename)} (${escapeHtml(mime)}) — no inline preview; save to view</div>`;
+        // Generic file (Phase 7) — kind === 'file'. Download-only, no
+        // inline preview attempt. Includes archives, SVG (downgraded
+        // from 'image' in mimeToKind on security grounds), and any
+        // future / unknown type with no specific renderer.
+        thumbWrap.innerHTML = `<div class="att-thumb-loading"><strong>📦 ${escapeHtml(filename)}</strong><br/><span style="font-size:0.66rem;color:var(--muted);">${escapeHtml(mime)} · ${bytesToHuman(fileBytes.length)}</span><br/><span style="font-size:0.66rem;color:var(--muted);">No inline preview — use Save to download.</span></div>`;
       }
       body.appendChild(thumbWrap);
       const actions = document.createElement('div');
