@@ -170,7 +170,7 @@
     .room-card.has-unread-attachment .room-card-name::after{content:' 📎';font-size:0.78rem;}
     .lobby-tab-content{display:none;flex:1;flex-direction:column;overflow:hidden;}
     .lobby-tab-content.active{display:flex;}
-    /* Uploads-management tab (v0.17 — desktop only) */
+    /* Uploads-management tab (v0.16.25 — desktop only) */
     .uploads-header{padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);display:flex;flex-direction:column;gap:4px;}
     .uploads-quota-mine{color:var(--text);font-weight:600;}
     .uploads-quota-shared{color:var(--muted);font-size:0.66rem;}
@@ -4088,7 +4088,7 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Uploads-management tab (v0.17 — desktop only). Lists the logged-in
+// Uploads-management tab (v0.16.25 — desktop only). Lists the logged-in
 // user's ipfs-gate uploads, shows their footprint + shared gate space,
 // and lets them delete/unpin. Source of truth is the GATE (it's the only
 // thing that knows what's actually still pinned); v4call just renders.
@@ -4162,7 +4162,7 @@ async function loadUploadsList(forceResign) {
   renderUploadsList(data, gw, ctx);
 }
 
-// v0.17 — ask our own server for the filename/room context of attachments we
+// v0.16.25 — ask our own server for the filename/room context of attachments we
 // sent (keyed by CID). Local-server data only; scoped to us server-side.
 function fetchUploadContext() {
   return new Promise((resolve) => {
