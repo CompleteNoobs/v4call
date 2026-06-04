@@ -192,6 +192,7 @@
     .upl-status.active{color:var(--green);}
     .upl-status.expired{color:var(--muted);}
     .upl-status.removed{color:var(--danger);}
+    .upl-ctx{font-family:'IBM Plex Mono',monospace;font-size:0.64rem;color:var(--subtext);}
     .upl-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
     .upl-btn{background:var(--bg);border:1px solid var(--border);color:var(--subtext);cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.64rem;font-weight:600;padding:3px 9px;border-radius:5px;transition:all 0.2s;}
     .upl-btn:hover{border-color:var(--accent);color:var(--accent);}
@@ -4123,10 +4124,29 @@ async function loadUploadsList(forceResign) {
   let data;
   try { data = await resp.json(); }
   catch (e) { listEl.innerHTML = '<div class="uploads-status">⚠ bad response from the gate.</div>'; return; }
-  renderUploadsList(data, gw);
+  // Enrich with locally-stored context (filename / kind / room|DM). The gate
+  // only ever saw ciphertext for encrypted uploads, so this is the only place
+  // a friendly label can come from. Best-effort — render anyway if it fails.
+  const ctx = await fetchUploadContext();
+  renderUploadsList(data, gw, ctx);
 }
 
-function renderUploadsList(data, gw) {
+// v0.17 — ask our own server for the filename/room context of attachments we
+// sent (keyed by CID). Local-server data only; scoped to us server-side.
+function fetchUploadContext() {
+  return new Promise((resolve) => {
+    if (!socket || !socket.connected) { resolve({}); return; }
+    let done = false;
+    socket.emit('my-uploads-context', (resp) => {
+      if (done) return; done = true;
+      resolve((resp && resp.context) ? resp.context : {});
+    });
+    setTimeout(() => { if (!done) { done = true; resolve({}); } }, 4000);
+  });
+}
+
+function renderUploadsList(data, gw, ctx) {
+  ctx = ctx || {};
   const listEl   = document.getElementById('uploads-list');
   const mineEl   = document.getElementById('uploads-quota-mine');
   const sharedEl = document.getElementById('uploads-quota-shared');
@@ -4153,21 +4173,34 @@ function renderUploadsList(data, gw) {
   // Most-recent first (gate already sorts, but be defensive).
   uploads.sort((a, b) => new Date(b.uploaded_at || 0) - new Date(a.uploaded_at || 0));
   listEl.innerHTML = '';
-  uploads.forEach(u => listEl.appendChild(buildUploadRow(u, gw)));
+  uploads.forEach(u => listEl.appendChild(buildUploadRow(u, gw, ctx[u.cid])));
 }
 
-function buildUploadRow(u, gw) {
+function buildUploadRow(u, gw, ctx) {
   const row      = document.createElement('div');
   const isActive = u.status === 'active';
   row.className  = 'upl-row' + (isActive ? '' : ' inactive');
   row.dataset.cid = u.cid;
 
   const isPublic = u.mode === 'public';
-  // Encrypted uploads: the gate never saw plaintext, so it has no mime/filename
-  // (🔒). Public uploads carry a claimed mime → derive the kind icon from it.
-  const kind = u.mime ? mimeToKind(u.mime) : null;
-  const icon = isPublic ? attachKindIcon(kind) : '🔒';
-  const name = u.mime ? `${u.mime} file` : 'encrypted upload';
+  // Icon + name resolution, in priority order:
+  //  - public uploads carry a claimed mime from the gate → derive kind from it.
+  //  - encrypted uploads: the gate only saw ciphertext, so the friendly label
+  //    comes from OUR locally-stored context (ctx) keyed by CID. When we have no
+  //    local record (e.g. sent from another device/server), fall back to 🔒.
+  let kind, icon, name;
+  if (isPublic) {
+    kind = u.mime ? mimeToKind(u.mime) : null;
+    icon = attachKindIcon(kind);
+    name = (ctx && ctx.filename) || (u.mime ? `${u.mime} file` : 'public upload');
+  } else if (ctx && (ctx.filename || ctx.kind)) {
+    kind = ctx.kind || (ctx.mime ? mimeToKind(ctx.mime) : null);
+    icon = attachKindIcon(kind);
+    name = ctx.filename || 'encrypted upload';
+  } else {
+    icon = '🔒';
+    name = 'encrypted upload';
+  }
 
   const statusCls = u.status === 'active' ? 'active'
                   : u.status === 'expired' ? 'expired'
@@ -4194,6 +4227,7 @@ function buildUploadRow(u, gw) {
       ${uploadedTxt ? `<span>↑ ${escapeHtml(uploadedTxt)}</span>` : ''}
       <span class="upl-status ${statusCls}">${escapeHtml(statusTxt)}</span>
     </div>
+    ${ctx && ctx.context ? `<div class="upl-ctx">${escapeHtml(ctx.context)}</div>` : ''}
     ${isPublic && u.public_url ? `<div class="upl-actions"><span class="upl-publink">${escapeHtml(u.public_url)}</span><button class="upl-btn" data-act="copy">📋 Copy link</button><button class="upl-btn" data-act="open">↗ Open</button></div>` : ''}
     <div class="upl-actions upl-action-bar">
       ${isActive ? '<button class="upl-btn danger" data-act="delete">🗑 Delete / unpin</button>' : ''}

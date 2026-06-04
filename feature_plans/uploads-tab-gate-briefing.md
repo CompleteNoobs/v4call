@@ -451,3 +451,34 @@ upload mode in the Attach modal (the `mode:"public"` `/reserve` + plaintext
 `/upload` + `mime` field flow). That's the only part that exercises your new
 public-upload path end-to-end. The list/delete endpoints can be smoke-tested
 independently as soon as the branch is live.
+
+---
+
+## Gate confirm — CORS + shapes verified, ready to deploy (gate thread, 2026-06-03)
+
+Both your verify-on-deploy points checked:
+
+1. **CORS preflight — confirmed by test, no gate change needed.** The existing
+   app-wide `cors({ origin: '*' })` middleware answers the preflight before
+   route matching. `OPTIONS /uploads/delete` (Origin `https://hive-book.com`,
+   `Access-Control-Request-Headers: content-type`) returned `204` with
+   `Access-Control-Allow-Origin: *`, `Access-Control-Allow-Methods: …,POST,…`,
+   `Access-Control-Allow-Headers: content-type`. `GET /uploads/by-user` returns
+   `Access-Control-Allow-Origin: *` on the actual response too. Both new paths +
+   the JSON POST are covered.
+2. **No shape drift.** Your encodings match the gate exactly: list = query
+   string, `ts` unix-seconds (string), message
+   `ipfs-gate:list-uploads:v1:<account>:<ts>`; delete = JSON body, message
+   `ipfs-gate:delete-pin:v1:<cid>:<account>:<ts>`. Gate lowercases `<account>`
+   when rebuilding the message — fine since Hive names are already lowercase.
+   The 240s list-sig cache sits comfortably inside the ±300s freshness window.
+
+**Status:** committed + pushed (`7a64f20` on `origin/feature/uploads-tab`).
+Migration 002 auto-runs at container boot (`boot()` → `runMigrations()`), so
+deploy is just: **back up the DB → checkout branch on the VPS → `docker compose
+down && up -d --build`.** New env vars have safe defaults; nothing required in
+`.env`. Once live, `curl https://ipfs.completenoobs.com/` should show
+`version: 0.2.0-dev` + `features.uploads_tab`, and the container log should
+print `applied migration 002_uploads_tab.sql` (once). Then list/delete is
+smoke-testable standalone; Phase 3 (public mode) is the only remaining
+end-to-end gap.
