@@ -311,4 +311,32 @@ thread. No v4call code lands until the gate endpoints are defined.
 
 ---
 
+## Known limitation — upload-context enrichment is home-server-local (deferred)
+
+Discovered + confirmed 2026-06-04. The `upload_index` row (filename / kind /
+"in #room") is written by whichever server's `room-attachment` /
+`dm-attachment` handler runs — which for a **federated** room is the room
+**HOST**, not the uploader's **home** server. But the Uploads tab fetches
+`my-uploads-context` from the user's **home** server. So:
+
+- ✅ Works when the uploader's home server **==** the room host (local rooms,
+  or when you created/host the room yourself).
+- ❌ A federated participant (e.g. `cnoobz@hive-book.com` uploading in a room
+  hosted on `v4call.com`) gets their index row written on `v4call.com`; their
+  Uploads tab (reading from `hive-book.com`) finds nothing → row shows bare 🔒.
+  The gate still lists the pin (gate is shared), just without the friendly
+  label.
+
+Confirmed by querying `upload_index` on both servers: the row consistently
+lands on the host, never the uploader's home. **Owner decision 2026-06-04: not
+a current priority — documented for later.** Two fix directions when revisited:
+(a) **client-side localStorage self-record** at send time (the sender's browser
+always knows filename/kind/room regardless of host; merge it in the tab —
+covers same-browser, misses other devices/private mode); (b) **federation-
+forward the index** — host server sends the uploader's home server a "record
+this upload for your user" message (correct cross-device, needs a new
+federation envelope + handler). Likely both eventually; neither is urgent.
+
+---
+
 *End of briefing. Multi-format arc complete. Next quest awaits.*

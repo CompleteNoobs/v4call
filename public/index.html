@@ -772,7 +772,10 @@
       <div class="uploads-header">
         <span class="uploads-quota-mine" id="uploads-quota-mine">Your uploads: —</span>
         <span class="uploads-quota-shared" id="uploads-quota-shared"></span>
-        <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+          <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
+          <button class="uploads-refresh-btn" onclick="openPublicUploadModal()" title="Upload a plaintext file and get a shareable link — anyone can open it, no v4call needed">⬆ Public upload</button>
+        </div>
       </div>
       <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
     </div>
@@ -897,6 +900,34 @@
     <div class="payment-btn-row">
       <button id="att-upload-btn" onclick="confirmSendAttachment()" style="background:var(--accent);color:#0a0c0f;">🔒 Encrypt &amp; Upload</button>
       <button id="att-cancel-btn" onclick="closeAttachModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PUBLIC UPLOAD MODAL (ipfs-gate v0.2 — plaintext, shareable link) -->
+<div id="public-upload-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="border-color:var(--accent);max-width:440px;">
+    <h3 style="color:var(--accent);">⬆ Public Upload</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Uploads <strong>plaintext</strong> to the gate and returns a link <strong>anyone</strong> can open — no v4call, no encryption. Pays the gate per upload. For sharing outside v4call; you're responsible for what you upload, and the operator can take it down.</p>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (any type)</div>
+      <input id="pub-file-input" type="file" onchange="onPubFilePick()" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div id="pub-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">IPFS-GATE</div>
+      <input id="pub-gateway-input" type="url" onchange="onPubGatewayChange()" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+    </div>
+
+    <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="pub-cost-line" style="color:var(--accent);">… checking gate</span></div>
+    <div class="payment-note" id="pub-status-note" style="min-height:18px;">Ready.</div>
+    <div id="pub-result" style="display:none;margin-top:8px;"></div>
+    <div class="keychain-required">⚡ Requires Hive Keychain (Posting + Active)</div>
+    <div class="payment-btn-row">
+      <button id="pub-upload-btn" onclick="confirmPublicUpload()" style="background:var(--accent);color:#0a0c0f;">⬆ Upload (public)</button>
+      <button id="pub-cancel-btn" onclick="closePublicUploadModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Close</button>
     </div>
   </div>
 </div>
@@ -4026,8 +4057,8 @@ function getRememberedGateway() {
 function rememberGateway(url) {
   try { localStorage.setItem('v4call:ipfs-gate', url); } catch (_) {}
 }
-async function refreshAttachCostLine(gatewayUrl) {
-  const line = document.getElementById('att-cost-line');
+async function refreshAttachCostLine(gatewayUrl, lineId) {
+  const line = document.getElementById(lineId || 'att-cost-line');
   line.textContent = '… checking gate';
   try {
     const r = await fetch(`${gatewayUrl}/`, { method: 'GET' });
@@ -4303,6 +4334,146 @@ function markRowRemoved(row, fullyUnpinned) {
   row.classList.add('inactive');
   const bar = row.querySelector('.upl-action-bar');
   if (bar) bar.innerHTML = `<span class="upl-confirm" style="color:var(--green);">✓ unpinned${fullyUnpinned === false ? ' (other copies remain)' : ''}</span>`;
+}
+
+// ── Public upload (Phase 3) ──────────────────────────────────────────────
+// Plaintext upload → shareable gateway link, started from the Uploads tab.
+// Reuses the exact reserve→sign→pay→upload mechanics as encrypted attachments,
+// minus the encryption + per-recipient envelope: bytes go up as-is, with a
+// claimed `mime` so the gate serves the real Content-Type on GET. The gate
+// forces html/svg to download (anti-XSS) — that's a gate-side concern.
+function setPubStatus(text, isErr) {
+  const n = document.getElementById('pub-status-note');
+  if (!n) return;
+  n.textContent = text;
+  n.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+}
+function openPublicUploadModal() {
+  if (!myUsername) { alert('Log in first.'); return; }
+  const gw = getRememberedGateway();
+  document.getElementById('pub-gateway-input').value = gw;
+  document.getElementById('pub-file-input').value = '';
+  document.getElementById('pub-file-meta').textContent = '';
+  const r = document.getElementById('pub-result'); r.style.display = 'none'; r.innerHTML = '';
+  document.getElementById('pub-upload-btn').disabled = false;
+  setPubStatus('Ready.');
+  document.getElementById('public-upload-modal').style.display = 'flex';
+  refreshAttachCostLine(gw, 'pub-cost-line');
+}
+function closePublicUploadModal() {
+  document.getElementById('public-upload-modal').style.display = 'none';
+}
+function onPubGatewayChange() {
+  const gw = (document.getElementById('pub-gateway-input').value || '').trim().replace(/\/+$/, '');
+  if (/^https?:\/\//.test(gw)) { rememberGateway(gw); refreshAttachCostLine(gw, 'pub-cost-line'); }
+}
+function onPubFilePick() {
+  const f = (document.getElementById('pub-file-input').files || [])[0];
+  const meta = document.getElementById('pub-file-meta');
+  if (!f) { meta.textContent = ''; return; }
+  const mime = detectFileMime(f) || 'application/octet-stream';
+  const warn = f.size > attachMaxBytes ? ` ⚠ over gate cap (${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB)` : '';
+  meta.textContent = `${f.name} · ${bytesToHuman(f.size)} · ${mime}${warn}`;
+}
+function showPubResult(url) {
+  const r = document.getElementById('pub-result');
+  r.style.display = 'block';
+  r.innerHTML = `<div style="font-size:0.68rem;color:var(--subtext);margin-bottom:4px;">SHAREABLE LINK (anyone can open)</div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span class="upl-publink" id="pub-result-url"></span>
+      <button class="upl-btn" id="pub-copy-btn">📋 Copy</button>
+      <button class="upl-btn" id="pub-open-btn">↗ Open</button>
+    </div>`;
+  document.getElementById('pub-result-url').textContent = url;  // textContent → no injection
+  document.getElementById('pub-copy-btn').addEventListener('click', () => {
+    navigator.clipboard?.writeText(url).then(() => {
+      const b = document.getElementById('pub-copy-btn'); b.textContent = '✓ Copied';
+      setTimeout(() => { b.textContent = '📋 Copy'; }, 1500);
+    });
+  });
+  document.getElementById('pub-open-btn').addEventListener('click', () => window.open(url, '_blank', 'noopener'));
+}
+async function confirmPublicUpload() {
+  const file = (document.getElementById('pub-file-input').files || [])[0];
+  if (!file) { setPubStatus('Pick a file first.', true); return; }
+  const gw = (document.getElementById('pub-gateway-input').value || '').trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//.test(gw)) { setPubStatus('Enter a valid gateway URL (https://…).', true); return; }
+  if (file.size > attachMaxBytes) { setPubStatus(`File too big — gate cap is ${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB.`, true); return; }
+  rememberGateway(gw);
+  const btn = document.getElementById('pub-upload-btn');
+  btn.disabled = true;
+  try {
+    const res = await uploadPublicFile(file, gw);
+    // Record the filename on our home server so the Uploads tab can label it
+    // (the gate stores mime but not filename). Public uploads aren't tied to a
+    // room, so this is correctly home-server-local — no federation locality gap.
+    if (socket && socket.connected) {
+      socket.emit('record-upload-meta', { cid: res.cid, filename: file.name, mime: res.mime, kind: mimeToKind(res.mime), context: 'public link' });
+    }
+    showPubResult(res.url);
+    setPubStatus('✓ Uploaded — link ready below.');
+    loadUploadsList();  // refresh footprint + list (reuses cached sig, no Keychain pop)
+  } catch (e) {
+    setPubStatus('⚠ ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+async function uploadPublicFile(file, gatewayUrl) {
+  const buf  = new Uint8Array(await file.arrayBuffer());
+  const mime = detectFileMime(file) || 'application/octet-stream';
+  const kind = mimeToKind(mime);
+  const sha  = await sha256HexBytes(buf);
+
+  setPubStatus('Reserving quota…');
+  const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uploader: myUsername, size_bytes: buf.length, mode: 'public' })
+  });
+  if (!reserveRes.ok) { const j = await reserveRes.json().catch(() => ({})); throw new Error(`reserve failed: ${j.message || reserveRes.status}`); }
+  const reserve       = await reserveRes.json();
+  const reservationId = reserve.reservation_id;
+  const escrowAccount = reserve.payment.escrow_account;
+  const memo          = reserve.payment.memo;
+  const payAmount     = reserve.payment.amount;
+  const payCurrency   = (reserve.payment.currency || 'CNOOBS').toUpperCase();
+
+  setPubStatus('Signing upload proof (Keychain)…');
+  const proofMsg       = buildUploadProofMessage({ ciphertextSha256Hex: sha, reservationId, uploader: myUsername });
+  const uploadProofSig = await signRaw(proofMsg);
+  if (!uploadProofSig) throw new Error('upload proof signature cancelled');
+
+  setPubStatus(`Paying ${payAmount} ${payCurrency} (Keychain)…`);
+  const txId = await keychainTransferGateToken({ to: escrowAccount, amount: payAmount, memo, symbol: payCurrency });
+  if (!txId) throw new Error('payment cancelled or failed');
+
+  setPubStatus('Waiting for tx to index (3s)…');
+  await new Promise(r => setTimeout(r, 3000));
+
+  setPubStatus('Uploading (plaintext)…');
+  const form = new FormData();
+  form.append('reservation_id', reservationId);
+  form.append('tx_id', txId);
+  form.append('uploader_pubkey', myPubKey);
+  form.append('upload_proof_sig', uploadProofSig);
+  form.append('mode', 'public');
+  form.append('mime', mime);
+  form.append('kind', kind);
+  // File still goes in the `ciphertext` field (that's the gate's multer field
+  // name); for a public reservation the gate treats these bytes as plaintext.
+  form.append('ciphertext', new Blob([buf], { type: mime }), file.name);
+  let upRes;
+  try {
+    upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+  } catch (e) {
+    throw new Error(`upload failed (${e.message}) — your ${payAmount} ${payCurrency} payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments.`);
+  }
+  if (!upRes.ok) { const j = await upRes.json().catch(() => ({})); throw new Error(`upload failed: ${j.message || upRes.status} — payment tx ${txId} may need operator review (orphan-payments).`); }
+  const upJson = await upRes.json();
+  const cid    = upJson.cid;
+  let url = upJson.gateway_url || '';
+  if (!url || /\/\/ipfs\.localhost(\/|$|:)/i.test(url) || /\/\/localhost(\/|$|:)/i.test(url)) url = `${gatewayUrl}/ipfs/${cid}`;
+  return { cid, url, mime };
 }
 
 function openAttachModal() {
