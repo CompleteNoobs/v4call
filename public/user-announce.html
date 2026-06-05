@@ -58,6 +58,24 @@
     .list-name-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--blue);font-weight:600;}
     .list-header .danger{margin-left:auto;}
 
+    /* ── Reorderable rate units (drag-to-prioritise) ───── */
+    .rate-unit{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;}
+    .rate-unit.draggable.dragging{opacity:0.45;border-color:var(--accent);}
+    .rate-unit.pinned{border-style:dashed;background:rgba(255,255,255,0.015);}
+    #rate-order{min-height:10px;}
+    .ru-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .ru-head .danger{margin-left:auto;}
+    .drag-handle{cursor:grab;color:var(--subtext);font-size:1.05rem;line-height:1;user-select:none;padding:0 2px;}
+    .drag-handle:active{cursor:grabbing;}
+    .pin-badge{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;padding:2px 7px;border-radius:999px;background:rgba(245,166,35,0.12);color:var(--accent);}
+
+    /* ── Who-pays-what tester ──────────────────────────── */
+    .preview-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:6px;}
+    .pv-tokens{margin:6px 0 4px;min-height:18px;}
+    .pv-result{margin-top:10px;font-family:'IBM Plex Mono',monospace;font-size:0.74rem;line-height:1.55;padding:8px 10px;border-radius:6px;background:var(--surface2);color:var(--subtext);}
+    .pv-result.pv-ok{color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);}
+    .pv-result.pv-bad{color:#fca5a5;background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);}
+
     .rg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
     .rg3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
     .rg2{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}
@@ -136,27 +154,71 @@
         <div class="sect-body">
           <div class="info-box">
             What callers pay <strong>you</strong> — invite fee / offer fee / DM fee, plus voice &amp; video ring /
-            connect / per-hour — in HBD or custom Hive-Engine tokens. Any field left <strong>0</strong> = FREE.
-            Escrow lives in the <strong>V4call service</strong> section above. Emits the <code>[V4CALL-RATES-V2]</code> block.
+            connect / per-hour. <strong>Priority is the order below</strong>: <code>[BLOCKED]</code> is always first,
+            then the middle rules are evaluated <strong>top-to-bottom — first match wins</strong> (drag ⠿ to reorder),
+            then <code>[LIST:default]</code> catches everyone else. Any field <strong>0</strong> = FREE. Use the
+            <strong>tester at the bottom</strong> to check who pays what before posting.
           </div>
 
-          <div class="slabel">DEFAULT RATES — anyone not in a named list (24/7)</div>
-          <div id="r-default"></div>
+          <!-- PINNED TOP — BLOCKED (always evaluated first; not draggable) -->
+          <div class="rate-unit pinned">
+            <div class="ru-head">
+              <span class="pin-badge">PINNED · 1st</span>
+              <span class="list-name-badge" style="color:var(--danger)">[BLOCKED]</span>
+              <span style="font-size:0.62rem;color:var(--subtext)">security — always first</span>
+            </div>
+            <div class="field"><label>USERS (comma-separated) — blank = no block</label><input id="r-blocked-users" placeholder="spammer1, spammer2"/></div>
+            <div class="row">
+              <div class="field"><label>BLOCK MESSAGE</label><input id="r-blocked-msg" placeholder="You have been blocked."/></div>
+              <div class="field"><label>ALLOW-IF-TOKEN (bypass)</label><input id="r-blocked-token" placeholder="CNOOBS"/></div>
+            </div>
+          </div>
 
-          <div class="slabel">TOKEN SECTIONS — accept Hive-Engine tokens</div>
-          <div id="tokens-container"></div>
-          <button class="secondary" onclick="addToken()">+ Add token</button>
-
-          <div class="slabel">NAMED LISTS — custom rates for specific users (single 24/7 window each)</div>
-          <div class="field-hint" style="margin-bottom:8px;">Multi-time-window / day-of-week splits per list are not yet ported here — set those in the full <code>rate-editor.html</code> for now. Listed as a known gap.</div>
-          <div id="lists-container"></div>
+          <!-- REORDERABLE MIDDLE — named lists + the single Token-rates group -->
+          <div class="slabel">PRIORITY ORDER — drag ⠿ to reprioritise (first match wins)</div>
+          <div id="rate-order">
+            <!-- Token-rates group: ONE draggable unit; all [TOKEN:*] move together + stay contiguous -->
+            <div class="rate-unit draggable" id="rate-tokens-group" data-unit="tokens">
+              <div class="ru-head">
+                <span class="drag-handle" title="drag to reprioritise">⠿</span>
+                <span class="tok-badge">Token rates (group)</span>
+                <span style="font-size:0.62rem;color:var(--subtext)">all tokens move together → multi-currency picker</span>
+              </div>
+              <div id="tokens-container"></div>
+              <button class="secondary" onclick="addToken()">+ Add token</button>
+            </div>
+            <!-- named-list cards are inserted here by addList() -->
+          </div>
           <button class="secondary" onclick="addList()">+ Add list</button>
+          <div class="field-hint" style="margin-top:6px;">Lists are single 24/7 windows here; multi-time-window / day-of-week splits still live in <code>rate-editor.html</code> (known gap).</div>
 
-          <div class="slabel">BLOCKED USERS (optional)</div>
-          <div class="field"><label>USERS (comma-separated)</label><input id="r-blocked-users" placeholder="spammer1, spammer2"/></div>
-          <div class="row">
-            <div class="field"><label>BLOCK MESSAGE</label><input id="r-blocked-msg" placeholder="You have been blocked."/></div>
-            <div class="field"><label>ALLOW-IF-TOKEN</label><input id="r-blocked-token" placeholder="CNOOBS"/></div>
+          <!-- PINNED BOTTOM — default fallback (not draggable) -->
+          <div class="rate-unit pinned" style="margin-top:12px;">
+            <div class="ru-head">
+              <span class="pin-badge">PINNED · last</span>
+              <span class="list-name-badge">[LIST:default]</span>
+              <span style="font-size:0.62rem;color:var(--subtext)">last-resort fallback for everyone else</span>
+            </div>
+            <div id="r-default"></div>
+          </div>
+
+          <!-- WHO PAYS WHAT — live test resolver -->
+          <div class="slabel">WHO PAYS WHAT — test resolver (uses your live order above)</div>
+          <div class="preview-box">
+            <div class="row">
+              <div class="field"><label>TEST CALLER</label><input id="pv-caller" placeholder="alice"/></div>
+              <div class="field"><label>DAY</label>
+                <select id="pv-day">
+                  <option value="">now</option>
+                  <option value="mon">Mon</option><option value="tue">Tue</option><option value="wed">Wed</option>
+                  <option value="thu">Thu</option><option value="fri">Fri</option><option value="sat">Sat</option><option value="sun">Sun</option>
+                </select>
+              </div>
+              <div class="field"><label>TIME</label><input id="pv-time" type="time"/></div>
+            </div>
+            <label>CALLER HOLDS THESE TOKENS (tick any)</label>
+            <div id="pv-tokens" class="pv-tokens"></div>
+            <div id="pv-result" class="pv-result">Enter a test caller to see what they'd pay.</div>
           </div>
         </div>
       </details>
@@ -443,27 +505,56 @@
         <span class="tok-badge">[TOKEN]</span>
         <input style="max-width:150px" placeholder="SYMBOL" id="${id}-sym" value="${symbol||''}"/>
         <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:0.62rem;"><input type="checkbox" id="${id}-allowblk" style="width:auto"/> bypass block</label>
-        <button class="danger" onclick="this.closest('.list-card').remove()">✕</button>
+        <button class="danger" onclick="this.closest('.list-card').remove();generateOutput();">✕</button>
       </div>
       ${rateGridHtml(id, true)}`;
     $('tokens-container').appendChild(card);
+    generateOutput();
+    return card;
   }
 
+  // Named lists are draggable middle units, inserted into #rate-order so the user
+  // controls priority by drag position. Document order in the emitted post IS priority.
   let listSeq = 0;
   function addList(name, users){
     const id = 'lst' + (++listSeq);
     const card = document.createElement('div');
-    card.className = 'list-card';
+    card.className = 'rate-unit draggable';
+    card.dataset.unit = 'list';
     card.dataset.listId = id;
     card.innerHTML = `
-      <div class="list-header">
+      <div class="ru-head">
+        <span class="drag-handle" title="drag to reprioritise">⠿</span>
         <span class="list-name-badge">[LIST]</span>
         <input style="max-width:150px" placeholder="name (family/work…)" id="${id}-name" value="${name||''}"/>
-        <button class="danger" onclick="this.closest('.list-card').remove()">✕</button>
+        <button class="danger" onclick="this.closest('.rate-unit').remove();generateOutput();">✕</button>
       </div>
       <div class="field"><label>USERS (comma-separated)</label><input id="${id}-users" placeholder="alice, bob" value="${users||''}"/></div>
       ${rateGridHtml(id, true)}`;
-    $('lists-container').appendChild(card);
+    $('rate-order').appendChild(card);
+    wireDraggable(card);
+    generateOutput();
+    return card;
+  }
+
+  // ── drag-to-reorder for the middle rate units (token group + named lists) ──
+  function wireDraggable(card){
+    const handle = card.querySelector('.drag-handle');
+    if (handle){
+      handle.addEventListener('mousedown', () => { card.draggable = true; });
+      handle.addEventListener('mouseup',   () => { card.draggable = false; });
+    }
+    card.addEventListener('dragstart', (e) => { card.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    card.addEventListener('dragend',   () => { card.classList.remove('dragging'); card.draggable = false; generateOutput(); });
+  }
+  function getDragAfterElement(container, y){
+    const els = [...container.querySelectorAll('.rate-unit:not(.dragging)')];
+    return els.reduce((closest, child) => {
+      const box = child.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) return { offset, element: child };
+      return closest;
+    }, { offset: -Infinity }).element;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -495,6 +586,7 @@
     L.push('UPDATED:' + today());
     L.push('ESCROW:' + (v('r-escrow') || ESCROW_DEFAULT));
 
+    // 1. BLOCKED — always emitted first (pinned, security).
     const blkUsers = csv(v('r-blocked-users'));
     if (blkUsers){
       L.push('', '[BLOCKED]');
@@ -504,24 +596,20 @@
       L.push('[/BLOCKED]');
     }
 
-    document.querySelectorAll('#tokens-container .list-card').forEach(card => {
-      const id = card.dataset.tokId;
-      const sym = (v(`${id}-sym`) || '').toUpperCase();
-      if (!sym) return;
-      L.push('', `[TOKEN:${sym}]`);
-      rateLines(id).forEach(x => L.push(x));
-      if ($(`${id}-allowblk`).checked) L.push('ALLOW-BLOCKED:yes');
-      L.push('[/TOKEN]');
-    });
-
-    // default list (the 24/7 catch-all)
-    L.push('', '[LIST:default]');
-    L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
-    rateLines('rd').forEach(x => L.push(x));
-    L.push('[/TIME]', '[/LIST]');
-
-    document.querySelectorAll('#lists-container .list-card').forEach(card => {
-      const id = card.dataset.listId;
+    // 2. Middle units in the user's drag order (document order = priority).
+    //    The Token-rates group emits ALL [TOKEN:*] blocks contiguously at its position.
+    const emitTokens = () => {
+      document.querySelectorAll('#tokens-container .list-card').forEach(card => {
+        const id = card.dataset.tokId;
+        const sym = (v(`${id}-sym`) || '').toUpperCase();
+        if (!sym) return;
+        L.push('', `[TOKEN:${sym}]`);
+        rateLines(id).forEach(x => L.push(x));
+        if ($(`${id}-allowblk`).checked) L.push('ALLOW-BLOCKED:yes');
+        L.push('[/TOKEN]');
+      });
+    };
+    const emitList = (id) => {
       const name = (v(`${id}-name`) || '').toLowerCase();
       if (!name || name === 'default') return;
       L.push('', `[LIST:${name}]`);
@@ -529,7 +617,17 @@
       L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
       rateLines(id).forEach(x => L.push(x));
       L.push('[/TIME]', '[/LIST]');
+    };
+    [...$('rate-order').children].forEach(unit => {
+      if (unit.dataset.unit === 'tokens')      emitTokens();
+      else if (unit.dataset.unit === 'list')   emitList(unit.dataset.listId);
     });
+
+    // 3. default — always last (pinned, last-resort fallback).
+    L.push('', '[LIST:default]');
+    L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
+    rateLines('rd').forEach(x => L.push(x));
+    L.push('[/TIME]', '[/LIST]');
 
     L.push('[/V4CALL-RATES-V2]');
     return L.join('\n');
@@ -636,8 +734,76 @@
 
     const body = parts.join('\n');
     $('output-area').value = body;
+    refreshPreview();
     return body;
   }
+
+  // ══════════════════════════════════════════════════════════
+  //  WHO-PAYS-WHAT — live test resolver (replicates the server's
+  //  positional resolution so the editor preview agrees with it)
+  // ══════════════════════════════════════════════════════════
+  const previewHeld = new Set();   // token symbols (UPPER) the test caller holds
+  let pvTokenSig = '';
+  function definedTokenSymbols(){
+    return [...new Set([...document.querySelectorAll('#tokens-container .list-card')]
+      .map(c => (v(c.dataset.tokId + '-sym') || '').toUpperCase()).filter(Boolean))];
+  }
+  function rebuildPreviewTokens(){
+    const syms = definedTokenSymbols();
+    const allowTok = (v('r-blocked-token') || '').toUpperCase();
+    if (allowTok && !syms.includes(allowTok)) syms.push(allowTok);  // so the bypass is testable
+    const sig = syms.join(',');
+    if (sig === pvTokenSig) return;   // unchanged — don't rebuild (keeps focus/ticks)
+    pvTokenSig = sig;
+    const box = $('pv-tokens');
+    if (!box) return;
+    box.innerHTML = '';
+    if (!syms.length){
+      box.innerHTML = '<span style="font-size:0.66rem;color:var(--muted)">No tokens defined — add a token section to test token resolution.</span>';
+      return;
+    }
+    syms.forEach(s => {
+      const lab = document.createElement('label');
+      lab.style.cssText = 'display:inline-flex;align-items:center;gap:5px;margin:0 12px 6px 0;font-size:0.7rem;color:var(--text)';
+      lab.innerHTML = `<input type="checkbox" style="width:auto" ${previewHeld.has(s) ? 'checked' : ''} data-pvsym="${s}"/> ${s}`;
+      box.appendChild(lab);
+    });
+  }
+  function computePreview(){
+    const out = $('pv-result');
+    if (!out) return;
+    const setOut = (t, k) => { out.textContent = t; out.className = 'pv-result' + (k ? ' ' + k : ''); };
+    const caller = (v('pv-caller') || '').toLowerCase();
+    if (!caller){ setOut("Enter a test caller to see what they'd pay."); return; }
+    const held = new Set([...previewHeld].map(s => s.toUpperCase()));
+
+    // 1. BLOCKED — unless ALLOW-IF-TOKEN held
+    const blocked = csv(v('r-blocked-users')).split(',').filter(Boolean);
+    if (blocked.includes(caller)){
+      const allowTok = (v('r-blocked-token') || '').toUpperCase();
+      if (allowTok && held.has(allowTok)) return setOut(`🔓 On your blocked list, but holds ${allowTok} → ALLOW-IF-TOKEN bypass: pays the ${allowTok} token rate.`, 'pv-ok');
+      return setOut(`⛔ BLOCKED — "${v('r-blocked-msg') || 'You have been blocked.'}"`, 'pv-bad');
+    }
+
+    // 2. Walk the middle units top-to-bottom; first match wins.
+    const defined = definedTokenSymbols();
+    for (const unit of $('rate-order').children){
+      if (unit.dataset.unit === 'list'){
+        const id = unit.dataset.listId;
+        const name = (v(`${id}-name`) || '').toLowerCase();
+        if (!name) continue;
+        const users = csv(v(`${id}-users`)).split(',').filter(Boolean);
+        if (users.includes(caller)) return setOut(`✅ Matches [LIST:${name}] (first match wins) → that list's rate applies (Invite / Offer / DM / Voice / Video).`, 'pv-ok');
+      } else if (unit.dataset.unit === 'tokens'){
+        const heldPriced = defined.filter(s => held.has(s));
+        if (heldPriced.length) return setOut(`💠 Reaches the Token-rates group → multi-currency picker among held priced tokens: ${heldPriced.join(', ')}.`, 'pv-ok');
+      }
+    }
+
+    // 3 + 4. default fallback / free
+    return setOut(`↩️ Falls through to [LIST:default] → your default rate (free if all default fields are 0).`, 'pv-ok');
+  }
+  function refreshPreview(){ rebuildPreviewTokens(); computePreview(); }
 
   function refreshBadges(){
     const map = {rates:'inc-rates',nostr:'inc-nostr',btc:'inc-btc',ln:'inc-ln',ssh:'inc-ssh',domains:'inc-domains',contact:'inc-contact'};
@@ -920,14 +1086,42 @@
       // default list window
       const def = (rb.match(/\[LIST:default\]([\s\S]*?)\[\/LIST\]/i)||[])[1];
       if (def){ const win = (def.match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1] || def; setRateGrid('rd', win); }
-      // tokens
+      // Reconstruct the MIDDLE priority order from document order. Walk the block:
+      // the Token-rates group lands at the FIRST [TOKEN:*] position; each non-default
+      // [LIST:*] becomes a draggable card in the order it appears.
+      const listBodies = {};
+      { let lm; const lre=/\[LIST:([^\]]+)\]([\s\S]*?)\[\/LIST\]/gi;
+        while((lm=lre.exec(rb))){ const nm=lm[1].trim().toLowerCase(); if(nm!=='default' && !(nm in listBodies)) listBodies[nm]=lm[2]; } }
+      const tokenBlocks = [...rb.matchAll(/\[TOKEN:([^\]]+)\]([\s\S]*?)\[\/TOKEN\]/gi)];
+      const order = []; let seenTok = false;
+      { let m; const ure=/\[TOKEN:[^\]]+\]|\[LIST:([^\]]+)\]/gi;
+        while((m=ure.exec(rb))){
+          if (m[0].toUpperCase().startsWith('[TOKEN')){ if(!seenTok){ order.push({t:'tokens'}); seenTok=true; } }
+          else { const nm=(m[1]||'').trim().toLowerCase(); if(nm==='default') continue; if(!order.some(u=>u.t==='list'&&u.name===nm)) order.push({t:'list', name:nm}); }
+        } }
+      if (!seenTok) order.unshift({t:'tokens'});  // tokens-first default when none present
+
+      // reset the middle, keeping the static token-group card to re-place
+      const tg = $('rate-tokens-group'); tg.remove();
       $('tokens-container').innerHTML='';
-      let tm; const tre=/\[TOKEN:([^\]]+)\]([\s\S]*?)\[\/TOKEN\]/gi;
-      while((tm=tre.exec(rb))){ addToken(tm[1].trim()); const id='tok'+tokSeq; setRateGrid(id, tm[2]); if(/ALLOW-BLOCKED:\s*yes/i.test(tm[2])) $(`${id}-allowblk`).checked=true; }
-      // named lists (non-default)
-      $('lists-container').innerHTML='';
-      let lm; const lre=/\[LIST:([^\]]+)\]([\s\S]*?)\[\/LIST\]/gi;
-      while((lm=lre.exec(rb))){ const nm=lm[1].trim().toLowerCase(); if(nm==='default') continue; addList(nm, fieldOf(lm[2],'USERS')); const id='lst'+listSeq; const win=(lm[2].match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1]||lm[2]; setRateGrid(id, win); }
+      [...$('rate-order').querySelectorAll('.rate-unit[data-unit="list"]')].forEach(c=>c.remove());
+      // render units in order
+      order.forEach(u=>{
+        if (u.t==='tokens'){ $('rate-order').appendChild(tg); }
+        else {
+          const body = listBodies[u.name] || '';
+          const card = addList(u.name, fieldOf(body,'USERS'));
+          const win = (body.match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1] || body;
+          setRateGrid(card.dataset.listId, win);
+        }
+      });
+      if (!$('rate-tokens-group').parentElement) $('rate-order').insertBefore(tg, $('rate-order').firstChild);
+      // populate the token sub-cards (their group position is already set)
+      tokenBlocks.forEach(tb=>{
+        const card = addToken(tb[1].trim());
+        setRateGrid(card.dataset.tokId, tb[2]);
+        if(/ALLOW-BLOCKED:\s*yes/i.test(tb[2])) $(card.dataset.tokId+'-allowblk').checked = true;
+      });
     }
 
     // domains
@@ -999,9 +1193,34 @@
     () => { $('nip07-status').textContent = 'No NIP-07 extension — paste an nsec below to sign (disposable keys only).'; $('n-nsec-wrap').style.display = 'block'; });
 
   // ── live preview wiring ──
-  document.addEventListener('input', () => { if ($('output-area').value) generateOutput(); });
+  document.addEventListener('input', () => { if ($('output-area').value) generateOutput(); else refreshPreview(); });
   document.addEventListener('change', generateOutput);
-  window.addEventListener('DOMContentLoaded', () => { $('my-server').value = SERVER_DOMAIN; $('r-escrow').value = ESCROW_DEFAULT; refreshBadges(); });
+  window.addEventListener('DOMContentLoaded', () => {
+    $('my-server').value = SERVER_DOMAIN; $('r-escrow').value = ESCROW_DEFAULT; refreshBadges();
+
+    // drag-to-reorder: make the static Token-rates group draggable + wire the container
+    wireDraggable($('rate-tokens-group'));
+    const ro = $('rate-order');
+    ro.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const dragging = ro.querySelector('.dragging');
+      if (!dragging) return;
+      const after = getDragAfterElement(ro, e.clientY);
+      if (after == null) ro.appendChild(dragging);
+      else ro.insertBefore(dragging, after);
+    });
+
+    // who-pays-what tester: recompute on test-input changes; toggle held tokens
+    ['pv-caller','pv-day','pv-time'].forEach(id => { const el = $(id); if (el) el.addEventListener('input', computePreview); });
+    $('pv-tokens').addEventListener('change', (e) => {
+      const cb = e.target.closest('input[data-pvsym]');
+      if (!cb) return;
+      const s = cb.dataset.pvsym;
+      if (cb.checked) previewHeld.add(s); else previewHeld.delete(s);
+      computePreview();
+    });
+    refreshPreview();
+  });
 
   // expose handlers used by inline onclick
   window.addToken = addToken; window.addList = addList; window.generateOutput = generateOutput;

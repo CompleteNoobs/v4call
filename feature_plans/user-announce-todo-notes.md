@@ -3,6 +3,21 @@
 Running notes captured while building/iterating `public/user-announce.html`
 (the one modular Hive post — title `user-announce` — replacing per-app announce posts).
 
+## 0. Positional rate priority — server resolver must read DOCUMENT ORDER (NEW 2026-06-05)
+The rates editor now lets the user **drag to reorder** rate rules; **priority is purely
+positional** — the order blocks appear inside `[V4CALL-RATES-V2]` IS the evaluation order.
+No new field/tag. Editor emits: `[BLOCKED]` first → middle units in the user's chosen order
+(named lists + ONE contiguous `[TOKEN:*]` group) → `[LIST:default]` last.
+- **Server change (separate v4call-server thread):** `getRatesForCaller` / `parseRateBlock`
+  must resolve in **document order, first-match-wins** — walk units top-to-bottom: a `[LIST:name]`
+  matches if caller ∈ USERS and day/time in a window; the token group matches if caller holds ≥1
+  priced token (→ multi-currency picker among held). `[BLOCKED]` always first (ALLOW-IF-TOKEN
+  bypass), `[LIST:default]` always last.
+- **Backward-compat:** today's posts emit tokens BEFORE lists; document-order resolution of an
+  un-reordered post reproduces current (tokens-first) behaviour. Don't migrate old posts.
+- The editor's "WHO PAYS WHAT" tester replicates this exact algorithm as a footgun guard
+  (e.g. ranking the token group above the family list). Keep editor + server algorithms in sync.
+
 ## 1. Federation hosting → escrow rules (NEW, raised 2026-06-05)
 The "🌐 V4call service" section asks the user for their home server's **domain** + the
 **escrow account that server controls**. Today there is **no standard rule** telling a user
