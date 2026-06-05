@@ -8,9 +8,15 @@
 > User: noob (project owner, tinkerer; prefers 2–3 sentence advice +
 > tradeoff before any build; "just talk no build" unless he says build).
 >
-> **Status: design captured, NOT started. This is a FUTURE quest —
-> AFTER the ipfs-gate v0.3 pricing rollout. Do not interleave with
-> pricing. The briefing exists so the idea is preserved and ready.**
+> **Status: SHIPPED (v0.16.26, 2026-06-05).** CORS spike PASSED (browser-direct
+> `pinFileToIPFS` returns 200 + CID — no proxy needed). Built as a client-only
+> adapter in `public/index.html`: shared `#storage-modal` picker (⚙ Change in
+> both upload modals), `getStorageBackend`/`setStorageBackend` (localStorage
+> `v4call:storage`), `pinataPin`/`pinataValidate`, and a backend branch in
+> `sendAttachment` + `uploadPublicFile`. JWT stored via user toggle (localStorage
+> plaintext / session-only); encrypted-at-rest deferred as a TODO. Zero server.js
+> changes, no protocol bump. Production-tested incl. cross-federation room
+> delivery. Section headings below are kept for the historical record.
 
 ---
 
