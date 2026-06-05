@@ -95,39 +95,49 @@
     <!-- ═══════════════ LEFT: FORM ═══════════════ -->
     <div>
 
-      <!-- ── IDENTITY (always included) ─────────────── -->
+      <!-- ── IDENTITY (always included, always open) ─── -->
       <div class="card">
         <div class="card-title">IDENTITY <span style="color:var(--subtext);font-size:0.6rem;">always in post</span></div>
-        <div class="row">
-          <div class="field">
-            <label>HIVE USERNAME</label>
-            <input id="my-username" placeholder="yourname" autocomplete="off" spellcheck="false"/>
-          </div>
-          <div class="field">
-            <label>HOME SERVER</label>
-            <input id="my-server" placeholder="v4call.com" autocomplete="off" spellcheck="false"/>
-          </div>
+        <div class="field">
+          <label>HIVE USERNAME</label>
+          <input id="my-username" placeholder="yourname" autocomplete="off" spellcheck="false"/>
         </div>
         <div class="keychain-note" id="keychain-status">Detecting Hive Keychain…</div>
       </div>
 
+      <!-- ── V4CALL SERVICE (domain + escrow) ─────────── -->
+      <details class="sect" id="sect-service" open>
+        <summary>
+          🌐 V4call service
+          <span class="sum-spacer"></span>
+          <span class="summary-badge on">in post</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            The v4call server you call home, and the <strong>escrow account that server controls</strong> — your paid
+            calls / DMs / invites settle there. Check your provider's docs to find that escrow account.
+            <em>Note: there isn't a standard federation-hosting rule for escrow yet (on the TODO list).</em>
+          </div>
+          <div class="row">
+            <div class="field"><label>V4CALL SERVER / DOMAIN</label><input id="my-server" placeholder="v4call.com" autocomplete="off" spellcheck="false"/></div>
+            <div class="field"><label>ESCROW ACCOUNT</label><input id="r-escrow" placeholder="v4call-escrow" autocomplete="off" spellcheck="false"/></div>
+          </div>
+        </div>
+      </details>
+
       <!-- ── v4call CALLER RATES ────────────────────── -->
       <details class="sect" id="sect-rates">
         <summary>
-          💬 Set caller rates (v4call)
+          💬 V4call — set your rates for callers
           <span class="sum-spacer"></span>
           <span class="summary-badge" data-badge="rates">off</span>
           <span class="inc-wrap"><input type="checkbox" id="inc-rates"/> include</span>
         </summary>
         <div class="sect-body">
           <div class="info-box">
-            What callers pay <strong>you</strong> for a ring / connect / per-hour / text / invite — in HBD or
-            custom Hive-Engine tokens. Any field left <strong>0</strong> = FREE. Emits the
-            <code>[V4CALL-RATES-V2]</code> block the v4call server already understands.
-          </div>
-          <div class="row">
-            <div class="field"><label>ESCROW ACCOUNT</label><input id="r-escrow" placeholder="v4call-escrow"/></div>
-            <div class="field"><label>PLATFORM FEE %</label><input id="r-fee" type="number" value="10" min="0"/></div>
+            What callers pay <strong>you</strong> — invite fee / offer fee / DM fee, plus voice &amp; video ring /
+            connect / per-hour — in HBD or custom Hive-Engine tokens. Any field left <strong>0</strong> = FREE.
+            Escrow lives in the <strong>V4call service</strong> section above. Emits the <code>[V4CALL-RATES-V2]</code> block.
           </div>
 
           <div class="slabel">DEFAULT RATES — anyone not in a named list (24/7)</div>
@@ -147,43 +157,6 @@
           <div class="row">
             <div class="field"><label>BLOCK MESSAGE</label><input id="r-blocked-msg" placeholder="You have been blocked."/></div>
             <div class="field"><label>ALLOW-IF-TOKEN</label><input id="r-blocked-token" placeholder="CNOOBS"/></div>
-          </div>
-        </div>
-      </details>
-
-      <!-- ── PAID-INVITE OFFERS ─────────────────────── -->
-      <details class="sect" id="sect-offer">
-        <summary>
-          💎 Paid-invite offers — minimum terms you'll accept
-          <span class="sum-spacer"></span>
-          <span class="summary-badge" data-badge="offer">off</span>
-          <span class="inc-wrap"><input type="checkbox" id="inc-offer"/> include</span>
-        </summary>
-        <div class="sect-body">
-          <div class="info-box">
-            The <em>reverse</em> direction of rates: when someone wants to pay <strong>you</strong> to join their
-            room as an expert (v0.17 paid-invite). Declaring a floor stops lowball-offer spam — offers below your
-            minimum get filtered before they ever reach you. Emits <code>[OFFER-V1]</code> with
-            <code>offer-defaults</code> + <code>offer-custom_list</code>.
-          </div>
-
-          <div class="list-card">
-            <div class="list-header"><span class="list-name-badge">offer-defaults</span><span style="font-size:0.62rem;color:var(--subtext);">— floor for everyone</span></div>
-            <div class="rg3">
-              <div class="rc"><label>MIN CONNECT</label><input id="od-connect" type="number" value="0" min="0"/></div>
-              <div class="rc"><label>MIN RATE /HR</label><input id="od-rate" type="number" value="0" min="0"/></div>
-              <div class="rc"><label>CURRENCY</label><input id="od-cur" value="HBD"/></div>
-            </div>
-          </div>
-
-          <div class="list-card">
-            <div class="list-header"><span class="list-name-badge">offer-custom_list</span><span style="font-size:0.62rem;color:var(--subtext);">— better/worse floor for named users</span></div>
-            <div class="field"><label>USERS (comma-separated)</label><input id="oc-users" placeholder="alice, bob"/></div>
-            <div class="rg3">
-              <div class="rc"><label>MIN CONNECT</label><input id="oc-connect" type="number" value="0" min="0"/></div>
-              <div class="rc"><label>MIN RATE /HR</label><input id="oc-rate" type="number" value="0" min="0"/></div>
-              <div class="rc"><label>CURRENCY</label><input id="oc-cur" value="HBD"/></div>
-            </div>
           </div>
         </div>
       </details>
@@ -300,6 +273,26 @@
         </div>
       </details>
 
+      <!-- ── DOMAINS ────────────────────────────────── -->
+      <details class="sect" id="sect-domains">
+        <summary>
+          🌐 Domains
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="domains">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-domains"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            Publish named lists of domains / IPs you run or control (web servers, relays, nodes…). Each list is a
+            <strong>name</strong> + one or more domain/IP entries. Add a list, fill the entries you need (blank ones are
+            dropped), add more with <em>+ add domain/IP</em>. Emits <code>[DOMAINS-V1]</code> with a
+            <code>[DLIST:name]</code> per list.
+          </div>
+          <div id="domains-container"></div>
+          <button class="secondary" onclick="addDomainList()">+ Add domain list</button>
+        </div>
+      </details>
+
       <!-- ── CONTACT (PII) ──────────────────────────── -->
       <details class="sect" id="sect-contact">
         <summary>
@@ -406,9 +399,9 @@
   function rateGridHtml(p, withMinDeposit){
     return `
       <div class="rg3">
-        <div class="rc"><label>INVITE</label><input id="${p}-invite" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>TEXT</label><input id="${p}-text" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>TEXT SESSION /HR</label><input id="${p}-textses" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>INVITE FEE</label><input id="${p}-invite" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>OFFER FEE</label><input id="${p}-offer" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>DM FEE</label><input id="${p}-dm" type="number" value="0" min="0"/></div>
       </div>
       <div class="slabel">VOICE</div>
       <div class="rg4">
@@ -429,8 +422,8 @@
   function rateLines(p){
     const L = [];
     L.push('INVITE:' + rv(`${p}-invite`));
-    L.push('TEXT:' + rv(`${p}-text`));
-    L.push('TEXT-SESSION:' + rv(`${p}-textses`) + '/hr');
+    L.push('OFFER:' + rv(`${p}-offer`));
+    L.push('DM:' + rv(`${p}-dm`));
     const dep = (id) => { const n = parseFloat(v(id)); return (!n||isNaN(n)) ? '' : `;MIN-DEPOSIT:${n}min`; };
     L.push(`VOICE:RING:${rv(p+'-vring')};CONNECT:${rv(p+'-vconn')};RATE:${rv(p+'-vrate')}/hr${dep(p+'-vdep')}`);
     L.push(`VIDEO:RING:${rv(p+'-Vring')};CONNECT:${rv(p+'-Vconn')};RATE:${rv(p+'-Vrate')}/hr${dep(p+'-Vdep')}`);
@@ -500,7 +493,6 @@
     if ($('inc-nostr').checked && v('n-hex'))  L.push('NOSTR-HEX:' + v('n-hex').toLowerCase());
     if ($('inc-nostr').checked && currentAttestation) L.push('NOSTR-ATTESTATION:' + btoa(JSON.stringify(currentAttestation)));
     L.push('UPDATED:' + today());
-    L.push('PLATFORM-FEE:' + (v('r-fee') || '10') + '%');
     L.push('ESCROW:' + (v('r-escrow') || ESCROW_DEFAULT));
 
     const blkUsers = csv(v('r-blocked-users'));
@@ -543,24 +535,43 @@
     return L.join('\n');
   }
 
-  function genOfferBlock(){
-    const L = ['[OFFER-V1]'];
-    L.push('[OFFER-LIST:offer-defaults]');
-    L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
-    L.push('MIN-CONNECT:' + rvObj(v('od-connect')));
-    L.push('MIN-RATE:' + rvObj(v('od-rate')) + '/hr');
-    L.push('CURRENCY:' + (v('od-cur') || 'HBD').toUpperCase());
-    L.push('[/TIME]', '[/OFFER-LIST]');
-    const ocUsers = csv(v('oc-users'));
-    if (ocUsers){
-      L.push('[OFFER-LIST:offer-custom_list]');
-      L.push('USERS:' + ocUsers);
-      L.push('MIN-CONNECT:' + rvObj(v('oc-connect')));
-      L.push('MIN-RATE:' + rvObj(v('oc-rate')) + '/hr');
-      L.push('CURRENCY:' + (v('oc-cur') || 'HBD').toUpperCase());
-      L.push('[/OFFER-LIST]');
-    }
-    L.push('[/OFFER-V1]');
+  // ── Domains: named lists of domains / IPs ──────────────────
+  let domSeq = 0;
+  function addDomainList(name, domains){
+    const id = 'dl' + (++domSeq);
+    const card = document.createElement('div');
+    card.className = 'list-card';
+    card.dataset.domId = id;
+    const arr = (domains && domains.length) ? domains : ['','','','',''];
+    const fields = arr.map(d => `<input class="dom-entry" placeholder="domain or IP" value="${(d||'').replace(/"/g,'&quot;')}" style="margin-bottom:5px"/>`).join('');
+    card.innerHTML = `
+      <div class="list-header">
+        <span class="list-name-badge">[DOMAINS]</span>
+        <input style="max-width:170px" placeholder="list name (e.g. webservers)" id="${id}-name" value="${(name||'').replace(/"/g,'&quot;')}"/>
+        <button class="danger" onclick="this.closest('.list-card').remove()">✕</button>
+      </div>
+      <div class="dom-fields" id="${id}-fields">${fields}</div>
+      <button class="secondary" onclick="addDomainField('${id}')">+ add domain/IP</button>`;
+    $('domains-container').appendChild(card);
+  }
+  function addDomainField(id){
+    const inp = document.createElement('input');
+    inp.className = 'dom-entry'; inp.placeholder = 'domain or IP'; inp.style.marginBottom = '5px';
+    $(id + '-fields').appendChild(inp);
+  }
+  function genDomainsBlock(){
+    const L = ['[DOMAINS-V1]'];
+    document.querySelectorAll('#domains-container .list-card').forEach(card => {
+      const id = card.dataset.domId;
+      const name = (v(`${id}-name`) || '').trim().toLowerCase();
+      if (!name) return;
+      const doms = Array.from(card.querySelectorAll('.dom-entry')).map(i => i.value.trim()).filter(Boolean);
+      if (!doms.length) return;
+      L.push(`[DLIST:${name}]`);
+      L.push('DOMAINS:' + doms.join(','));
+      L.push('[/DLIST]');
+    });
+    L.push('[/DOMAINS-V1]');
     return L.join('\n');
   }
 
@@ -616,11 +627,11 @@
     parts.push(genIdentityBlock());
 
     if ($('inc-rates').checked)   { parts.push(''); parts.push(genRatesBlock()); }
-    if ($('inc-offer').checked)   { parts.push(''); parts.push(genOfferBlock()); }
     if ($('inc-nostr').checked)   { parts.push(''); parts.push(genNostrBlock()); }
     if ($('inc-btc').checked)     { parts.push(''); parts.push(genBtcBlock()); }
     if ($('inc-ln').checked)      { parts.push(''); parts.push(genLightningBlock()); }
     if ($('inc-ssh').checked)     { parts.push(''); parts.push(genSshBlock()); }
+    if ($('inc-domains').checked) { parts.push(''); parts.push(genDomainsBlock()); }
     if ($('inc-contact').checked) { parts.push(''); parts.push(genContactBlock()); }
 
     const body = parts.join('\n');
@@ -629,7 +640,7 @@
   }
 
   function refreshBadges(){
-    const map = {rates:'inc-rates',offer:'inc-offer',nostr:'inc-nostr',btc:'inc-btc',ln:'inc-ln',ssh:'inc-ssh',contact:'inc-contact'};
+    const map = {rates:'inc-rates',nostr:'inc-nostr',btc:'inc-btc',ln:'inc-ln',ssh:'inc-ssh',domains:'inc-domains',contact:'inc-contact'};
     Object.entries(map).forEach(([badge, inc]) => {
       const on = $(inc) && $(inc).checked;
       document.querySelectorAll(`[data-badge="${badge}"]`).forEach(b => {
@@ -886,8 +897,8 @@
     if (!block) return;
     const set = (id,val)=>{ if($(id)) $(id).value = val; };
     set(`${p}-invite`, numFromRate(fieldOf(block,'INVITE')));
-    set(`${p}-text`, numFromRate(fieldOf(block,'TEXT')));
-    set(`${p}-textses`, numFromRate(fieldOf(block,'TEXT-SESSION')));
+    set(`${p}-offer`, numFromRate(fieldOf(block,'OFFER')));
+    set(`${p}-dm`, numFromRate(fieldOf(block,'DM')));
     const voice = fieldOf(block,'VOICE'), video = fieldOf(block,'VIDEO');
     const pick = (line,k)=>{ const m=line.match(new RegExp(k+':([\\d.]+|FREE)','i')); return m?numFromRate(m[1]):'0'; };
     if (voice){ set(`${p}-vring`,pick(voice,'RING')); set(`${p}-vconn`,pick(voice,'CONNECT')); set(`${p}-vrate`,pick(voice,'RATE')); set(`${p}-vdep`,pick(voice,'MIN-DEPOSIT')); }
@@ -903,7 +914,6 @@
     const rb = blockOf(body, 'V4CALL-RATES-V2') || blockOf(body, 'V4CALL-RATES-V1');
     if (rb){
       $('inc-rates').checked = true;
-      const fee = fieldOf(rb,'PLATFORM-FEE'); if (fee) $('r-fee').value = fee.replace('%','').trim();
       if (fieldOf(rb,'ESCROW')) $('r-escrow').value = fieldOf(rb,'ESCROW');
       const blk = blockOf(rb,'BLOCKED');
       if (blk){ $('r-blocked-users').value = fieldOf(blk,'USERS'); $('r-blocked-msg').value = fieldOf(blk,'MESSAGE'); $('r-blocked-token').value = fieldOf(blk,'ALLOW-IF-TOKEN'); }
@@ -920,14 +930,16 @@
       while((lm=lre.exec(rb))){ const nm=lm[1].trim().toLowerCase(); if(nm==='default') continue; addList(nm, fieldOf(lm[2],'USERS')); const id='lst'+listSeq; const win=(lm[2].match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1]||lm[2]; setRateGrid(id, win); }
     }
 
-    // offers
-    const ob = blockOf(body, 'OFFER-V1');
-    if (ob){
-      $('inc-offer').checked = true;
-      const od = (ob.match(/\[OFFER-LIST:offer-defaults\]([\s\S]*?)\[\/OFFER-LIST\]/i)||[])[1];
-      if (od){ $('od-connect').value=numFromRate(fieldOf(od,'MIN-CONNECT')); $('od-rate').value=numFromRate(fieldOf(od,'MIN-RATE')); if(fieldOf(od,'CURRENCY')) $('od-cur').value=fieldOf(od,'CURRENCY'); }
-      const oc = (ob.match(/\[OFFER-LIST:offer-custom_list\]([\s\S]*?)\[\/OFFER-LIST\]/i)||[])[1];
-      if (oc){ $('oc-users').value=fieldOf(oc,'USERS'); $('oc-connect').value=numFromRate(fieldOf(oc,'MIN-CONNECT')); $('oc-rate').value=numFromRate(fieldOf(oc,'MIN-RATE')); if(fieldOf(oc,'CURRENCY')) $('oc-cur').value=fieldOf(oc,'CURRENCY'); }
+    // domains
+    const db = blockOf(body, 'DOMAINS-V1');
+    if (db){
+      $('inc-domains').checked = true;
+      $('domains-container').innerHTML = '';
+      let dm; const dre = /\[DLIST:([^\]]+)\]([\s\S]*?)\[\/DLIST\]/gi;
+      while ((dm = dre.exec(db))){
+        const doms = (fieldOf(dm[2],'DOMAINS') || '').split(',').map(s=>s.trim()).filter(Boolean);
+        addDomainList(dm[1].trim(), doms);
+      }
     }
 
     // nostr (canonical [NOSTR-V1], fall back to rates-header fields)
@@ -963,7 +975,7 @@
     }
 
     // open the sections that came back populated so they're visible
-    [['inc-rates','sect-rates'],['inc-offer','sect-offer'],['inc-nostr','sect-nostr'],['inc-btc','sect-btc'],['inc-ln','sect-ln'],['inc-ssh','sect-ssh'],['inc-contact','sect-contact']]
+    [['inc-rates','sect-rates'],['inc-nostr','sect-nostr'],['inc-btc','sect-btc'],['inc-ln','sect-ln'],['inc-ssh','sect-ssh'],['inc-domains','sect-domains'],['inc-contact','sect-contact']]
       .forEach(([inc,sect]) => { if ($(inc).checked) $(sect).open = true; });
     generateOutput();
   }
@@ -996,6 +1008,7 @@
   window.copyOutput = copyOutput; window.postToHive = postToHive; window.loadFromHive = loadFromHive;
   window.signNostrAttestation = signNostrAttestation; window.clearAttestation = clearAttestation;
   window.btcSign = btcSign; window.btcVerify = btcVerify;
+  window.addDomainList = addDomainList; window.addDomainField = addDomainField;
   </script>
 </body>
 </html>
