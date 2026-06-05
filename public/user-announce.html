@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>user-announce — one signed Hive post for all your apps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#0a0c0f; --surface:#12151a; --surface2:#1a1e26; --border:#222730;
+      --accent:#f5a623; --green:#4ade80; --blue:#38bdf8; --danger:#f87171;
+      --muted:#3d4555; --text:#dde3ed; --subtext:#7a869a; --purple:#a78bfa; --orange:#fb923c;
+    }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding:20px;}
+    h1{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:1.3rem;margin-bottom:4px;}
+    .subtitle{font-family:'IBM Plex Mono',monospace;color:var(--subtext);font-size:0.75rem;margin-bottom:20px;line-height:1.7;}
+    .layout{display:grid;grid-template-columns:1fr 430px;gap:20px;max-width:1240px;}
+    @media(max-width:900px){.layout{grid-template-columns:1fr;}}
+
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px;margin-bottom:16px;}
+    .card-title{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--accent);letter-spacing:0.05em;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;}
+
+    label{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);letter-spacing:0.04em;display:block;margin-bottom:4px;}
+    input,select,textarea{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:0.82rem;outline:none;transition:border-color 0.2s;}
+    input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+    select option{background:var(--surface);}
+    .field{margin-bottom:12px;}
+    .row{display:flex;gap:10px;}
+    .row>.field{flex:1;}
+
+    button.primary{padding:9px 18px;background:var(--accent);color:#0a0c0f;border:none;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;transition:opacity 0.2s;}
+    button.primary:hover{opacity:0.85;}
+    button.secondary{padding:7px 14px;background:transparent;color:var(--subtext);border:1px solid var(--border);border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;transition:border-color 0.2s,color 0.2s;}
+    button.secondary:hover{border-color:var(--accent);color:var(--accent);}
+    button.danger{padding:5px 10px;background:transparent;color:var(--danger);border:1px solid rgba(248,113,113,0.3);border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;transition:background 0.2s;}
+    button.danger:hover{background:rgba(248,113,113,0.1);}
+    .btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+
+    /* ── Collapsible sections ───────────────────────────── */
+    details.sect{background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:14px;overflow:hidden;}
+    details.sect[open]{border-color:rgba(245,166,35,0.35);}
+    details.sect>summary{list-style:none;cursor:pointer;padding:14px 18px;display:flex;align-items:center;gap:12px;font-family:'IBM Plex Mono',monospace;font-size:0.85rem;color:var(--text);user-select:none;}
+    details.sect>summary::-webkit-details-marker{display:none;}
+    details.sect>summary::before{content:'▸';color:var(--accent);font-size:0.8rem;transition:transform 0.15s;}
+    details.sect[open]>summary::before{transform:rotate(90deg);}
+    .sect-body{padding:4px 18px 18px;border-top:1px solid var(--border);}
+    .sum-spacer{flex:1;}
+    .inc-wrap{display:flex;align-items:center;gap:6px;font-size:0.68rem;color:var(--subtext);}
+    .inc-wrap input{width:auto;}
+    .summary-badge{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;padding:2px 7px;border-radius:999px;background:var(--border);color:var(--subtext);}
+    .summary-badge.on{background:rgba(74,222,128,0.15);color:var(--green);}
+
+    .list-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;}
+    .list-header{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .tok-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--purple);font-weight:600;}
+    .list-name-badge{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--blue);font-weight:600;}
+    .list-header .danger{margin-left:auto;}
+
+    .rg4{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
+    .rg3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
+    .rg2{display:grid;grid-template-columns:repeat(2,1fr);gap:6px;}
+    @media(max-width:620px){.rg4,.rg3{grid-template-columns:1fr 1fr;}.rg2{grid-template-columns:1fr;}}
+    .rc label{font-size:0.62rem;}
+    .rc input{font-size:0.75rem;padding:5px 7px;}
+    .slabel{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;color:var(--muted);letter-spacing:0.07em;margin:10px 0 5px;border-left:2px solid var(--border);padding-left:6px;}
+
+    .info-box{background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.18);border-radius:6px;padding:9px 11px;font-size:0.7rem;color:var(--subtext);line-height:1.6;margin-bottom:12px;}
+    .warn-box{background:rgba(248,113,113,0.08);border:1px solid rgba(248,113,113,0.3);border-radius:6px;padding:10px 12px;font-size:0.72rem;color:#fca5a5;line-height:1.65;margin-bottom:12px;}
+    .field-hint{font-size:0.64rem;color:var(--muted);margin-top:3px;line-height:1.5;}
+
+    #output-panel{position:sticky;top:20px;}
+    #output-area{width:100%;height:340px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--green);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;padding:10px;resize:vertical;white-space:pre;}
+    .status-msg{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-top:6px;min-height:18px;word-break:break-all;}
+    .keychain-note{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--muted);line-height:1.6;margin-top:10px;}
+    .wiki-link{display:block;text-align:center;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--accent);text-decoration:none;margin-top:6px;}
+    .opt-line{display:flex;align-items:center;gap:8px;margin-bottom:10px;}
+    .opt-line input[type=checkbox]{width:auto;}
+    .opt-line>label{margin:0;min-width:62px;}
+    .opt-line>input[type=text]{flex:1;}
+    code{font-family:'IBM Plex Mono',monospace;color:var(--accent);font-size:0.95em;}
+  </style>
+</head>
+<body>
+  <h1>user-announce</h1>
+  <div class="subtitle">
+    One signed Hive post that every app can read — v4call rates, paid-invite offers, Nostr keys,
+    Bitcoin/Lightning addresses, SSH key, contact details. Pick only the sections you want.<br>
+    Post title <code>user-announce</code> · tags <code>user-announce, hive, v4call, nostr, bitcoin</code>.
+    Each section is its own versioned block — apps read what they understand and ignore the rest.
+  </div>
+
+  <div class="layout">
+    <!-- ═══════════════ LEFT: FORM ═══════════════ -->
+    <div>
+
+      <!-- ── IDENTITY (always included) ─────────────── -->
+      <div class="card">
+        <div class="card-title">IDENTITY <span style="color:var(--subtext);font-size:0.6rem;">always in post</span></div>
+        <div class="row">
+          <div class="field">
+            <label>HIVE USERNAME</label>
+            <input id="my-username" placeholder="yourname" autocomplete="off" spellcheck="false"/>
+          </div>
+          <div class="field">
+            <label>HOME SERVER</label>
+            <input id="my-server" placeholder="v4call.com" autocomplete="off" spellcheck="false"/>
+          </div>
+        </div>
+        <div class="keychain-note" id="keychain-status">Detecting Hive Keychain…</div>
+      </div>
+
+      <!-- ── v4call CALLER RATES ────────────────────── -->
+      <details class="sect" id="sect-rates">
+        <summary>
+          💬 Set caller rates (v4call)
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="rates">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-rates"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            What callers pay <strong>you</strong> for a ring / connect / per-hour / text / invite — in HBD or
+            custom Hive-Engine tokens. Any field left <strong>0</strong> = FREE. Emits the
+            <code>[V4CALL-RATES-V2]</code> block the v4call server already understands.
+          </div>
+          <div class="row">
+            <div class="field"><label>ESCROW ACCOUNT</label><input id="r-escrow" placeholder="v4call-escrow"/></div>
+            <div class="field"><label>PLATFORM FEE %</label><input id="r-fee" type="number" value="10" min="0"/></div>
+          </div>
+
+          <div class="slabel">DEFAULT RATES — anyone not in a named list (24/7)</div>
+          <div id="r-default"></div>
+
+          <div class="slabel">TOKEN SECTIONS — accept Hive-Engine tokens</div>
+          <div id="tokens-container"></div>
+          <button class="secondary" onclick="addToken()">+ Add token</button>
+
+          <div class="slabel">NAMED LISTS — custom rates for specific users (single 24/7 window each)</div>
+          <div class="field-hint" style="margin-bottom:8px;">Multi-time-window / day-of-week splits per list are not yet ported here — set those in the full <code>rate-editor.html</code> for now. Listed as a known gap.</div>
+          <div id="lists-container"></div>
+          <button class="secondary" onclick="addList()">+ Add list</button>
+
+          <div class="slabel">BLOCKED USERS (optional)</div>
+          <div class="field"><label>USERS (comma-separated)</label><input id="r-blocked-users" placeholder="spammer1, spammer2"/></div>
+          <div class="row">
+            <div class="field"><label>BLOCK MESSAGE</label><input id="r-blocked-msg" placeholder="You have been blocked."/></div>
+            <div class="field"><label>ALLOW-IF-TOKEN</label><input id="r-blocked-token" placeholder="CNOOBS"/></div>
+          </div>
+        </div>
+      </details>
+
+      <!-- ── PAID-INVITE OFFERS ─────────────────────── -->
+      <details class="sect" id="sect-offer">
+        <summary>
+          💎 Paid-invite offers — minimum terms you'll accept
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="offer">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-offer"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            The <em>reverse</em> direction of rates: when someone wants to pay <strong>you</strong> to join their
+            room as an expert (v0.17 paid-invite). Declaring a floor stops lowball-offer spam — offers below your
+            minimum get filtered before they ever reach you. Emits <code>[OFFER-V1]</code> with
+            <code>offer-defaults</code> + <code>offer-custom_list</code>.
+          </div>
+
+          <div class="list-card">
+            <div class="list-header"><span class="list-name-badge">offer-defaults</span><span style="font-size:0.62rem;color:var(--subtext);">— floor for everyone</span></div>
+            <div class="rg3">
+              <div class="rc"><label>MIN CONNECT</label><input id="od-connect" type="number" value="0" min="0"/></div>
+              <div class="rc"><label>MIN RATE /HR</label><input id="od-rate" type="number" value="0" min="0"/></div>
+              <div class="rc"><label>CURRENCY</label><input id="od-cur" value="HBD"/></div>
+            </div>
+          </div>
+
+          <div class="list-card">
+            <div class="list-header"><span class="list-name-badge">offer-custom_list</span><span style="font-size:0.62rem;color:var(--subtext);">— better/worse floor for named users</span></div>
+            <div class="field"><label>USERS (comma-separated)</label><input id="oc-users" placeholder="alice, bob"/></div>
+            <div class="rg3">
+              <div class="rc"><label>MIN CONNECT</label><input id="oc-connect" type="number" value="0" min="0"/></div>
+              <div class="rc"><label>MIN RATE /HR</label><input id="oc-rate" type="number" value="0" min="0"/></div>
+              <div class="rc"><label>CURRENCY</label><input id="oc-cur" value="HBD"/></div>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <!-- ── NOSTR ──────────────────────────────────── -->
+      <details class="sect" id="sect-nostr">
+        <summary>
+          🟣 Nostr
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="nostr">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-nostr"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            Publish your Nostr public key + relays so others (and apps) can reach you over Nostr.
+            No keypair yet? Generate one in <a href="nostr-gen.html" target="_blank" style="color:var(--accent);">nostr-gen.html</a>
+            (keys never leave the browser). Sign the attestation below to prove the key is yours.
+          </div>
+          <div class="field"><label>NPUB</label><input id="n-npub" placeholder="npub1…" autocomplete="off" spellcheck="false"/></div>
+          <div class="field"><label>HEX PUBKEY (64-char)</label><input id="n-hex" placeholder="64-char lowercase hex" autocomplete="off" spellcheck="false"/></div>
+          <div class="field"><label>RELAYS (comma-separated, optional)</label><input id="n-relays" placeholder="wss://relay.damus.io, wss://nos.lol"/></div>
+
+          <div class="slabel">ATTESTATION — prove you hold this Nostr key</div>
+          <div class="keychain-note" id="nip07-status">Detecting NIP-07 (nos2x / Alby)…</div>
+          <div class="field" id="n-nsec-wrap" style="display:none;">
+            <label>NOSTR PRIVATE KEY — DISPOSABLE / TEST KEYS ONLY</label>
+            <input id="n-nsec" type="password" placeholder="nsec1…  (or 64-char hex)" autocomplete="off" spellcheck="false"/>
+            <div class="field-hint" style="color:var(--danger);">⚠ Lives in browser memory only until signing completes, then is wiped.</div>
+          </div>
+          <div class="btn-row">
+            <button class="primary" style="background:var(--purple);" onclick="signNostrAttestation()">🔑 Sign attestation</button>
+            <button class="secondary" onclick="clearAttestation()">Clear</button>
+          </div>
+          <div class="keychain-note" id="n-attest-status" style="color:var(--danger);">⚠ No attestation signed yet.</div>
+        </div>
+      </details>
+
+      <!-- ── BITCOIN ────────────────────────────────── -->
+      <details class="sect" id="sect-btc">
+        <summary>
+          ₿ Bitcoin
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="btc">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-btc"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            Publish a Bitcoin address, optionally with a <strong>BIP137 signed proof</strong> that you hold its key
+            (Electrum / Sparrow / <code>bitcoin-cli verifymessage</code> compatible). Sign here with a WIF, or paste a
+            proof you made in the fully-offline <a href="bitcoin-gen.html" target="_blank" style="color:var(--accent);">bitcoin-gen.html</a>.
+          </div>
+          <div class="warn-box" id="btc-cdn-warn">
+            ⚠ <strong>Key-safety note:</strong> signing here loads the secp256k1 library from a CDN (esm.sh). For a
+            high-value key, prefer signing in <code>bitcoin-gen.html</code> (vendored / offline-capable) and pasting the
+            proof below — your WIF then never touches CDN code.
+          </div>
+          <div class="field"><label>BITCOIN ADDRESS</label><input id="b-address" placeholder="bc1… or 1… or 3…" autocomplete="off" spellcheck="false"/></div>
+
+          <div class="slabel">SIGN A PROOF (optional)</div>
+          <div class="field">
+            <label>PRIVATE KEY (WIF) — wiped after signing</label>
+            <input id="b-wif" type="password" placeholder="L… or K…" autocomplete="off" spellcheck="false"/>
+          </div>
+          <div class="field">
+            <label>MESSAGE</label>
+            <textarea id="b-message" rows="2" style="height:auto;"></textarea>
+          </div>
+          <div class="btn-row">
+            <button class="primary" style="background:var(--orange);color:#3d1b07;" onclick="btcSign()">✍ Sign proof</button>
+            <button class="secondary" onclick="btcVerify()">Verify current</button>
+          </div>
+          <div class="field" style="margin-top:10px;">
+            <label>SIGNATURE (base64) — auto-filled on sign, or paste from bitcoin-gen.html</label>
+            <input id="b-sig" placeholder="(no proof — address published unsigned)" autocomplete="off" spellcheck="false"/>
+          </div>
+          <div class="keychain-note" id="b-status"></div>
+        </div>
+      </details>
+
+      <!-- ── LIGHTNING ──────────────────────────────── -->
+      <details class="sect" id="sect-ln">
+        <summary>
+          ⚡ Lightning
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="ln">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-ln"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            A Lightning Address for tips. Display-only — no v4call infrastructure touches Lightning; senders pay your
+            wallet directly. Emits <code>[LIGHTNING-V1]</code>.
+          </div>
+          <div class="field"><label>LIGHTNING ADDRESS</label><input id="l-addr" placeholder="you@walletofsatoshi.com" autocomplete="off" spellcheck="false"/></div>
+        </div>
+      </details>
+
+      <!-- ── SSH ────────────────────────────────────── -->
+      <details class="sect" id="sect-ssh">
+        <summary>
+          🔑 SSH public key
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="ssh">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-ssh"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="info-box">
+            Your <strong>public</strong> SSH key (safe to publish — it's public by design). Lets someone add you to a
+            box for a look without DMing the key around. Emits <code>[SSH-V1]</code>. Never paste a private key here.
+          </div>
+          <div class="field">
+            <label>SSH PUBLIC KEY (one line)</label>
+            <textarea id="s-key" rows="2" style="height:auto;" placeholder="ssh-ed25519 AAAA… you@host"></textarea>
+          </div>
+        </div>
+      </details>
+
+      <!-- ── CONTACT (PII) ──────────────────────────── -->
+      <details class="sect" id="sect-contact">
+        <summary>
+          ☎ Contact (phone / email / fax)
+          <span class="sum-spacer"></span>
+          <span class="summary-badge" data-badge="contact">off</span>
+          <span class="inc-wrap"><input type="checkbox" id="inc-contact"/> include</span>
+        </summary>
+        <div class="sect-body">
+          <div class="warn-box">
+            ⚠ <strong>Public &amp; permanent.</strong> Anything you put here is written to the Hive blockchain
+            <strong>forever</strong> — it cannot be deleted, it is replicated across nodes, and it <strong>will</strong>
+            be scraped by spam harvesters. Prefer a dedicated alias / forwarding number over a personal one. Each field
+            below is opt-in: tick it to include it.
+          </div>
+          <div class="opt-line"><input type="checkbox" id="c-phone-on"/><label>PHONE</label><input type="text" id="c-phone" placeholder="+1 555 0100"/></div>
+          <div class="opt-line"><input type="checkbox" id="c-email-on"/><label>EMAIL</label><input type="text" id="c-email" placeholder="alias@example.com"/></div>
+          <div class="opt-line"><input type="checkbox" id="c-fax-on"/><label>FAX</label><input type="text" id="c-fax" placeholder="+1 555 0101"/></div>
+        </div>
+      </details>
+
+    </div>
+
+    <!-- ═══════════════ RIGHT: OUTPUT ═══════════════ -->
+    <div id="output-panel">
+      <div class="card">
+        <div class="card-title">OUTPUT — Hive post body</div>
+        <textarea id="output-area" readonly placeholder="Click Generate to preview your user-announce post…"></textarea>
+        <div class="status-msg" id="status-msg"></div>
+        <div class="btn-row">
+          <button class="primary"   onclick="generateOutput()">Generate</button>
+          <button class="secondary" onclick="copyOutput()">Copy</button>
+          <button class="primary"   style="background:var(--green);color:#0a0c0f;" onclick="postToHive()">Post to Hive</button>
+          <button class="secondary" onclick="loadFromHive()">Load from Hive</button>
+        </div>
+        <div class="keychain-note">
+          Posting needs the <strong>Hive Keychain</strong> extension. Title <strong>user-announce</strong>.
+          Apps always read your most recent post with that title. Unticked sections emit no block at all.
+        </div>
+      </div>
+      <a href="https://www.completenoobs.com/index.php/v4call" target="_blank" class="wiki-link">📖 v4call wiki — completenoobs.com</a>
+    </div>
+  </div>
+
+  <!-- ── crypto loaders: nostr-tools + noble-secp256k1 + noble-hashes ── -->
+  <script type="module">
+    import { finalizeEvent, getPublicKey, verifyEvent, nip19 } from 'https://esm.sh/nostr-tools@2.7.2';
+    window.nGate = { finalizeEvent, getPublicKey, verifyEvent, nip19, ready:true };
+    document.dispatchEvent(new CustomEvent('nGate-ready'));
+
+    import * as nobleSecpNS from 'https://esm.sh/noble-secp256k1@1.2.14';
+    // esm.sh may expose a CJS module either as named exports or under .default.
+    const nobleSecp = (nobleSecpNS && nobleSecpNS.utils) ? nobleSecpNS : (nobleSecpNS.default || nobleSecpNS);
+    const { sha256 }    = await import('https://esm.sh/@noble/hashes@1.3.0/sha256');
+    const { ripemd160 } = await import('https://esm.sh/@noble/hashes@1.3.0/ripemd160');
+    const { hmac }      = await import('https://esm.sh/@noble/hashes@1.3.0/hmac');
+    // Wire noble-secp256k1's sync hooks so signSync (RFC6979) works in-browser.
+    nobleSecp.utils.sha256Sync   = (m) => sha256(m);
+    nobleSecp.utils.hmacSha256Sync = (key, ...msgs) => {
+      let total = 0; for (const m of msgs) total += m.length;
+      const c = new Uint8Array(total); let o = 0; for (const m of msgs){ c.set(m,o); o += m.length; }
+      return hmac(sha256, key, c);
+    };
+    window.btc = { secp: nobleSecp, sha256, ripemd160, ready:true };
+    document.dispatchEvent(new CustomEvent('btc-ready'));
+  </script>
+
+  <script>
+  // ══════════════════════════════════════════════════════════
+  //  FORKER CONFIG
+  // ══════════════════════════════════════════════════════════
+  const SERVER_DOMAIN        = 'v4call.com';
+  const ESCROW_DEFAULT       = 'v4call-escrow';
+  const APP_VERSION          = 'v4call/user-announce-1.0';
+  const POST_TITLE           = 'user-announce';
+  const POST_TAGS            = ['user-announce','hive','v4call','nostr','bitcoin'];
+
+  // Nostr attestation constants — kept identical to rate-editor.html so a future
+  // nGate user-tier verifier accepts posts made by either page.
+  const ATTESTATION_D_TAG_USER  = 'v4call-user-cross-attestation';
+  const V4CALL_ROLE_USER        = 'user';
+  const V4CALL_PROTOCOL_VERSION = '0.3';
+
+  let currentAttestation = null;   // signed kind-30078 event
+  let attestationBoundTo = null;   // identity snapshot it was signed against
+
+  // ── tiny helpers ─────────────────────────────────────────
+  const $ = (id) => document.getElementById(id);
+  const v = (id) => ($(id) ? $(id).value.trim() : '');
+  function showStatus(msg, color){
+    const el = $('status-msg');
+    el.textContent = msg;
+    el.style.color = ({green:'var(--green)',danger:'var(--danger)',blue:'var(--blue)'})[color] || 'var(--subtext)';
+  }
+  // FREE when 0 / empty, else the numeric string
+  function rv(id){ const n = parseFloat(v(id)); return (!n || isNaN(n)) ? 'FREE' : String(n); }
+  function rvObj(o){ const n = parseFloat(o); return (!n || isNaN(n)) ? 'FREE' : String(n); }
+  function today(){ return new Date().toISOString().slice(0,10); }
+
+  // ══════════════════════════════════════════════════════════
+  //  DYNAMIC RATE BUILDERS (default window, tokens, lists)
+  // ══════════════════════════════════════════════════════════
+  // Returns the inner HTML for one rate-window's input grid. `p` = id prefix.
+  function rateGridHtml(p, withMinDeposit){
+    return `
+      <div class="rg3">
+        <div class="rc"><label>INVITE</label><input id="${p}-invite" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>TEXT</label><input id="${p}-text" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>TEXT SESSION /HR</label><input id="${p}-textses" type="number" value="0" min="0"/></div>
+      </div>
+      <div class="slabel">VOICE</div>
+      <div class="rg4">
+        <div class="rc"><label>RING</label><input id="${p}-vring" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>CONNECT</label><input id="${p}-vconn" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>RATE /HR</label><input id="${p}-vrate" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>MIN-DEP min</label><input id="${p}-vdep" type="number" value="0" min="0"/></div>
+      </div>
+      <div class="slabel">VIDEO</div>
+      <div class="rg4">
+        <div class="rc"><label>RING</label><input id="${p}-Vring" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>CONNECT</label><input id="${p}-Vconn" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>RATE /HR</label><input id="${p}-Vrate" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>MIN-DEP min</label><input id="${p}-Vdep" type="number" value="0" min="0"/></div>
+      </div>`;
+  }
+  // Emit the INVITE/TEXT/VOICE/VIDEO lines for a rate window with id prefix `p`.
+  function rateLines(p){
+    const L = [];
+    L.push('INVITE:' + rv(`${p}-invite`));
+    L.push('TEXT:' + rv(`${p}-text`));
+    L.push('TEXT-SESSION:' + rv(`${p}-textses`) + '/hr');
+    const dep = (id) => { const n = parseFloat(v(id)); return (!n||isNaN(n)) ? '' : `;MIN-DEPOSIT:${n}min`; };
+    L.push(`VOICE:RING:${rv(p+'-vring')};CONNECT:${rv(p+'-vconn')};RATE:${rv(p+'-vrate')}/hr${dep(p+'-vdep')}`);
+    L.push(`VIDEO:RING:${rv(p+'-Vring')};CONNECT:${rv(p+'-Vconn')};RATE:${rv(p+'-Vrate')}/hr${dep(p+'-Vdep')}`);
+    return L;
+  }
+
+  $('r-default').innerHTML = rateGridHtml('rd', true);
+
+  let tokSeq = 0;
+  function addToken(symbol){
+    const id = 'tok' + (++tokSeq);
+    const card = document.createElement('div');
+    card.className = 'list-card';
+    card.dataset.tokId = id;
+    card.innerHTML = `
+      <div class="list-header">
+        <span class="tok-badge">[TOKEN]</span>
+        <input style="max-width:150px" placeholder="SYMBOL" id="${id}-sym" value="${symbol||''}"/>
+        <label style="display:flex;align-items:center;gap:5px;margin:0;font-size:0.62rem;"><input type="checkbox" id="${id}-allowblk" style="width:auto"/> bypass block</label>
+        <button class="danger" onclick="this.closest('.list-card').remove()">✕</button>
+      </div>
+      ${rateGridHtml(id, true)}`;
+    $('tokens-container').appendChild(card);
+  }
+
+  let listSeq = 0;
+  function addList(name, users){
+    const id = 'lst' + (++listSeq);
+    const card = document.createElement('div');
+    card.className = 'list-card';
+    card.dataset.listId = id;
+    card.innerHTML = `
+      <div class="list-header">
+        <span class="list-name-badge">[LIST]</span>
+        <input style="max-width:150px" placeholder="name (family/work…)" id="${id}-name" value="${name||''}"/>
+        <button class="danger" onclick="this.closest('.list-card').remove()">✕</button>
+      </div>
+      <div class="field"><label>USERS (comma-separated)</label><input id="${id}-users" placeholder="alice, bob" value="${users||''}"/></div>
+      ${rateGridHtml(id, true)}`;
+    $('lists-container').appendChild(card);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  BLOCK GENERATORS
+  // ══════════════════════════════════════════════════════════
+  function csv(str){ return (str||'').split(',').map(s=>s.trim().toLowerCase()).filter(Boolean).join(','); }
+
+  function genIdentityBlock(){
+    return [
+      '[V4CALL-USER-V1]',
+      'ACCOUNT:' + v('my-username').toLowerCase(),
+      'CHAIN:hive',
+      'SERVER:' + (v('my-server') || SERVER_DOMAIN),
+      'UPDATED:' + today(),
+      '[/V4CALL-USER-V1]'
+    ].join('\n');
+  }
+
+  function genRatesBlock(){
+    const L = ['[V4CALL-RATES-V2]'];
+    L.push('ACCOUNT:' + v('my-username').toLowerCase());
+    L.push('CHAIN:hive');
+    L.push('SERVER:' + (v('my-server') || SERVER_DOMAIN));
+    // Mirror Nostr identity into the rates header too — the current v4call server
+    // reads NOSTR/NOSTR-HEX from here. The canonical copy lives in [NOSTR-V1].
+    if ($('inc-nostr').checked && v('n-npub')) L.push('NOSTR:' + v('n-npub'));
+    if ($('inc-nostr').checked && v('n-hex'))  L.push('NOSTR-HEX:' + v('n-hex').toLowerCase());
+    if ($('inc-nostr').checked && currentAttestation) L.push('NOSTR-ATTESTATION:' + btoa(JSON.stringify(currentAttestation)));
+    L.push('UPDATED:' + today());
+    L.push('PLATFORM-FEE:' + (v('r-fee') || '10') + '%');
+    L.push('ESCROW:' + (v('r-escrow') || ESCROW_DEFAULT));
+
+    const blkUsers = csv(v('r-blocked-users'));
+    if (blkUsers){
+      L.push('', '[BLOCKED]');
+      L.push('USERS:' + blkUsers);
+      if (v('r-blocked-msg'))   L.push('MESSAGE:' + v('r-blocked-msg'));
+      if (v('r-blocked-token')) L.push('ALLOW-IF-TOKEN:' + v('r-blocked-token').toUpperCase());
+      L.push('[/BLOCKED]');
+    }
+
+    document.querySelectorAll('#tokens-container .list-card').forEach(card => {
+      const id = card.dataset.tokId;
+      const sym = (v(`${id}-sym`) || '').toUpperCase();
+      if (!sym) return;
+      L.push('', `[TOKEN:${sym}]`);
+      rateLines(id).forEach(x => L.push(x));
+      if ($(`${id}-allowblk`).checked) L.push('ALLOW-BLOCKED:yes');
+      L.push('[/TOKEN]');
+    });
+
+    // default list (the 24/7 catch-all)
+    L.push('', '[LIST:default]');
+    L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
+    rateLines('rd').forEach(x => L.push(x));
+    L.push('[/TIME]', '[/LIST]');
+
+    document.querySelectorAll('#lists-container .list-card').forEach(card => {
+      const id = card.dataset.listId;
+      const name = (v(`${id}-name`) || '').toLowerCase();
+      if (!name || name === 'default') return;
+      L.push('', `[LIST:${name}]`);
+      L.push('USERS:' + csv(v(`${id}-users`)));
+      L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
+      rateLines(id).forEach(x => L.push(x));
+      L.push('[/TIME]', '[/LIST]');
+    });
+
+    L.push('[/V4CALL-RATES-V2]');
+    return L.join('\n');
+  }
+
+  function genOfferBlock(){
+    const L = ['[OFFER-V1]'];
+    L.push('[OFFER-LIST:offer-defaults]');
+    L.push('[DAYS:mon-sun][TIME:00:00-23:59]');
+    L.push('MIN-CONNECT:' + rvObj(v('od-connect')));
+    L.push('MIN-RATE:' + rvObj(v('od-rate')) + '/hr');
+    L.push('CURRENCY:' + (v('od-cur') || 'HBD').toUpperCase());
+    L.push('[/TIME]', '[/OFFER-LIST]');
+    const ocUsers = csv(v('oc-users'));
+    if (ocUsers){
+      L.push('[OFFER-LIST:offer-custom_list]');
+      L.push('USERS:' + ocUsers);
+      L.push('MIN-CONNECT:' + rvObj(v('oc-connect')));
+      L.push('MIN-RATE:' + rvObj(v('oc-rate')) + '/hr');
+      L.push('CURRENCY:' + (v('oc-cur') || 'HBD').toUpperCase());
+      L.push('[/OFFER-LIST]');
+    }
+    L.push('[/OFFER-V1]');
+    return L.join('\n');
+  }
+
+  function genNostrBlock(){
+    const L = ['[NOSTR-V1]'];
+    if (v('n-npub')) L.push('NPUB:' + v('n-npub'));
+    if (v('n-hex'))  L.push('HEX:' + v('n-hex').toLowerCase());
+    if (v('n-relays')) L.push('RELAYS:' + v('n-relays').split(',').map(s=>s.trim()).filter(Boolean).join(','));
+    if (currentAttestation) L.push('ATTESTATION:' + btoa(JSON.stringify(currentAttestation)));
+    L.push('[/NOSTR-V1]');
+    return L.join('\n');
+  }
+
+  function genBtcBlock(){
+    const L = ['[BITCOIN-V1]'];
+    L.push('ADDRESS:' + v('b-address'));
+    if (v('b-sig')){
+      L.push('MESSAGE:' + v('b-message'));
+      L.push('SIGNATURE:' + v('b-sig'));
+    }
+    L.push('[/BITCOIN-V1]');
+    return L.join('\n');
+  }
+
+  function genLightningBlock(){
+    return ['[LIGHTNING-V1]', 'ADDRESS:' + v('l-addr'), '[/LIGHTNING-V1]'].join('\n');
+  }
+
+  function genSshBlock(){
+    return ['[SSH-V1]', 'KEY:' + v('s-key').replace(/\s+/g,' ').trim(), '[/SSH-V1]'].join('\n');
+  }
+
+  function genContactBlock(){
+    const L = ['[CONTACT-V1]'];
+    if ($('c-phone-on').checked && v('c-phone')) L.push('PHONE:' + v('c-phone'));
+    if ($('c-email-on').checked && v('c-email')) L.push('EMAIL:' + v('c-email'));
+    if ($('c-fax-on').checked   && v('c-fax'))   L.push('FAX:' + v('c-fax'));
+    L.push('[/CONTACT-V1]');
+    return L.join('\n');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  ASSEMBLE FULL POST
+  // ══════════════════════════════════════════════════════════
+  function generateOutput(){
+    refreshBadges();
+    const acct = v('my-username').toLowerCase() || 'yourname';
+    const parts = [];
+    parts.push('# user-announce — @' + acct);
+    parts.push('');
+    parts.push('One signed Hive post for all my apps. Machine-readable blocks below.');
+    parts.push('');
+    parts.push(genIdentityBlock());
+
+    if ($('inc-rates').checked)   { parts.push(''); parts.push(genRatesBlock()); }
+    if ($('inc-offer').checked)   { parts.push(''); parts.push(genOfferBlock()); }
+    if ($('inc-nostr').checked)   { parts.push(''); parts.push(genNostrBlock()); }
+    if ($('inc-btc').checked)     { parts.push(''); parts.push(genBtcBlock()); }
+    if ($('inc-ln').checked)      { parts.push(''); parts.push(genLightningBlock()); }
+    if ($('inc-ssh').checked)     { parts.push(''); parts.push(genSshBlock()); }
+    if ($('inc-contact').checked) { parts.push(''); parts.push(genContactBlock()); }
+
+    const body = parts.join('\n');
+    $('output-area').value = body;
+    return body;
+  }
+
+  function refreshBadges(){
+    const map = {rates:'inc-rates',offer:'inc-offer',nostr:'inc-nostr',btc:'inc-btc',ln:'inc-ln',ssh:'inc-ssh',contact:'inc-contact'};
+    Object.entries(map).forEach(([badge, inc]) => {
+      const on = $(inc) && $(inc).checked;
+      document.querySelectorAll(`[data-badge="${badge}"]`).forEach(b => {
+        b.textContent = on ? 'in post' : 'off';
+        b.classList.toggle('on', !!on);
+      });
+    });
+  }
+
+  function copyOutput(){
+    const t = $('output-area');
+    if (!t.value) generateOutput();
+    t.select(); document.execCommand('copy');
+    showStatus('Copied to clipboard.', 'green');
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  NOSTR ATTESTATION (ported from rate-editor.html)
+  // ══════════════════════════════════════════════════════════
+  function snapshotIdentity(){
+    return {
+      account:  v('my-username').toLowerCase(),
+      server:   v('my-server') || SERVER_DOMAIN,
+      nostrNpub:v('n-npub'),
+      nostrHex: v('n-hex').toLowerCase()
+    };
+  }
+  function buildUserAttestationEvent(snap, nonce){
+    return {
+      kind: 30078,
+      created_at: Math.floor(Date.now()/1000),
+      tags: [
+        ['d', ATTESTATION_D_TAG_USER],
+        ['v4call_hive_account', snap.account],
+        ['v4call_server', snap.server],
+        ['v4call_role', V4CALL_ROLE_USER],
+        ['v4call_protocol', V4CALL_PROTOCOL_VERSION],
+        ['nonce', nonce]
+      ],
+      content: `I, holder of Nostr key ${snap.nostrHex}, attest that I am the v4call user @${snap.account} (server ${snap.server}).`
+    };
+  }
+  async function signUserAttestation(snap){
+    if (!window.nGate || !window.nGate.ready) throw new Error('nostr-tools not loaded (check internet / esm.sh).');
+    if (!snap.account)  throw new Error('Hive username is empty.');
+    if (!snap.server)   throw new Error('Server field is empty.');
+    if (!snap.nostrHex) throw new Error('NOSTR HEX is empty — fill it before signing.');
+    if (!/^[0-9a-f]{64}$/.test(snap.nostrHex)) throw new Error('NOSTR HEX must be 64-char lowercase hex.');
+    const nonce = Array.from(crypto.getRandomValues(new Uint8Array(8))).map(b=>b.toString(16).padStart(2,'0')).join('');
+    const unsigned = buildUserAttestationEvent(snap, nonce);
+    let signed;
+    if (window.nostr && typeof window.nostr.signEvent === 'function'){
+      let ext; try { ext = await window.nostr.getPublicKey(); } catch(e){ throw new Error('NIP-07 getPublicKey() failed: '+e.message); }
+      if (ext.toLowerCase() !== snap.nostrHex) throw new Error(`NIP-07 holds ${ext.slice(0,16)}… but you declared ${snap.nostrHex.slice(0,16)}…`);
+      unsigned.pubkey = ext;
+      try { signed = await window.nostr.signEvent(unsigned); } catch(e){ throw new Error('NIP-07 signEvent() failed (cancelled?): '+e.message); }
+    } else {
+      const nsecStr = v('n-nsec');
+      if (!nsecStr) throw new Error('No NIP-07 extension and no nsec pasted.');
+      let priv;
+      if (nsecStr.startsWith('nsec1')){ const d = window.nGate.nip19.decode(nsecStr); if (d.type!=='nsec') throw new Error('not an nsec'); priv = d.data; }
+      else if (/^[0-9a-f]{64}$/i.test(nsecStr)){ priv = new Uint8Array(nsecStr.toLowerCase().match(/.{1,2}/g).map(b=>parseInt(b,16))); }
+      else throw new Error('paste an nsec1… or 64-char hex');
+      const derived = window.nGate.getPublicKey(priv);
+      if (derived.toLowerCase() !== snap.nostrHex) throw new Error(`nsec derives to ${derived.slice(0,16)}… but you declared ${snap.nostrHex.slice(0,16)}…`);
+      signed = window.nGate.finalizeEvent(unsigned, priv);
+      $('n-nsec').value = '';
+    }
+    if (!window.nGate.verifyEvent(signed)) throw new Error('verifyEvent() failed — refusing self-invalid attestation.');
+    return signed;
+  }
+  async function signNostrAttestation(){
+    const el = $('n-attest-status');
+    el.style.color = 'var(--subtext)'; el.textContent = 'Signing…';
+    const snap = snapshotIdentity();
+    try {
+      const signed = await signUserAttestation(snap);
+      currentAttestation = signed; attestationBoundTo = snap;
+      el.style.color = 'var(--green)';
+      el.textContent = `✓ Signed for ${signed.pubkey.slice(0,16)}… — ready to post.`;
+      generateOutput();
+    } catch(e){
+      currentAttestation = null; attestationBoundTo = null;
+      el.style.color = 'var(--danger)'; el.textContent = '✗ ' + e.message;
+    }
+  }
+  function clearAttestation(){
+    currentAttestation = null; attestationBoundTo = null;
+    const el = $('n-attest-status'); el.style.color = 'var(--danger)'; el.textContent = '⚠ Attestation cleared.';
+    generateOutput();
+  }
+  function attestationStillValid(){
+    if (!currentAttestation || !attestationBoundTo) return false;
+    const n = snapshotIdentity();
+    return n.account===attestationBoundTo.account && n.server===attestationBoundTo.server && n.nostrHex===attestationBoundTo.nostrHex;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  BITCOIN — BIP137 sign/verify (wrappers ported from bitcoin-gen.html;
+  //  noble libs loaded via esm.sh in the module script above)
+  // ══════════════════════════════════════════════════════════
+  function _sha256(b){ return window.btc.sha256(b); }
+  function dsha256(b){ return _sha256(_sha256(b)); }
+  function hash160(b){ return window.btc.ripemd160(_sha256(b)); }
+  function concatU8(...arrs){ let l=0; for(const a of arrs) l+=a.length; const r=new Uint8Array(l); let o=0; for(const a of arrs){ r.set(a,o); o+=a.length; } return r; }
+  function utf8Raw(s){ return new TextEncoder().encode(s); }
+  function varintEncode(n){
+    if(n<0xfd) return new Uint8Array([n]);
+    if(n<0x10000) return new Uint8Array([0xfd, n&0xff, (n>>8)&0xff]);
+    if(n<0x100000000) return new Uint8Array([0xfe, n&0xff, (n>>8)&0xff, (n>>16)&0xff, (n>>>24)&0xff]);
+    throw new Error('message too long');
+  }
+  const BTC_MSG_MAGIC = utf8Raw('Bitcoin Signed Message:\n');
+  function bitcoinMessageHash(message){
+    const msgBytes = utf8Raw(message);
+    return dsha256(concatU8(varintEncode(BTC_MSG_MAGIC.length), BTC_MSG_MAGIC, varintEncode(msgBytes.length), msgBytes));
+  }
+  function bytesToBase64(b){ let s=''; for(const x of b) s+=String.fromCharCode(x); return btoa(s); }
+  function base64ToBytes(s){ const bin=atob(s.trim()); const r=new Uint8Array(bin.length); for(let i=0;i<r.length;i++) r[i]=bin.charCodeAt(i); return r; }
+
+  // base58 / WIF
+  const B58='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  function base58encode(bytes){ let z=0; while(z<bytes.length&&bytes[z]===0)z++; let n=0n; for(const b of bytes) n=(n<<8n)|BigInt(b); let o=''; while(n>0n){ o=B58[Number(n%58n)]+o; n/=58n; } for(let i=0;i<z;i++) o='1'+o; return o; }
+  function base58check(prefix,payload){ const data=concatU8(prefix,payload); return base58encode(concatU8(data, dsha256(data).slice(0,4))); }
+  function base58decode(s){ let n=0n; for(const c of s){ const i=B58.indexOf(c); if(i<0) throw new Error('bad base58 char '+c); n=n*58n+BigInt(i); } let z=0; for(const c of s){ if(c==='1')z++; else break; } const b=[]; while(n>0n){ b.unshift(Number(n&0xffn)); n>>=8n; } const out=new Uint8Array(z+b.length); for(let i=0;i<b.length;i++) out[z+i]=b[i]; return out; }
+  function base58checkDecode(s){ const full=base58decode(s); if(full.length<5) throw new Error('base58check too short'); const p=full.slice(0,full.length-4); const c=full.slice(full.length-4); const e=dsha256(p).slice(0,4); for(let i=0;i<4;i++) if(c[i]!==e[i]) throw new Error('base58check checksum mismatch'); return p; }
+  function wifDecode(wif){ const d=base58checkDecode(wif); if(d[0]!==0x80) throw new Error('not a mainnet WIF'); if(d.length===34&&d[33]===0x01) return {priv:d.slice(1,33),compressed:true}; if(d.length===33) return {priv:d.slice(1,33),compressed:false}; throw new Error('unexpected WIF length '+d.length); }
+
+  // bech32
+  const BECH='qpzry9x8gf2tvdw0s3jn54khce6mua7l';
+  function bech32Polymod(values){ const G=[0x3b6a57b2,0x26508e6d,0x1ea119fa,0x3d4233dd,0x2a1462b3]; let chk=1; for(const x of values){ const b=chk>>>25; chk=((chk&0x1ffffff)<<5)^x; for(let i=0;i<5;i++) if((b>>i)&1) chk^=G[i]; } return chk; }
+  function bech32HrpExpand(hrp){ const o=[]; for(let i=0;i<hrp.length;i++) o.push(hrp.charCodeAt(i)>>5); o.push(0); for(let i=0;i<hrp.length;i++) o.push(hrp.charCodeAt(i)&31); return o; }
+  function bech32Checksum(hrp,data){ const vals=bech32HrpExpand(hrp).concat(data).concat([0,0,0,0,0,0]); const pm=bech32Polymod(vals)^1; const o=[]; for(let i=0;i<6;i++) o.push((pm>>(5*(5-i)))&31); return o; }
+  function bech32Encode(hrp,data){ const cs=bech32Checksum(hrp,data); let o=hrp+'1'; for(const d of data.concat(cs)) o+=BECH[d]; return o; }
+  function convertBits(data,from,to,pad){ let acc=0,bits=0; const o=[]; const maxv=(1<<to)-1; for(const x of data){ acc=(acc<<from)|x; bits+=from; while(bits>=to){ bits-=to; o.push((acc>>bits)&maxv); } } if(pad){ if(bits) o.push((acc<<(to-bits))&maxv); } return o; }
+  function pubkeyToP2WPKH(pub){ const h=hash160(pub); return bech32Encode('bc',[0].concat(convertBits(Array.from(h),8,5,true))); }
+  function pubkeyToP2PKH(pub){ return base58check(new Uint8Array([0x00]), hash160(pub)); }
+  function pubkeyToP2SHP2WPKH(pub){ const h=hash160(pub); const rs=concatU8(new Uint8Array([0x00,0x14]),h); return base58check(new Uint8Array([0x05]), hash160(rs)); }
+
+  function signBitcoinMessage(wif, message){
+    const { priv, compressed } = wifDecode(wif);
+    if (!compressed) throw new Error('WIF must be for a compressed key');
+    const msgHash = bitcoinMessageHash(message);
+    const out = window.btc.secp.signSync(msgHash, priv, { recovered:true, der:false, canonical:true });
+    const sig65 = new Uint8Array(65); sig65[0] = 31 + out[1]; sig65.set(out[0], 1);
+    return { sig: bytesToBase64(sig65), pub: window.btc.secp.getPublicKey(priv, true) };
+  }
+  function verifyBitcoinMessage(address, message, sigB64){
+    const sig65 = base64ToBytes(sigB64);
+    if (sig65.length !== 65) throw new Error('signature must be 65 bytes, got '+sig65.length);
+    const recovery = (sig65[0] - 27) & 3;
+    const msgHash = bitcoinMessageHash(message);
+    const sig = window.btc.secp.Signature.fromCompact(sig65.slice(1));
+    const rec = window.btc.secp.recoverPublicKey(msgHash, sig, recovery);
+    const pub = window.btc.secp.Point.fromHex(rec).toRawBytes(true);
+    const a = address.trim();
+    if (a === pubkeyToP2PKH(pub))      return 'Legacy (P2PKH, "1…")';
+    if (a === pubkeyToP2WPKH(pub))     return 'Native SegWit (P2WPKH, "bc1…")';
+    if (a === pubkeyToP2SHP2WPKH(pub)) return 'Nested SegWit (P2SH-P2WPKH, "3…")';
+    return null;
+  }
+
+  function btcSign(){
+    const el = $('b-status');
+    if (!window.btc || !window.btc.ready){ el.style.color='var(--danger)'; el.textContent='Crypto still loading — wait a moment and retry.'; return; }
+    const wif = v('b-wif'), addr = v('b-address');
+    let msg = v('b-message');
+    if (!wif){ el.style.color='var(--danger)'; el.textContent='Enter a WIF to sign (or paste a ready-made signature).'; return; }
+    if (!addr){ el.style.color='var(--danger)'; el.textContent='Enter the Bitcoin address you are proving.'; return; }
+    if (!msg){ msg = `I, @${v('my-username').toLowerCase()||'me'} on ${v('my-server')||SERVER_DOMAIN}, control ${addr}. ${today()}`; $('b-message').value = msg; }
+    try {
+      const { sig } = signBitcoinMessage(wif, msg);
+      $('b-sig').value = sig;
+      $('b-wif').value = '';   // wipe WIF immediately
+      const t = verifyBitcoinMessage(addr, msg, sig);
+      if (t){ el.style.color='var(--green)'; el.textContent = `✓ Signed & verified — ${t}`; }
+      else  { el.style.color='var(--danger)'; el.textContent = '⚠ Signed, but the signature does not match the address you entered. Wrong address for this key?'; }
+      generateOutput();
+    } catch(e){ el.style.color='var(--danger)'; el.textContent='✗ '+e.message; }
+  }
+  function btcVerify(){
+    const el = $('b-status');
+    if (!window.btc || !window.btc.ready){ el.style.color='var(--danger)'; el.textContent='Crypto still loading — wait and retry.'; return; }
+    try {
+      const t = verifyBitcoinMessage(v('b-address'), v('b-message'), v('b-sig'));
+      if (t){ el.style.color='var(--green)'; el.textContent = `✓ Valid — ${t}`; }
+      else  { el.style.color='var(--danger)'; el.textContent = '✗ Signature does not match this address + message.'; }
+    } catch(e){ el.style.color='var(--danger)'; el.textContent='✗ '+e.message; }
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  POST TO HIVE
+  // ══════════════════════════════════════════════════════════
+  function postToHive(){
+    const username = v('my-username').toLowerCase();
+    if (!username){ alert('Enter your Hive username first.'); return; }
+    if (!window.hive_keychain){ alert('Hive Keychain extension is not installed.\nhttps://hive-keychain.com'); return; }
+    if ($('inc-nostr').checked && (v('n-npub') || v('n-hex'))){
+      if (!currentAttestation){ alert('You declared a Nostr key but have not signed an attestation. Sign it in the Nostr section, or untick "include" on Nostr.'); return; }
+      if (!attestationStillValid()){ alert('Your Nostr attestation is stale (identity changed since signing). Re-sign before posting.'); return; }
+    }
+    const body = generateOutput();
+    const permlink = POST_TITLE + '-' + Date.now();
+    const jsonMeta = JSON.stringify({ tags: POST_TAGS, app: APP_VERSION });
+    showStatus('Posting to Hive…', 'blue');
+    window.hive_keychain.requestPost(
+      username, POST_TITLE, body, POST_TAGS[0], '', jsonMeta, permlink, '',
+      (response) => {
+        if (response.success){ showStatus(`✓ Posted! https://hive.blog/@${username}/${permlink}`, 'green'); }
+        else {
+          console.error('[postToHive] Keychain response (full):', response);
+          const detail = response.message || response.error || (response.result && (response.result.message||response.result.error)) || 'unknown error — see DevTools Console';
+          showStatus('✗ Post failed: ' + detail, 'danger');
+        }
+      }
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  LOAD FROM HIVE (best-effort round-trip into the form)
+  // ══════════════════════════════════════════════════════════
+  async function loadFromHive(){
+    const username = v('my-username').toLowerCase();
+    if (!username){ showStatus('Enter your Hive username first.', 'danger'); return; }
+    showStatus('Fetching from Hive…', 'blue');
+    const nodes = ['https://api.hive.blog','https://api.deathwing.me','https://hive-api.arcange.eu'];
+    let posts = null;
+    for (const node of nodes){
+      try {
+        const res = await fetch(node, { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ jsonrpc:'2.0', method:'condenser_api.get_discussions_by_blog', params:[{tag:username,limit:20}], id:1 }) });
+        const data = await res.json();
+        if (data.result){ posts = data.result; break; }
+      } catch(_){}
+    }
+    if (!posts){ showStatus('✗ Could not reach Hive API.', 'danger'); return; }
+    const post = posts.find(p => p.title === POST_TITLE) || posts.find(p => p.title === 'v4call-rates');
+    if (!post){ showStatus(`✗ No ${POST_TITLE} / v4call-rates post for @${username}.`, 'danger'); return; }
+    try { applyLoaded(post.body); showStatus(`✓ Loaded from Hive (@${username}).`, 'green'); }
+    catch(e){ showStatus('✗ Parse error: ' + e.message, 'danger'); }
+  }
+
+  function blockOf(body, name){
+    const m = body.match(new RegExp('\\[' + name + '\\]([\\s\\S]*?)\\[\\/' + name + '\\]', 'i'));
+    return m ? m[1] : null;
+  }
+  function fieldOf(block, key){
+    if (!block) return '';
+    const m = block.match(new RegExp('^' + key + ':(.+)$', 'im'));
+    return m ? m[1].trim() : '';
+  }
+  function numFromRate(s){ if(!s) return '0'; if(/free/i.test(s)) return '0'; const n=parseFloat(s.replace(/[^0-9.]/g,'')); return isNaN(n)?'0':String(n); }
+  function setRateGrid(p, block){
+    if (!block) return;
+    const set = (id,val)=>{ if($(id)) $(id).value = val; };
+    set(`${p}-invite`, numFromRate(fieldOf(block,'INVITE')));
+    set(`${p}-text`, numFromRate(fieldOf(block,'TEXT')));
+    set(`${p}-textses`, numFromRate(fieldOf(block,'TEXT-SESSION')));
+    const voice = fieldOf(block,'VOICE'), video = fieldOf(block,'VIDEO');
+    const pick = (line,k)=>{ const m=line.match(new RegExp(k+':([\\d.]+|FREE)','i')); return m?numFromRate(m[1]):'0'; };
+    if (voice){ set(`${p}-vring`,pick(voice,'RING')); set(`${p}-vconn`,pick(voice,'CONNECT')); set(`${p}-vrate`,pick(voice,'RATE')); set(`${p}-vdep`,pick(voice,'MIN-DEPOSIT')); }
+    if (video){ set(`${p}-Vring`,pick(video,'RING')); set(`${p}-Vconn`,pick(video,'CONNECT')); set(`${p}-Vrate`,pick(video,'RATE')); set(`${p}-Vdep`,pick(video,'MIN-DEPOSIT')); }
+  }
+
+  function applyLoaded(body){
+    // identity
+    const idb = blockOf(body, 'V4CALL-USER-V1');
+    if (fieldOf(idb,'SERVER')) $('my-server').value = fieldOf(idb,'SERVER');
+
+    // rates
+    const rb = blockOf(body, 'V4CALL-RATES-V2') || blockOf(body, 'V4CALL-RATES-V1');
+    if (rb){
+      $('inc-rates').checked = true;
+      const fee = fieldOf(rb,'PLATFORM-FEE'); if (fee) $('r-fee').value = fee.replace('%','').trim();
+      if (fieldOf(rb,'ESCROW')) $('r-escrow').value = fieldOf(rb,'ESCROW');
+      const blk = blockOf(rb,'BLOCKED');
+      if (blk){ $('r-blocked-users').value = fieldOf(blk,'USERS'); $('r-blocked-msg').value = fieldOf(blk,'MESSAGE'); $('r-blocked-token').value = fieldOf(blk,'ALLOW-IF-TOKEN'); }
+      // default list window
+      const def = (rb.match(/\[LIST:default\]([\s\S]*?)\[\/LIST\]/i)||[])[1];
+      if (def){ const win = (def.match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1] || def; setRateGrid('rd', win); }
+      // tokens
+      $('tokens-container').innerHTML='';
+      let tm; const tre=/\[TOKEN:([^\]]+)\]([\s\S]*?)\[\/TOKEN\]/gi;
+      while((tm=tre.exec(rb))){ addToken(tm[1].trim()); const id='tok'+tokSeq; setRateGrid(id, tm[2]); if(/ALLOW-BLOCKED:\s*yes/i.test(tm[2])) $(`${id}-allowblk`).checked=true; }
+      // named lists (non-default)
+      $('lists-container').innerHTML='';
+      let lm; const lre=/\[LIST:([^\]]+)\]([\s\S]*?)\[\/LIST\]/gi;
+      while((lm=lre.exec(rb))){ const nm=lm[1].trim().toLowerCase(); if(nm==='default') continue; addList(nm, fieldOf(lm[2],'USERS')); const id='lst'+listSeq; const win=(lm[2].match(/\[TIME:[^\]]*\]([\s\S]*?)\[\/TIME\]/i)||[])[1]||lm[2]; setRateGrid(id, win); }
+    }
+
+    // offers
+    const ob = blockOf(body, 'OFFER-V1');
+    if (ob){
+      $('inc-offer').checked = true;
+      const od = (ob.match(/\[OFFER-LIST:offer-defaults\]([\s\S]*?)\[\/OFFER-LIST\]/i)||[])[1];
+      if (od){ $('od-connect').value=numFromRate(fieldOf(od,'MIN-CONNECT')); $('od-rate').value=numFromRate(fieldOf(od,'MIN-RATE')); if(fieldOf(od,'CURRENCY')) $('od-cur').value=fieldOf(od,'CURRENCY'); }
+      const oc = (ob.match(/\[OFFER-LIST:offer-custom_list\]([\s\S]*?)\[\/OFFER-LIST\]/i)||[])[1];
+      if (oc){ $('oc-users').value=fieldOf(oc,'USERS'); $('oc-connect').value=numFromRate(fieldOf(oc,'MIN-CONNECT')); $('oc-rate').value=numFromRate(fieldOf(oc,'MIN-RATE')); if(fieldOf(oc,'CURRENCY')) $('oc-cur').value=fieldOf(oc,'CURRENCY'); }
+    }
+
+    // nostr (canonical [NOSTR-V1], fall back to rates-header fields)
+    const nb = blockOf(body, 'NOSTR-V1');
+    if (nb){
+      $('inc-nostr').checked = true;
+      $('n-npub').value = fieldOf(nb,'NPUB'); $('n-hex').value = fieldOf(nb,'HEX'); $('n-relays').value = fieldOf(nb,'RELAYS');
+      const at = fieldOf(nb,'ATTESTATION');
+      if (at){ try { currentAttestation = JSON.parse(atob(at)); attestationBoundTo = snapshotIdentity(); $('n-attest-status').style.color='var(--green)'; $('n-attest-status').textContent='✓ Attestation loaded from Hive.'; } catch(_){} }
+    } else if (rb && fieldOf(rb,'NOSTR')){
+      $('inc-nostr').checked = true; $('n-npub').value = fieldOf(rb,'NOSTR'); $('n-hex').value = fieldOf(rb,'NOSTR-HEX');
+    }
+
+    // bitcoin
+    const bb = blockOf(body, 'BITCOIN-V1');
+    if (bb){ $('inc-btc').checked = true; $('b-address').value = fieldOf(bb,'ADDRESS'); $('b-message').value = fieldOf(bb,'MESSAGE'); $('b-sig').value = fieldOf(bb,'SIGNATURE'); }
+
+    // lightning
+    const lb = blockOf(body, 'LIGHTNING-V1');
+    if (lb){ $('inc-ln').checked = true; $('l-addr').value = fieldOf(lb,'ADDRESS'); }
+
+    // ssh
+    const sb = blockOf(body, 'SSH-V1');
+    if (sb){ $('inc-ssh').checked = true; $('s-key').value = fieldOf(sb,'KEY'); }
+
+    // contact
+    const cb = blockOf(body, 'CONTACT-V1');
+    if (cb){
+      $('inc-contact').checked = true;
+      if (fieldOf(cb,'PHONE')){ $('c-phone-on').checked=true; $('c-phone').value=fieldOf(cb,'PHONE'); }
+      if (fieldOf(cb,'EMAIL')){ $('c-email-on').checked=true; $('c-email').value=fieldOf(cb,'EMAIL'); }
+      if (fieldOf(cb,'FAX')){ $('c-fax-on').checked=true; $('c-fax').value=fieldOf(cb,'FAX'); }
+    }
+
+    // open the sections that came back populated so they're visible
+    [['inc-rates','sect-rates'],['inc-offer','sect-offer'],['inc-nostr','sect-nostr'],['inc-btc','sect-btc'],['inc-ln','sect-ln'],['inc-ssh','sect-ssh'],['inc-contact','sect-contact']]
+      .forEach(([inc,sect]) => { if ($(inc).checked) $(sect).open = true; });
+    generateOutput();
+  }
+
+  // ══════════════════════════════════════════════════════════
+  //  KEYCHAIN / NIP-07 DETECTION (poll — never one-shot)
+  // ══════════════════════════════════════════════════════════
+  function pollFor(testFn, onFound, onTimeout, ms){
+    const start = Date.now();
+    (function tick(){
+      if (testFn()){ onFound(); return; }
+      if (Date.now() - start > (ms||3000)){ if(onTimeout) onTimeout(); return; }
+      setTimeout(tick, 100);
+    })();
+  }
+  pollFor(() => !!window.hive_keychain,
+    () => { $('keychain-status').textContent = '✓ Hive Keychain detected — Post to Hive enabled.'; $('keychain-status').style.color = 'var(--green)'; },
+    () => { $('keychain-status').textContent = '⚠ Hive Keychain not found — install it to post (you can still Generate + Copy).'; });
+  pollFor(() => (window.nostr && typeof window.nostr.signEvent === 'function'),
+    () => { $('nip07-status').textContent = '✓ NIP-07 extension detected — sign with one click.'; $('nip07-status').style.color = 'var(--green)'; },
+    () => { $('nip07-status').textContent = 'No NIP-07 extension — paste an nsec below to sign (disposable keys only).'; $('n-nsec-wrap').style.display = 'block'; });
+
+  // ── live preview wiring ──
+  document.addEventListener('input', () => { if ($('output-area').value) generateOutput(); });
+  document.addEventListener('change', generateOutput);
+  window.addEventListener('DOMContentLoaded', () => { $('my-server').value = SERVER_DOMAIN; $('r-escrow').value = ESCROW_DEFAULT; refreshBadges(); });
+
+  // expose handlers used by inline onclick
+  window.addToken = addToken; window.addList = addList; window.generateOutput = generateOutput;
+  window.copyOutput = copyOutput; window.postToHive = postToHive; window.loadFromHive = loadFromHive;
+  window.signNostrAttestation = signNostrAttestation; window.clearAttestation = clearAttestation;
+  window.btcSign = btcSign; window.btcVerify = btcVerify;
+  </script>
+</body>
+</html>

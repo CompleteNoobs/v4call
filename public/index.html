@@ -886,12 +886,11 @@
     </div>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">IPFS-GATE</div>
-      <select id="att-gateway-select" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;">
-        <option value="https://ipfs.completenoobs.com">ipfs.completenoobs.com (default)</option>
-        <option value="__custom__">Custom…</option>
-      </select>
-      <input id="att-gateway-custom" type="url" placeholder="https://your-ipfs-gate.example" style="display:none;margin-top:5px;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">STORAGE</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="att-backend-line" style="font-size:0.78rem;color:var(--text);flex:1;"></span>
+        <button type="button" onclick="openStorageModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;font-size:0.74rem;padding:4px 9px;">⚙ Change</button>
+      </div>
     </div>
 
     <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="att-cost-line" style="color:var(--accent);">… checking gate</span></div>
@@ -917,8 +916,11 @@
     </div>
 
     <div style="margin-top:10px;">
-      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">IPFS-GATE</div>
-      <input id="pub-gateway-input" type="url" onchange="onPubGatewayChange()" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">STORAGE</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="pub-backend-line" style="font-size:0.78rem;color:var(--text);flex:1;"></span>
+        <button type="button" onclick="openStorageModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;font-size:0.74rem;padding:4px 9px;">⚙ Change</button>
+      </div>
     </div>
 
     <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="pub-cost-line" style="color:var(--accent);">… checking gate</span></div>
@@ -928,6 +930,53 @@
     <div class="payment-btn-row">
       <button id="pub-upload-btn" onclick="confirmPublicUpload()" style="background:var(--accent);color:#0a0c0f;">⬆ Upload (public)</button>
       <button id="pub-cancel-btn" onclick="closePublicUploadModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- STORAGE BACKEND PICKER (v0.16.26 — ipfs-gate OR bring-your-own Pinata) -->
+<div id="storage-modal" style="display:none;position:fixed;inset:0;z-index:3200;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="border-color:var(--accent);max-width:470px;">
+    <h3 style="color:var(--accent);">🗄 Storage Backend</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Where your uploaded bytes get parked. Encryption + sharing are identical either way — only storage differs. Your Hive key stays your identity; a Pinata key is just a storage credential (never sent to this server).</p>
+
+    <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text);cursor:pointer;">
+        <input type="radio" name="storage-type" value="ipfs-gate" onchange="onStorageTypeChange()"/> ipfs-gate <span style="color:var(--muted);font-size:0.72rem;">(Hive payment per upload)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:0.82rem;color:var(--text);cursor:pointer;">
+        <input type="radio" name="storage-type" value="pinata" onchange="onStorageTypeChange()"/> Pinata — your own account <span style="color:var(--muted);font-size:0.72rem;">(free 1 GB tier+)</span>
+      </label>
+    </div>
+
+    <div id="storage-gate-cfg" style="margin-top:12px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">GATE URL</div>
+      <select id="storage-gate-select" onchange="onStorageGateSelect()" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;">
+        <option value="https://ipfs.completenoobs.com">ipfs.completenoobs.com (default)</option>
+        <option value="__custom__">Custom…</option>
+      </select>
+      <input id="storage-gate-custom" type="url" placeholder="https://your-ipfs-gate.example" style="display:none;margin-top:5px;width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+    </div>
+
+    <div id="storage-pinata-cfg" style="display:none;margin-top:12px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">PINATA JWT (scoped to <code>pinFileToIPFS</code>)</div>
+      <input id="storage-pinata-jwt" type="password" placeholder="eyJ… (paste your Pinata API key JWT)" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+      <label style="display:flex;align-items:flex-start;gap:6px;font-size:0.72rem;color:var(--subtext);margin-top:7px;cursor:pointer;line-height:1.4;">
+        <input type="checkbox" id="storage-pinata-remember" style="margin-top:2px;"/> <span>Remember on this device — stores the key in this browser. Uncheck to keep it for this session only (re-paste each login).</span>
+      </label>
+      <div style="font-size:0.68rem;color:var(--subtext);margin-top:9px;margin-bottom:5px;">GATEWAY (for share links)</div>
+      <input id="storage-pinata-gateway" type="url" placeholder="https://gateway.pinata.cloud" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;" autocomplete="off" spellcheck="false"/>
+      <div style="margin-top:9px;display:flex;gap:8px;align-items:center;">
+        <button type="button" onclick="validatePinataKey()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)!important;font-size:0.76rem;padding:5px 11px;">✓ Test key</button>
+        <span id="storage-pinata-status" style="font-size:0.72rem;color:var(--muted);"></span>
+      </div>
+      <p style="font-size:0.68rem;color:var(--muted);line-height:1.5;margin-top:9px;">A <code>pinFileToIPFS</code>-only key can only burn pin quota if leaked — it can't read, delete, or touch billing, and you can revoke it in Pinata anytime. You pay Pinata directly; no Hive fee, no v4call fee. <em>(Encrypted-at-rest storage of this key is a planned future option.)</em></p>
+    </div>
+
+    <div class="payment-note" id="storage-note" style="min-height:18px;"></div>
+    <div class="payment-btn-row">
+      <button onclick="saveStorageBackend()" style="background:var(--accent);color:#0a0c0f;">Save</button>
+      <button onclick="closeStorageModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
     </div>
   </div>
 </div>
@@ -4057,6 +4106,198 @@ function getRememberedGateway() {
 function rememberGateway(url) {
   try { localStorage.setItem('v4call:ipfs-gate', url); } catch (_) {}
 }
+
+// ──────────────────────────────────────────────────────────────
+// Storage backend selection (v0.16.26 — Pinata bring-your-own adapter)
+// ──────────────────────────────────────────────────────────────
+// A "storage backend" does two jobs: PIN (store) + GATEWAY (fetch). Encryption
+// is client-side BEFORE upload, so every backend is a dumb byte-store and they
+// swap freely. Identity is ALWAYS Hive (envelope still signed with the posting
+// key); Pinata is only a storage credential, never a v4call login, and is NEVER
+// sent to this server. Two backend types share one upload step:
+//   ipfs-gate → reserve→sign-proof→pay→upload (Hive payment), the original flow
+//   pinata    → a single POST pinFileToIPFS with the user's own Bearer JWT
+// Browser-direct Pinata pinning CORS verified open 2026-06-05.
+//
+// JWT storage (user choice — v4call has NO at-rest key encryption today;
+// unlockEncryption keeps the posting key in memory only, so there's nothing to
+// reuse): "Remember on this device" persists the JWT to localStorage in
+// PLAINTEXT (a pinFileToIPFS-only key is scoped + revocable → small blast
+// radius); unchecked keeps it in session memory only (re-paste each login).
+// TODO(pinata): encrypted-at-rest JWT behind a session passphrase — deferred.
+let pinataSessionJwt = ''; // session-only JWT when "Remember" is off
+
+function getStorageBackend() {
+  try {
+    const raw = localStorage.getItem('v4call:storage');
+    if (raw) {
+      const o = JSON.parse(raw);
+      if (o && o.type === 'pinata') {
+        return {
+          type: 'pinata',
+          // persisted plaintext jwt only if the user opted to remember; else
+          // the in-memory session jwt (empty after a reload → must re-paste)
+          jwt: o.remember ? (o.jwt || '') : pinataSessionJwt,
+          gateway: o.gateway || 'https://gateway.pinata.cloud',
+          remember: !!o.remember
+        };
+      }
+    }
+  } catch (_) {}
+  return { type: 'ipfs-gate', url: getRememberedGateway() };
+}
+
+function setStorageBackend(cfg) {
+  try {
+    if (cfg.type === 'pinata') {
+      pinataSessionJwt = cfg.jwt || '';
+      const toStore = {
+        type: 'pinata',
+        gateway: cfg.gateway || 'https://gateway.pinata.cloud',
+        remember: !!cfg.remember
+      };
+      if (cfg.remember) toStore.jwt = cfg.jwt || ''; // plaintext, by user choice
+      localStorage.setItem('v4call:storage', JSON.stringify(toStore));
+    } else {
+      localStorage.setItem('v4call:storage', JSON.stringify({ type: 'ipfs-gate' }));
+      if (cfg.url) rememberGateway(cfg.url);
+    }
+  } catch (_) {}
+}
+
+// Pin bytes to the user's own Pinata account. Works for both encrypted
+// ciphertext and plaintext public uploads (caller passes the right bytes/mime).
+// Returns { cid, gateway_url }. Browser-direct — no server proxy.
+async function pinataPin({ bytes, jwt, filename, mime, gatewayBase }) {
+  const form = new FormData();
+  form.append('file', new Blob([bytes], { type: mime || 'application/octet-stream' }), filename || 'v4call.bin');
+  // Pinata stores this name in ITS dashboard only; for encrypted blobs we pass a
+  // neutral name (the bytes are ciphertext anyway → no plaintext leak).
+  form.append('pinataMetadata', JSON.stringify({ name: filename || 'v4call-upload' }));
+  let res;
+  try {
+    res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + jwt },
+      body: form
+    });
+  } catch (e) {
+    throw new Error(`Pinata upload failed (${e.message}) — check your network or JWT.`);
+  }
+  if (!res.ok) {
+    const t = await res.text().catch(() => '');
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Pinata rejected the key (HTTP ' + res.status + ') — re-check the JWT and that it has pinFileToIPFS enabled.');
+    }
+    throw new Error(`Pinata upload failed: HTTP ${res.status} ${String(t).slice(0, 140)}`);
+  }
+  const j = await res.json();
+  const cid = j.IpfsHash;
+  if (!cid) throw new Error('Pinata returned no IpfsHash (unexpected response).');
+  const base = (gatewayBase || 'https://gateway.pinata.cloud').replace(/\/+$/, '');
+  return { cid, gateway_url: `${base}/ipfs/${cid}` };
+}
+
+// Validate a pasted JWT by attempting a tiny real pin. We DON'T use Pinata's
+// testAuthentication endpoint because a pinFileToIPFS-only scoped key may not be
+// permitted to call it — a few-byte pin proves the exact permission we need.
+async function pinataValidate(jwt, gatewayBase) {
+  const { cid } = await pinataPin({
+    bytes: new Uint8Array([0x76, 0x34, 0x63, 0x61, 0x6c, 0x6c]), // "v4call"
+    jwt, filename: 'v4call-keycheck.bin', mime: 'application/octet-stream', gatewayBase
+  });
+  return cid;
+}
+
+// ── Storage backend picker modal + per-upload-modal backend lines ──
+function describeBackend(b) {
+  if (b.type === 'pinata') return b.jwt ? '📌 Pinata (your account)' : '📌 Pinata — ⚠ no key set';
+  return '🌐 ipfs-gate · ' + String(b.url || '').replace(/^https?:\/\//, '');
+}
+function renderBackendLines() {
+  const b = getStorageBackend();
+  const desc = describeBackend(b);
+  const a = document.getElementById('att-backend-line'); if (a) a.textContent = desc;
+  const p = document.getElementById('pub-backend-line'); if (p) p.textContent = desc;
+  const ac = document.getElementById('att-cost-line');
+  const pc = document.getElementById('pub-cost-line');
+  if (b.type === 'pinata') {
+    const t = b.jwt ? 'You pay Pinata directly — no Hive or v4call fee' : '⚠ Set your Pinata key (⚙ Change) before uploading';
+    if (ac) ac.textContent = t;
+    if (pc) pc.textContent = t;
+  } else {
+    const attOpen = document.getElementById('attachment-modal')?.style.display !== 'none';
+    const pubOpen = document.getElementById('public-upload-modal')?.style.display !== 'none';
+    if (ac && attOpen) refreshAttachCostLine(b.url, 'att-cost-line');
+    if (pc && pubOpen) refreshAttachCostLine(b.url, 'pub-cost-line');
+  }
+}
+function openStorageModal() {
+  const b = getStorageBackend();
+  const radio = document.querySelector(`input[name=storage-type][value="${b.type}"]`);
+  if (radio) radio.checked = true;
+  const gateUrl = b.type === 'ipfs-gate' ? b.url : getRememberedGateway();
+  const sel = document.getElementById('storage-gate-select');
+  const opts = Array.from(sel.options).map(o => o.value);
+  if (opts.includes(gateUrl)) {
+    sel.value = gateUrl;
+    document.getElementById('storage-gate-custom').style.display = 'none';
+  } else {
+    sel.value = '__custom__';
+    const c = document.getElementById('storage-gate-custom');
+    c.value = gateUrl; c.style.display = 'block';
+  }
+  document.getElementById('storage-pinata-jwt').value = b.type === 'pinata' ? (b.jwt || '') : '';
+  document.getElementById('storage-pinata-remember').checked = b.type === 'pinata' ? !!b.remember : false;
+  document.getElementById('storage-pinata-gateway').value = b.type === 'pinata' ? (b.gateway || 'https://gateway.pinata.cloud') : 'https://gateway.pinata.cloud';
+  document.getElementById('storage-pinata-status').textContent = '';
+  const note = document.getElementById('storage-note'); note.textContent = '';
+  onStorageTypeChange();
+  document.getElementById('storage-modal').style.display = 'flex';
+}
+function closeStorageModal() { document.getElementById('storage-modal').style.display = 'none'; }
+function onStorageTypeChange() {
+  const type = document.querySelector('input[name=storage-type]:checked')?.value || 'ipfs-gate';
+  document.getElementById('storage-gate-cfg').style.display   = type === 'ipfs-gate' ? 'block' : 'none';
+  document.getElementById('storage-pinata-cfg').style.display = type === 'pinata'    ? 'block' : 'none';
+}
+function onStorageGateSelect() {
+  const v = document.getElementById('storage-gate-select').value;
+  document.getElementById('storage-gate-custom').style.display = (v === '__custom__') ? 'block' : 'none';
+}
+async function validatePinataKey() {
+  const jwt = document.getElementById('storage-pinata-jwt').value.trim();
+  const s = document.getElementById('storage-pinata-status');
+  if (!jwt) { s.textContent = 'Paste a JWT first.'; s.style.color = 'var(--danger)'; return; }
+  s.textContent = 'Testing…'; s.style.color = 'var(--muted)';
+  try {
+    const gw = document.getElementById('storage-pinata-gateway').value.trim().replace(/\/+$/, '') || 'https://gateway.pinata.cloud';
+    const cid = await pinataValidate(jwt, gw);
+    s.textContent = `✓ Connected — test pin ${cid.slice(0, 12)}…`; s.style.color = 'var(--green)';
+  } catch (e) {
+    s.textContent = '✗ ' + e.message; s.style.color = 'var(--danger)';
+  }
+}
+function saveStorageBackend() {
+  const note = document.getElementById('storage-note');
+  const type = document.querySelector('input[name=storage-type]:checked')?.value || 'ipfs-gate';
+  if (type === 'pinata') {
+    const jwt = document.getElementById('storage-pinata-jwt').value.trim();
+    if (!jwt) { note.textContent = '⚠ Paste your Pinata JWT first.'; note.style.color = 'var(--danger)'; return; }
+    const remember = document.getElementById('storage-pinata-remember').checked;
+    const gateway = (document.getElementById('storage-pinata-gateway').value.trim().replace(/\/+$/, '')) || 'https://gateway.pinata.cloud';
+    setStorageBackend({ type: 'pinata', jwt, gateway, remember });
+  } else {
+    const sel = document.getElementById('storage-gate-select').value;
+    const url = (sel === '__custom__')
+      ? document.getElementById('storage-gate-custom').value.trim().replace(/\/+$/, '')
+      : sel;
+    if (!/^https?:\/\//.test(url)) { note.textContent = '⚠ Gate URL must start with https://'; note.style.color = 'var(--danger)'; return; }
+    setStorageBackend({ type: 'ipfs-gate', url });
+  }
+  closeStorageModal();
+  renderBackendLines();
+}
 async function refreshAttachCostLine(gatewayUrl, lineId) {
   const line = document.getElementById(lineId || 'att-cost-line');
   line.textContent = '… checking gate';
@@ -4350,29 +4591,23 @@ function setPubStatus(text, isErr) {
 }
 function openPublicUploadModal() {
   if (!myUsername) { alert('Log in first.'); return; }
-  const gw = getRememberedGateway();
-  document.getElementById('pub-gateway-input').value = gw;
   document.getElementById('pub-file-input').value = '';
   document.getElementById('pub-file-meta').textContent = '';
   const r = document.getElementById('pub-result'); r.style.display = 'none'; r.innerHTML = '';
   document.getElementById('pub-upload-btn').disabled = false;
   setPubStatus('Ready.');
   document.getElementById('public-upload-modal').style.display = 'flex';
-  refreshAttachCostLine(gw, 'pub-cost-line');
+  renderBackendLines();
 }
 function closePublicUploadModal() {
   document.getElementById('public-upload-modal').style.display = 'none';
-}
-function onPubGatewayChange() {
-  const gw = (document.getElementById('pub-gateway-input').value || '').trim().replace(/\/+$/, '');
-  if (/^https?:\/\//.test(gw)) { rememberGateway(gw); refreshAttachCostLine(gw, 'pub-cost-line'); }
 }
 function onPubFilePick() {
   const f = (document.getElementById('pub-file-input').files || [])[0];
   const meta = document.getElementById('pub-file-meta');
   if (!f) { meta.textContent = ''; return; }
   const mime = detectFileMime(f) || 'application/octet-stream';
-  const warn = f.size > attachMaxBytes ? ` ⚠ over gate cap (${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB)` : '';
+  const warn = (getStorageBackend().type === 'ipfs-gate' && f.size > attachMaxBytes) ? ` ⚠ over gate cap (${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB)` : '';
   meta.textContent = `${f.name} · ${bytesToHuman(f.size)} · ${mime}${warn}`;
 }
 function showPubResult(url) {
@@ -4396,14 +4631,15 @@ function showPubResult(url) {
 async function confirmPublicUpload() {
   const file = (document.getElementById('pub-file-input').files || [])[0];
   if (!file) { setPubStatus('Pick a file first.', true); return; }
-  const gw = (document.getElementById('pub-gateway-input').value || '').trim().replace(/\/+$/, '');
-  if (!/^https?:\/\//.test(gw)) { setPubStatus('Enter a valid gateway URL (https://…).', true); return; }
-  if (file.size > attachMaxBytes) { setPubStatus(`File too big — gate cap is ${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB.`, true); return; }
-  rememberGateway(gw);
+  const backend = getStorageBackend();
+  if (backend.type === 'pinata' && !backend.jwt) { setPubStatus('No Pinata key set — click ⚙ Change to add it.', true); return; }
+  if (backend.type === 'ipfs-gate' && !/^https?:\/\//.test(backend.url || '')) { setPubStatus('Enter a valid gateway URL (⚙ Change).', true); return; }
+  // The gate cap only applies to ipfs-gate; Pinata's limit is the user's plan.
+  if (backend.type === 'ipfs-gate' && file.size > attachMaxBytes) { setPubStatus(`File too big — gate cap is ${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB.`, true); return; }
   const btn = document.getElementById('pub-upload-btn');
   btn.disabled = true;
   try {
-    const res = await uploadPublicFile(file, gw);
+    const res = await uploadPublicFile(file, backend.type === 'ipfs-gate' ? backend.url : '');
     // Record the filename on our home server so the Uploads tab can label it
     // (the gate stores mime but not filename). Public uploads aren't tied to a
     // room, so this is correctly home-server-local — no federation locality gap.
@@ -4424,6 +4660,16 @@ async function uploadPublicFile(file, gatewayUrl) {
   const mime = detectFileMime(file) || 'application/octet-stream';
   const kind = mimeToKind(mime);
   const sha  = await sha256HexBytes(buf);
+
+  // Pinata path: a single pin to the user's own account, no Hive payment, real
+  // filename + mime preserved (Pinata serves Content-Type from the blob).
+  const backend = getStorageBackend();
+  if (backend.type === 'pinata') {
+    if (!backend.jwt) throw new Error('No Pinata key set — open ⚙ Change and paste your JWT.');
+    setPubStatus('Pinning to your Pinata account…');
+    const pinned = await pinataPin({ bytes: buf, jwt: backend.jwt, filename: file.name, mime, gatewayBase: backend.gateway });
+    return { cid: pinned.cid, url: pinned.gateway_url, mime };
+  }
 
   setPubStatus('Reserving quota…');
   const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
@@ -4487,24 +4733,11 @@ function openAttachModal() {
   document.getElementById('att-dm-rate-line').style.display = 'none';
   document.getElementById('att-file-input').value = '';
   document.getElementById('att-file-meta').textContent = '';
-  const sel = document.getElementById('att-gateway-select');
-  // Preserve remembered choice across modal opens. If the remembered URL isn't
-  // one of the preset options, switch to Custom mode and seed the custom input.
-  const opts = Array.from(sel.options).map(o => o.value);
-  if (opts.includes(remembered)) {
-    sel.value = remembered;
-    document.getElementById('att-gateway-custom').style.display = 'none';
-  } else {
-    sel.value = '__custom__';
-    const custom = document.getElementById('att-gateway-custom');
-    custom.value = remembered;
-    custom.style.display = 'block';
-  }
   document.getElementById('att-status-note').textContent = 'Ready.';
   document.getElementById('att-upload-btn').disabled = false;
   populateAttachRecipients();
   document.getElementById('attachment-modal').style.display = 'flex';
-  refreshAttachCostLine(remembered);
+  renderBackendLines();
 }
 function closeAttachModal() {
   document.getElementById('attachment-modal').style.display = 'none';
@@ -4542,22 +4775,11 @@ function openDmAttachModal() {
 
   document.getElementById('att-file-input').value = '';
   document.getElementById('att-file-meta').textContent = '';
-  const sel = document.getElementById('att-gateway-select');
-  const opts = Array.from(sel.options).map(o => o.value);
-  if (opts.includes(remembered)) {
-    sel.value = remembered;
-    document.getElementById('att-gateway-custom').style.display = 'none';
-  } else {
-    sel.value = '__custom__';
-    const custom = document.getElementById('att-gateway-custom');
-    custom.value = remembered;
-    custom.style.display = 'block';
-  }
   document.getElementById('att-status-note').textContent = 'Ready.';
   document.getElementById('att-upload-btn').disabled = false;
   populateAttachRecipients();
   document.getElementById('attachment-modal').style.display = 'flex';
-  refreshAttachCostLine(remembered);
+  renderBackendLines();
 }
 function populateAttachRecipients() {
   const c = document.getElementById('att-recipients');
@@ -4626,7 +4848,7 @@ document.addEventListener('change', (e) => {
       meta.style.color = 'var(--danger)';
       return;
     }
-    if (f.size > attachMaxBytes) {
+    if (getStorageBackend().type === 'ipfs-gate' && f.size > attachMaxBytes) {
       const capMb = (attachMaxBytes / 1024 / 1024).toFixed(0);
       meta.textContent = `⚠ ${(f.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap (${capMb} MB).`;
       meta.style.color = 'var(--danger)';
@@ -4634,27 +4856,6 @@ document.addEventListener('change', (e) => {
     }
     meta.textContent = `${f.name} — ${(f.size / 1024).toFixed(1)} KB`; meta.style.color = 'var(--subtext)';
     if (attachState) attachState.file = f;
-  }
-  if (e.target?.id === 'att-gateway-select') {
-    const v = e.target.value;
-    const custom = document.getElementById('att-gateway-custom');
-    if (v === '__custom__') {
-      custom.style.display = 'block';
-      custom.focus();
-    } else {
-      custom.style.display = 'none';
-      if (attachState) attachState.gatewayUrl = v;
-      rememberGateway(v);
-      refreshAttachCostLine(v);
-    }
-  }
-  if (e.target?.id === 'att-gateway-custom') {
-    const v = e.target.value.trim().replace(/\/+$/, '');
-    if (attachState) attachState.gatewayUrl = v;
-    if (/^https?:\/\/.+/.test(v)) {
-      rememberGateway(v);
-      refreshAttachCostLine(v);
-    }
   }
 });
 function setAttachStatus(text, isError) {
@@ -4667,18 +4868,18 @@ async function confirmSendAttachment() {
   const file = attachState.file || document.getElementById('att-file-input').files?.[0];
   if (!file) { setAttachStatus('⚠ Pick a file first.', true); return; }
   if (!isMimeAllowed(detectFileMime(file))) { setAttachStatus(`⚠ ${detectFileMime(file) || 'unknown type'} not accepted. v0.2 supports: ${ATTACH_ALLOWED_MIMES.join(', ')}.`, true); return; }
-  if (file.size > attachMaxBytes) {
+  const backend = getStorageBackend();
+  // The gate cap only applies to ipfs-gate; Pinata's limit is the user's plan.
+  if (backend.type === 'ipfs-gate' && file.size > attachMaxBytes) {
     const capMb = (attachMaxBytes / 1024 / 1024).toFixed(0);
     setAttachStatus(`⚠ ${(file.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap (${capMb} MB).`, true);
     return;
   }
+  if (backend.type === 'pinata' && !backend.jwt) { setAttachStatus('⚠ No Pinata key set — click ⚙ Change to add it.', true); return; }
+  if (backend.type === 'ipfs-gate' && !/^https?:\/\//.test(backend.url || '')) { setAttachStatus('⚠ Gateway URL invalid — set it in ⚙ Change.', true); return; }
   attachState.file = file;
-  const selSel = document.getElementById('att-gateway-select').value;
-  const gwRaw = (selSel === '__custom__')
-    ? document.getElementById('att-gateway-custom').value.trim().replace(/\/+$/, '')
-    : selSel;
-  if (!/^https?:\/\//.test(gwRaw)) { setAttachStatus('⚠ Gateway URL must start with https://', true); return; }
-  attachState.gatewayUrl = gwRaw;
+  const gwUrl = backend.type === 'ipfs-gate' ? backend.url : '';
+  attachState.gatewayUrl = gwUrl;
   const recipients = Array.from(document.querySelectorAll('#att-recipients input[type=checkbox]'))
     .filter(cb => cb.checked).map(cb => cb.dataset.user);
   document.getElementById('att-upload-btn').disabled = true;
@@ -4690,7 +4891,7 @@ async function confirmSendAttachment() {
       currency: attachState.dmCurrency || 'HBD',
       escrow:   attachState.dmEscrow
     } : null;
-    await sendAttachment({ file, gatewayUrl: gwRaw, recipientUsernames: recipients, mode, dmContext });
+    await sendAttachment({ file, gatewayUrl: gwUrl, recipientUsernames: recipients, mode, dmContext });
     setAttachStatus('✓ Sent.', false);
     setTimeout(closeAttachModal, 700);
   } catch (e) {
@@ -4754,72 +4955,87 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   const { blob, rawKey, plaintextSize } = await buildInnerBlob({ file, sender: myUsername });
   const ciphertextSha256Hex = await sha256HexBytes(blob);
 
-  // 2) Reserve
-  setAttachStatus('Reserving quota…');
-  const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length })
-  });
-  if (!reserveRes.ok) {
-    const j = await reserveRes.json().catch(() => ({}));
-    throw new Error(`reserve failed: ${j.message || reserveRes.status}`);
-  }
-  const reserve = await reserveRes.json();
-  const reservationId = reserve.reservation_id;
-  const escrowAccount = reserve.payment.escrow_account;
-  const memo = reserve.payment.memo;
-  const payAmount = reserve.payment.amount;
-  // v0.16.18 — read the gate's announced currency. Fallback to CNOOBS for
-  // backwards compat with v0.1.2 gates that didn't include `currency` in the
-  // reserve response. v0.1.3+ always returns it.
-  const payCurrency = (reserve.payment.currency || 'CNOOBS').toUpperCase();
+  // 2–6) Pin the ciphertext to the selected storage backend → { cid, gateway_url }.
+  //   pinata    → one POST pinFileToIPFS to the user's own account (no Hive fee)
+  //   ipfs-gate → reserve→sign-proof→pay→settle→upload (the original flow)
+  // The wrap/sign/emit/render half below is identical for both.
+  const backend = getStorageBackend();
+  let cid, expires_at, gateway_url;
+  if (backend.type === 'pinata') {
+    if (!backend.jwt) throw new Error('No Pinata key set — open ⚙ Change and paste your JWT.');
+    setAttachStatus('Pinning to your Pinata account…');
+    const pinned = await pinataPin({ bytes: blob, jwt: backend.jwt, filename: 'ciphertext.bin', mime: 'application/octet-stream', gatewayBase: backend.gateway });
+    cid = pinned.cid;
+    gateway_url = pinned.gateway_url;
+    expires_at = null; // Pinata pins per the user's plan; no gate TTL countdown
+  } else {
+    // 2) Reserve
+    setAttachStatus('Reserving quota…');
+    const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length })
+    });
+    if (!reserveRes.ok) {
+      const j = await reserveRes.json().catch(() => ({}));
+      throw new Error(`reserve failed: ${j.message || reserveRes.status}`);
+    }
+    const reserve = await reserveRes.json();
+    const reservationId = reserve.reservation_id;
+    const escrowAccount = reserve.payment.escrow_account;
+    const memo = reserve.payment.memo;
+    const payAmount = reserve.payment.amount;
+    // v0.16.18 — read the gate's announced currency. Fallback to CNOOBS for
+    // backwards compat with v0.1.2 gates that didn't include `currency` in the
+    // reserve response. v0.1.3+ always returns it.
+    const payCurrency = (reserve.payment.currency || 'CNOOBS').toUpperCase();
 
-  // 3) Sign upload proof
-  setAttachStatus('Signing upload proof (Keychain)…');
-  const proofMsg = buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader: myUsername });
-  const uploadProofSig = await signRaw(proofMsg);
-  if (!uploadProofSig) throw new Error('upload proof signature cancelled');
+    // 3) Sign upload proof
+    setAttachStatus('Signing upload proof (Keychain)…');
+    const proofMsg = buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader: myUsername });
+    const uploadProofSig = await signRaw(proofMsg);
+    if (!uploadProofSig) throw new Error('upload proof signature cancelled');
 
-  // 4) Pay
-  setAttachStatus(`Paying ${payAmount} ${payCurrency} (Keychain)…`);
-  const txId = await keychainTransferGateToken({ to: escrowAccount, amount: payAmount, memo, symbol: payCurrency });
-  if (!txId) throw new Error('payment cancelled or failed');
+    // 4) Pay
+    setAttachStatus(`Paying ${payAmount} ${payCurrency} (Keychain)…`);
+    const txId = await keychainTransferGateToken({ to: escrowAccount, amount: payAmount, memo, symbol: payCurrency });
+    if (!txId) throw new Error('payment cancelled or failed');
 
-  // 5) Brief settle delay so the tx is indexed before /upload checks
-  setAttachStatus('Waiting for tx to index (3s)…');
-  await new Promise(r => setTimeout(r, 3000));
+    // 5) Brief settle delay so the tx is indexed before /upload checks
+    setAttachStatus('Waiting for tx to index (3s)…');
+    await new Promise(r => setTimeout(r, 3000));
 
-  // 6) Upload. v0.16.16 — if the fetch itself throws (network drop after the
-  // CNOOBS transfer already broadcast), the payment is in escrow with no pin
-  // attached. Surface this explicitly so the user knows their funds went out
-  // and can ask the operator for a manual refund via /admin/orphan-payments.
-  setAttachStatus('Uploading ciphertext…');
-  const form = new FormData();
-  form.append('reservation_id', reservationId);
-  form.append('tx_id', txId);
-  form.append('uploader_pubkey', myPubKey);
-  form.append('upload_proof_sig', uploadProofSig);
-  form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
-  let upRes;
-  try {
-    upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
-  } catch (e) {
-    throw new Error(`upload failed (${e.message}) — your ${payAmount} ${payCurrency} payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments for a manual refund.`);
-  }
-  if (!upRes.ok) {
-    const j = await upRes.json().catch(() => ({}));
-    throw new Error(`upload failed: ${j.message || upRes.status} — payment tx ${txId} may need operator review (orphan-payments).`);
-  }
-  const upJson = await upRes.json();
-  const cid = upJson.cid;
-  const expires_at = upJson.expires_at;
-  // Safety net: if the gate was misconfigured (PUBLIC_GATEWAY_BASE unset → falls
-  // back to https://ipfs.localhost), substitute the URL the user actually uploaded
-  // to. End-users in the room can still fetch via the same gate they paid.
-  let gateway_url = upJson.gateway_url || '';
-  if (!gateway_url || /\/\/ipfs\.localhost(\/|$|:)/i.test(gateway_url) || /\/\/localhost(\/|$|:)/i.test(gateway_url)) {
-    gateway_url = `${gatewayUrl}/ipfs/${cid}`;
+    // 6) Upload. v0.16.16 — if the fetch itself throws (network drop after the
+    // CNOOBS transfer already broadcast), the payment is in escrow with no pin
+    // attached. Surface this explicitly so the user knows their funds went out
+    // and can ask the operator for a manual refund via /admin/orphan-payments.
+    setAttachStatus('Uploading ciphertext…');
+    const form = new FormData();
+    form.append('reservation_id', reservationId);
+    form.append('tx_id', txId);
+    form.append('uploader_pubkey', myPubKey);
+    form.append('upload_proof_sig', uploadProofSig);
+    form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
+    let upRes;
+    try {
+      upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+    } catch (e) {
+      throw new Error(`upload failed (${e.message}) — your ${payAmount} ${payCurrency} payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments for a manual refund.`);
+    }
+    if (!upRes.ok) {
+      const j = await upRes.json().catch(() => ({}));
+      throw new Error(`upload failed: ${j.message || upRes.status} — payment tx ${txId} may need operator review (orphan-payments).`);
+    }
+    const upJson = await upRes.json();
+    cid = upJson.cid;
+    expires_at = upJson.expires_at;
+    // Safety net: if the gate was misconfigured (PUBLIC_GATEWAY_BASE unset → falls
+    // back to https://ipfs.localhost), substitute the URL the user actually uploaded
+    // to. End-users in the room can still fetch via the same gate they paid.
+    gateway_url = upJson.gateway_url || '';
+    if (!gateway_url || /\/\/ipfs\.localhost(\/|$|:)/i.test(gateway_url) || /\/\/localhost(\/|$|:)/i.test(gateway_url)) {
+      gateway_url = `${gatewayUrl}/ipfs/${cid}`;
+    }
   }
 
   // 7) Per-recipient key wrapping (always include self so sender can re-read).
