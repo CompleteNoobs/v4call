@@ -4,6 +4,11 @@ Running notes captured while building/iterating `public/user-announce.html`
 (the one modular Hive post — title `user-announce` — replacing per-app announce posts).
 
 ## 0. Positional rate priority — server resolver must read DOCUMENT ORDER (NEW 2026-06-05)
+**Status:** editor handoff prompt issued 2026-06-06 (drag-to-reorder UI + emit order + "who pays what"
+preview, tokens-as-one-contiguous-group, BLOCKED pinned top / default pinned bottom). **Server resolver
+document-order change is still PENDING** — `getRatesForCaller` + `computePaymentOptions` currently still
+resolve tokens-then-lists (fixed category order). Do the server side once the editor lands so the two agree.
+
 The rates editor now lets the user **drag to reorder** rate rules; **priority is purely
 positional** — the order blocks appear inside `[V4CALL-RATES-V2]` IS the evaluation order.
 No new field/tag. Editor emits: `[BLOCKED]` first → middle units in the user's chosen order
@@ -28,22 +33,23 @@ provider's docs. The service-section info box says so explicitly.
   federation hello) and/or let user-announce auto-fill the escrow field by fetching the chosen
   server's verify file. Until then the field is manual.
 
-## 2. Rate-field semantics changed — v4call server parser must follow (NOT done)
+## 2. Rate-field semantics changed — v4call server parser follows (DONE 2026-06-05, v0.16.27)
 The rates section now emits, per window/token/list:
 - `INVITE:`  → "Invite fee"  (cost to invite/offer you into a room — unchanged prefix; server already reads it)
-- `OFFER:`   → "Offer fee"   (**new** prefix — server does NOT parse it yet)
+- `OFFER:`   → "Offer fee"   (**new** prefix — server now **parses & captures** it into `r.offer`, read-only)
 - `DM:`      → "DM fee"      (**new** prefix; replaces the old `TEXT:` per-DM fee)
 - `TEXT-SESSION:` — **removed** entirely (the "/hr text session" concept is dropped)
 - `PLATFORM-FEE:` — **removed** from the post (server falls back to its `DEFAULT_PLATFORM_FEE`)
 
-**Consequence:** the current `server.js` `parseRateBlock` reads `TEXT:` (→ `r.text`, the paid-DM
-rate) and `TEXT-SESSION:`. A `user-announce` post made with the new labels will NOT have its DM
-fee enforced until the server learns `DM:` (and optionally `OFFER:`). This is deferred consumer
-wiring — same bucket as parsing the other new blocks. When wiring:
-- map `DM:` → `r.text` (the existing paid-DM machinery) OR introduce `r.dm` and migrate.
-- decide what `OFFER:` means server-side (likely the v0.17 paid-expert-invite floor) — see
+**Status — server-side landed (v0.16.27):**
+- `parseRateBlock` now reads `DM:` → `r.text` (the existing paid-DM machinery), with `TEXT:` kept as a
+  backward-compat alias (DM wins if both present); `TEXT-SESSION:` still parsed for legacy posts.
+- `OFFER:` is **parsed into `r.offer` (read-only)** — captured so user-announce posts round-trip, but
+  **nothing consumes it yet**. The v0.17 paid-expert-invite flow is the intended consumer — see
   `project_v017_paid_invite_inviter_holds_funds`.
-- keep reading old `TEXT:`/`TEXT-SESSION:` from legacy `v4call-rates` posts for back-compat.
+- **`fetchRates` now reads ONLY the `user-announce` post** — the old `v4call-rates` title match AND the
+  fixed-permlink fallback were removed. Tradeoff: a user with only a legacy `v4call-rates` post (no
+  user-announce yet) resolves to **no rates = free-for-all** until they post via `user-announce.html`.
 
 ## 3. New blocks not yet parsed by any consumer (deferred, by design)
 `[OFFER removed]`, `[DOMAINS-V1]` (with `[DLIST:name]` → `DOMAINS:csv`), `[NOSTR-V1]`,
