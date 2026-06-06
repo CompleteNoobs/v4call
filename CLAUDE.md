@@ -34,8 +34,12 @@ The version split is intentional: the application keeps evolving (UI/UX/features
 server.js                              — All backend logic: socket handlers, rate parsing, payment
                                          verification, escrow disbursement, chat storage, room
                                          management, federation transport + verification + discovery
-public/index.html                      — Entire main frontend: login, lobby, rooms, calls, DMs,
-                                         payment modals, mobile bottom-tab nav
+public/app.html                        — ⭐ ACTIVE main frontend (as of 2026-06-06). All new feature
+                                         work targets this file. Entire frontend: login, lobby, rooms,
+                                         calls, DMs, payment modals, uploads tab, mobile bottom-tab nav.
+public/index.html                      — ⚠️ LEGACY frontend — NO LONGER the active file. Kept for
+                                         reference/fallback only. Do NOT add new features here; edit
+                                         public/app.html instead.
 public/rate-editor.html                — Rate post builder (generates V1/V2 rates posts for Hive)
 public/server-sign.html                — Generates the signed v4call-server.json domain-proof file.
                                          Operator runs this once per config change.
@@ -69,7 +73,9 @@ WalkThrough.wiki                       — Operator deploy guide (also lives at
 FEDERATION-BUILD-SPEC.md               — Federation protocol spec, completed milestones, next steps
 ```
 
-**Do not split index.html into separate files.** The entire main frontend lives in one file. This is intentional. The four operator-tool pages (rate-editor, server-sign, server-announce, admin-peers) are deliberately separate — they're standalone tools used outside normal user sessions.
+**⭐ The active main frontend is `public/app.html` (since 2026-06-06), NOT `public/index.html`.** All new feature work goes in `app.html`. `index.html` is kept as a legacy/reference copy only — do not add features there. Whenever older docs/notes/version-history below say "index.html" for client work, read it as "app.html" going forward.
+
+**Do not split app.html into separate files.** The entire main frontend lives in one file. This is intentional. The four operator-tool pages (rate-editor, server-sign, server-announce, admin-peers) are deliberately separate — they're standalone tools used outside normal user sessions.
 
 ## Architecture
 

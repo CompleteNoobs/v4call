@@ -204,6 +204,22 @@
     .upl-publink{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;color:var(--accent);word-break:break-all;flex:1;min-width:140px;}
     .upl-confirm{font-family:'IBM Plex Mono',monospace;font-size:0.64rem;color:var(--danger);display:flex;gap:6px;align-items:center;flex-wrap:wrap;}
     .uploads-empty,.uploads-status{padding:16px 12px;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--muted);text-align:center;line-height:1.6;}
+    /* Uploads sub-tabs: IPFS-Gate | Pinata (v0.16.28 — desktop only) */
+    .uploads-subtabs{display:flex;gap:6px;padding:8px 12px 0;flex-shrink:0;}
+    .uploads-subtab{flex:1;padding:6px 8px;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;color:var(--subtext);background:var(--bg);border:1px solid var(--border);border-radius:6px 6px 0 0;border-bottom:2px solid transparent;cursor:pointer;transition:color 0.2s,border-color 0.2s;}
+    .uploads-subtab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--surface);}
+    .uploads-sub{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+    /* Pinata management key form */
+    .pinata-keyform{padding:14px 12px;display:flex;flex-direction:column;gap:9px;overflow-y:auto;}
+    .pinata-keyform label{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);display:flex;flex-direction:column;gap:4px;}
+    .pinata-keyform input[type=password],.pinata-keyform input[type=url]{background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:7px;font-size:0.78rem;font-family:'IBM Plex Mono',monospace;outline:none;}
+    .pinata-keyform input:focus{border-color:var(--accent);}
+    .pinata-perm-note{background:rgba(245,166,35,0.07);border:1px solid rgba(245,166,35,0.2);border-radius:7px;padding:10px 12px;font-size:0.7rem;color:var(--subtext);line-height:1.6;}
+    .pinata-perm-note code{color:var(--accent);background:var(--bg);padding:1px 5px;border-radius:3px;font-size:0.7rem;}
+    .pinata-perm-note ul{margin:6px 0 0 0;padding-left:18px;}
+    .pinata-perm-note li{margin:2px 0;}
+    .pinata-keystate-ok{color:var(--green);}
+    .pinata-keystate-warn{color:var(--danger);}
     #lobby-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
     #lobby-messages::-webkit-scrollbar{width:3px;}
     #lobby-messages::-webkit-scrollbar-thumb{background:var(--border);}
@@ -861,15 +877,33 @@
       <div id="included-rooms-list"><div id="no-included-msg">No included rooms (allowlisted but empty).</div></div>
     </div>
     <div class="lobby-tab-content" id="tab-uploads">
-      <div class="uploads-header">
-        <span class="uploads-quota-mine" id="uploads-quota-mine">Your uploads: —</span>
-        <span class="uploads-quota-shared" id="uploads-quota-shared"></span>
-        <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
-          <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
-          <button class="uploads-refresh-btn" onclick="openPublicUploadModal()" title="Upload a plaintext file and get a shareable link — anyone can open it, no v4call needed">⬆ Public upload</button>
-        </div>
+      <div class="uploads-subtabs">
+        <button class="uploads-subtab active" data-sub="gate" onclick="switchUploadsSub('gate')">🌐 IPFS-Gate</button>
+        <button class="uploads-subtab" data-sub="pinata" onclick="switchUploadsSub('pinata')">📌 Pinata</button>
       </div>
-      <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
+      <div class="uploads-sub" id="uploads-sub-gate">
+        <div class="uploads-header">
+          <span class="uploads-quota-mine" id="uploads-quota-mine">Your uploads: —</span>
+          <span class="uploads-quota-shared" id="uploads-quota-shared"></span>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
+            <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
+            <button class="uploads-refresh-btn" onclick="openPublicUploadModal()" title="Upload a plaintext file and get a shareable link — anyone can open it, no v4call needed">⬆ Public upload</button>
+          </div>
+        </div>
+        <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
+      </div>
+      <div class="uploads-sub" id="uploads-sub-pinata" style="display:none;">
+        <div class="uploads-header">
+          <span class="uploads-quota-mine" id="pinata-quota">Pinata storage: —</span>
+          <span class="uploads-quota-shared" id="pinata-keystate"></span>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px;flex-wrap:wrap;">
+            <button class="uploads-refresh-btn" onclick="loadPinataList(true)">🔄 Refresh</button>
+            <button class="uploads-refresh-btn" onclick="openPinataUploadModal()" title="Upload a file to YOUR Pinata account — plaintext, or encrypted to a Hive key">⬆ Upload to Pinata</button>
+            <button class="uploads-refresh-btn" onclick="openPinataKeyModal()" title="Set the management API key (needs pinList / unpin / userPinnedDataTotal scopes)">🔑 Management key</button>
+          </div>
+        </div>
+        <div id="pinata-list"><div class="uploads-status">Set a management key, then this lists every pin in your Pinata account.</div></div>
+      </div>
     </div>
     </div><!-- /#lobby-middle-body -->
   </div>
@@ -1077,6 +1111,74 @@
     <div class="payment-btn-row">
       <button onclick="saveStorageBackend()" style="background:var(--accent);color:#0a0c0f;">Save</button>
       <button onclick="closeStorageModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PINATA MANAGEMENT KEY MODAL (v0.16.28 — needs broader scopes than the pin-only room key) -->
+<div id="pinata-key-modal" style="display:none;position:fixed;inset:0;z-index:3200;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="max-width:480px;">
+    <h3 style="margin:0 0 6px;">📌 Pinata management key</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">This is a <strong>separate, broader-scoped</strong> key from the pin-only key you paste to post files in a room. It can <strong>list, delete (unpin), and read storage usage</strong> — so it carries more risk if it leaks. It is stored only in this browser and is <strong>never sent to this server</strong>.</p>
+    <div class="pinata-perm-note">
+      In Pinata → <strong>API Keys → New Key</strong>, tick exactly these scopes (leave the rest off to keep the blast radius small):
+      <ul>
+        <li><code>pinFileToIPFS</code> — upload from this tab</li>
+        <li><code>pinList</code> — list your pins</li>
+        <li><code>unpin</code> — delete pins</li>
+        <li><code>userPinnedDataTotal</code> — show storage used</li>
+      </ul>
+    </div>
+    <div class="pinata-keyform" style="padding:12px 0 0;">
+      <label>Pinata API key JWT
+        <input id="pinata-mgmt-jwt" type="password" placeholder="eyJ… (paste the management key JWT)" autocomplete="off" spellcheck="false"/>
+      </label>
+      <label>Gateway base (for opening files)
+        <input id="pinata-mgmt-gateway" type="url" placeholder="https://gateway.pinata.cloud" autocomplete="off" spellcheck="false"/>
+      </label>
+      <label style="flex-direction:row;align-items:flex-start;gap:7px;">
+        <input type="checkbox" id="pinata-mgmt-remember" style="margin-top:2px;"/>
+        <span>Remember on this device — stores the key in this browser (plaintext). Uncheck to keep it for this session only (re-paste each login).</span>
+      </label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button type="button" onclick="testPinataMgmtKey()" style="background:var(--surface2);color:var(--text);border:1px solid var(--border)!important;font-size:0.76rem;padding:6px 12px;">✓ Test key</button>
+        <span id="pinata-mgmt-status" style="font-size:0.72rem;color:var(--muted);"></span>
+      </div>
+    </div>
+    <div class="payment-btn-row" style="margin-top:14px;">
+      <button onclick="savePinataMgmtKey()" style="background:var(--accent);color:#0a0c0f;border:none;">Save</button>
+      <button onclick="closePinataKeyModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- PINATA UPLOAD MODAL (v0.16.28 — plaintext OR encrypt to a Hive key) -->
+<div id="pinata-upload-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="max-width:480px;">
+    <h3 style="margin:0 0 6px;">⬆ Upload to your Pinata</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Pins to <strong>your own Pinata account</strong> — you pay Pinata directly, no Hive or v4call fee. Choose plaintext (shareable link) or encrypt to a Hive key (you also get a downloadable encrypted bundle for later use).</p>
+    <input id="pinata-up-file" type="file" onchange="onPinataFilePick()" style="width:100%;font-size:0.78rem;color:var(--text);margin:6px 0;"/>
+    <div id="pinata-up-meta" style="font-size:0.7rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;min-height:16px;"></div>
+    <div style="display:flex;flex-direction:column;gap:7px;margin:10px 0;font-size:0.78rem;color:var(--text);">
+      <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;">
+        <input type="radio" name="pinata-up-mode" value="plain" checked onchange="onPinataModeChange()" style="margin-top:2px;"/>
+        <span><strong>Unencrypted</strong> — plaintext, anyone with the link can open it.</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;">
+        <input type="radio" name="pinata-up-mode" value="self" onchange="onPinataModeChange()" style="margin-top:2px;"/>
+        <span><strong>Encrypt for myself</strong> — only you can decrypt (needs 🔑 unlock).</span>
+      </label>
+      <label style="display:flex;align-items:flex-start;gap:7px;cursor:pointer;">
+        <input type="radio" name="pinata-up-mode" value="user" onchange="onPinataModeChange()" style="margin-top:2px;"/>
+        <span><strong>Encrypt for a Hive user</strong> — wrapped to their posting key (you can also read it).</span>
+      </label>
+      <input id="pinata-up-user" type="text" placeholder="@username" autocomplete="off" spellcheck="false" disabled style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-size:0.78rem;font-family:'IBM Plex Mono',monospace;margin-left:24px;"/>
+    </div>
+    <div id="pinata-up-status" style="font-size:0.72rem;color:var(--muted);min-height:16px;"></div>
+    <div id="pinata-up-result" style="display:none;margin-top:8px;"></div>
+    <div class="payment-btn-row" style="margin-top:12px;">
+      <button id="pinata-up-btn" onclick="confirmPinataUpload()" style="background:var(--accent);color:#0a0c0f;border:none;">Upload</button>
+      <button onclick="closePinataUploadModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Close</button>
     </div>
   </div>
 </div>
@@ -1864,7 +1966,12 @@ function switchLobbyTab(tab) {
   const content = document.getElementById('tab-' + tab);
   if (content) content.classList.add('active');
   if (tab === 'dm') renderDmUserList();
-  if (tab === 'uploads') loadUploadsList();
+  if (tab === 'uploads') {
+    // Load whichever sub-tab is active so we don't trigger a gate-signature
+    // Keychain prompt when the user is sitting on the Pinata sub-tab.
+    const onPinata = document.getElementById('uploads-sub-pinata')?.style.display !== 'none';
+    if (onPinata) loadPinataList(); else loadUploadsList();
+  }
 }
 
 function renderDmUserList() {
@@ -4330,6 +4437,352 @@ async function pinataValidate(jwt, gatewayBase) {
     jwt, filename: 'v4call-keycheck.bin', mime: 'application/octet-stream', gatewayBase
   });
   return cid;
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Pinata management tab (v0.16.28) — list / unpin / storage-used / upload
+// ────────────────────────────────────────────────────────────────────
+// SEPARATE key from the pin-only room-posting key (v4call:storage). The room
+// flow only ever needs pinFileToIPFS; this tab needs the broader pinList /
+// unpin / userPinnedDataTotal scopes, which carry more risk, so they live
+// behind their own opt-in key. CORS for all three endpoints verified open
+// 2026-06-06 (reflects any origin). The JWT is NEVER sent to v4call's server.
+// "Remember" stores it in localStorage plaintext (user choice); else session-
+// memory only. Encrypted-at-rest = deferred TODO (no at-rest key vault yet).
+let pinataMgmtSessionJwt = '';
+function getPinataMgmtKey() {
+  try {
+    const raw = localStorage.getItem('v4call:pinata-mgmt');
+    if (raw) {
+      const o = JSON.parse(raw);
+      return {
+        jwt: o.remember ? (o.jwt || '') : pinataMgmtSessionJwt,
+        gateway: o.gateway || 'https://gateway.pinata.cloud',
+        remember: !!o.remember
+      };
+    }
+  } catch (_) {}
+  return { jwt: pinataMgmtSessionJwt, gateway: 'https://gateway.pinata.cloud', remember: false };
+}
+function setPinataMgmtKey(cfg) {
+  try {
+    pinataMgmtSessionJwt = cfg.jwt || '';
+    const toStore = { remember: !!cfg.remember, gateway: cfg.gateway || 'https://gateway.pinata.cloud' };
+    if (cfg.remember) toStore.jwt = cfg.jwt || ''; // plaintext, by user choice
+    localStorage.setItem('v4call:pinata-mgmt', JSON.stringify(toStore));
+  } catch (_) {}
+}
+
+// Thin Pinata API helpers (browser-direct, Bearer JWT). 401/403 → key scope msg.
+async function pinataApiGet(path, jwt) {
+  let res;
+  try { res = await fetch('https://api.pinata.cloud' + path, { headers: { Authorization: 'Bearer ' + jwt } }); }
+  catch (e) { throw new Error('could not reach Pinata (' + e.message + ')'); }
+  if (res.status === 401 || res.status === 403) throw new Error('Pinata rejected the key (HTTP ' + res.status + ') — the management key needs pinList / userPinnedDataTotal scopes.');
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error('Pinata error HTTP ' + res.status + ' ' + String(t).slice(0, 120)); }
+  return res.json();
+}
+async function pinataUserPinnedTotal(jwt) {
+  // { pin_count, pin_size_total, pin_size_with_replications_total }
+  return pinataApiGet('/data/userPinnedDataTotal', jwt);
+}
+async function pinataListPins(jwt) {
+  const rows = []; const limit = 100; let offset = 0;
+  for (let i = 0; i < 25; i++) { // hard cap 2500 pins so a huge account can't hang the UI
+    const j = await pinataApiGet(`/data/pinList?status=pinned&pageLimit=${limit}&pageOffset=${offset}`, jwt);
+    const r = (j && j.rows) || [];
+    rows.push(...r);
+    if (r.length < limit) break;
+    offset += limit;
+  }
+  return rows;
+}
+async function pinataUnpin(jwt, cid) {
+  let res;
+  try { res = await fetch('https://api.pinata.cloud/pinning/unpin/' + encodeURIComponent(cid), { method: 'DELETE', headers: { Authorization: 'Bearer ' + jwt } }); }
+  catch (e) { throw new Error('could not reach Pinata (' + e.message + ')'); }
+  if (res.status === 401 || res.status === 403) throw new Error('key lacks the unpin scope (HTTP ' + res.status + ')');
+  if (res.status === 404) return true; // already gone — treat as success
+  if (!res.ok) { const t = await res.text().catch(() => ''); throw new Error('unpin failed HTTP ' + res.status + ' ' + String(t).slice(0, 120)); }
+  return true;
+}
+
+// ── Sub-tab switching (IPFS-Gate | Pinata) ──
+function switchUploadsSub(sub) {
+  document.querySelectorAll('.uploads-subtab').forEach(b => b.classList.toggle('active', b.dataset.sub === sub));
+  const g = document.getElementById('uploads-sub-gate');
+  const p = document.getElementById('uploads-sub-pinata');
+  if (g) g.style.display = sub === 'gate' ? 'flex' : 'none';
+  if (p) p.style.display = sub === 'pinata' ? 'flex' : 'none';
+  if (sub === 'pinata') loadPinataList();
+}
+
+// ── Management-key modal ──
+function openPinataKeyModal() {
+  const k = getPinataMgmtKey();
+  document.getElementById('pinata-mgmt-jwt').value = k.remember ? (k.jwt || '') : '';
+  document.getElementById('pinata-mgmt-gateway').value = k.gateway || 'https://gateway.pinata.cloud';
+  document.getElementById('pinata-mgmt-remember').checked = !!k.remember;
+  setPinataMgmtStatus('');
+  document.getElementById('pinata-key-modal').style.display = 'flex';
+}
+function closePinataKeyModal() { document.getElementById('pinata-key-modal').style.display = 'none'; }
+function setPinataMgmtStatus(text, isErr) {
+  const n = document.getElementById('pinata-mgmt-status');
+  if (!n) return;
+  n.textContent = text;
+  n.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+}
+async function testPinataMgmtKey() {
+  const jwt = document.getElementById('pinata-mgmt-jwt').value.trim();
+  if (!jwt) { setPinataMgmtStatus('Paste a JWT first.', true); return; }
+  setPinataMgmtStatus('Testing list + storage scopes…');
+  try {
+    const total = await pinataUserPinnedTotal(jwt);
+    await pinataListPins(jwt);
+    setPinataMgmtStatus(`✓ Key works — ${total.pin_count || 0} pins, ${bytesToHuman(total.pin_size_total || 0)} stored.`);
+  } catch (e) {
+    setPinataMgmtStatus('⚠ ' + e.message, true);
+  }
+}
+function savePinataMgmtKey() {
+  const jwt = document.getElementById('pinata-mgmt-jwt').value.trim();
+  const gateway = document.getElementById('pinata-mgmt-gateway').value.trim() || 'https://gateway.pinata.cloud';
+  const remember = document.getElementById('pinata-mgmt-remember').checked;
+  setPinataMgmtKey({ jwt, gateway, remember });
+  closePinataKeyModal();
+  loadPinataList(true);
+}
+
+// ── List + render ──
+async function loadPinataList(force) {
+  const listEl = document.getElementById('pinata-list');
+  const quotaEl = document.getElementById('pinata-quota');
+  const stateEl = document.getElementById('pinata-keystate');
+  if (!listEl) return;
+  const k = getPinataMgmtKey();
+  if (!k.jwt) {
+    quotaEl.textContent = 'Pinata storage: —';
+    stateEl.innerHTML = '<span class="pinata-keystate-warn">no management key set</span>';
+    listEl.innerHTML = '<div class="uploads-status">Click <strong>🔑 Management key</strong> to add a key with pinList / unpin / userPinnedDataTotal scopes — then your pins appear here.</div>';
+    return;
+  }
+  listEl.innerHTML = '<div class="uploads-status">… loading your pins from Pinata</div>';
+  let total, rows;
+  try {
+    total = await pinataUserPinnedTotal(k.jwt);
+    rows = await pinataListPins(k.jwt);
+  } catch (e) {
+    quotaEl.textContent = 'Pinata storage: —';
+    stateEl.innerHTML = '<span class="pinata-keystate-warn">key error</span>';
+    listEl.innerHTML = `<div class="uploads-status">⚠ ${escapeHtml(e.message)}<br><br>Re-check the key via <strong>🔑 Management key</strong>.</div>`;
+    return;
+  }
+  quotaEl.textContent = `Pinata storage: ${bytesToHuman(total.pin_size_total || 0)} across ${total.pin_count || 0} pin${(total.pin_count === 1) ? '' : 's'}`;
+  stateEl.innerHTML = '<span class="pinata-keystate-ok">✓ management key active · you pay Pinata directly</span>';
+  renderPinataList(rows, k.gateway);
+}
+function renderPinataList(rows, gateway) {
+  const listEl = document.getElementById('pinata-list');
+  rows = Array.isArray(rows) ? rows : [];
+  if (rows.length === 0) {
+    listEl.innerHTML = '<div class="uploads-empty">No pins in your Pinata account yet. Use ⬆ Upload to Pinata.</div>';
+    return;
+  }
+  rows.sort((a, b) => new Date(b.date_pinned || 0) - new Date(a.date_pinned || 0));
+  listEl.innerHTML = '';
+  rows.forEach(r => listEl.appendChild(buildPinataRow(r, gateway)));
+}
+function buildPinataRow(r, gateway) {
+  const row = document.createElement('div');
+  row.className = 'upl-row';
+  const cid = r.ipfs_pin_hash;
+  row.dataset.cid = cid;
+  const name = (r.metadata && r.metadata.name) || 'pinata upload';
+  const encrypted = /^enc-/.test(name); // we prefix encrypted uploads from this tab
+  const base = String(gateway || 'https://gateway.pinata.cloud').replace(/\/+$/, '');
+  const url = `${base}/ipfs/${cid}`;
+  let when = '';
+  try { when = r.date_pinned ? new Date(r.date_pinned).toLocaleString() : ''; } catch (_) {}
+  row.innerHTML = `
+    <div class="upl-top">
+      <span class="upl-icon">${encrypted ? '🔒' : '📌'}</span>
+      <span class="upl-name">${escapeHtml(name)}</span>
+      <span class="upl-mode ${encrypted ? 'encrypted' : 'public'}">${encrypted ? 'encrypted' : 'plaintext'}</span>
+    </div>
+    <div class="upl-meta">
+      <span>${bytesToHuman(r.size || 0)}</span>
+      <span title="${escapeHtml(cid)}">cid:${escapeHtml(String(cid).slice(0, 12))}…</span>
+      ${when ? `<span>↑ ${escapeHtml(when)}</span>` : ''}
+    </div>
+    <div class="upl-actions">
+      <span class="upl-publink">${escapeHtml(url)}</span>
+      <button class="upl-btn" data-act="copy">📋 Copy link</button>
+      <button class="upl-btn" data-act="open">↗ Open</button>
+    </div>
+    <div class="upl-actions upl-action-bar">
+      <button class="upl-btn danger" data-act="unpin">🗑 Unpin</button>
+    </div>`;
+  row.querySelectorAll('[data-act]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const act = btn.getAttribute('data-act');
+      if (act === 'copy') {
+        navigator.clipboard?.writeText(url).then(() => { btn.textContent = '✓ Copied'; setTimeout(() => { btn.textContent = '📋 Copy link'; }, 1500); });
+      } else if (act === 'open') {
+        window.open(url, '_blank', 'noopener');
+      } else if (act === 'unpin') {
+        promptUnpinPinata(row, cid);
+      }
+    });
+  });
+  return row;
+}
+function promptUnpinPinata(row, cid) {
+  const bar = row.querySelector('.upl-action-bar');
+  if (!bar) return;
+  bar.innerHTML = `<span class="upl-confirm">Unpin from your Pinata? Anyone with the link gets a 404 (unless pinned elsewhere).
+      <button class="upl-btn danger" data-c="yes">Confirm</button>
+      <button class="upl-btn" data-c="no">Cancel</button></span>`;
+  bar.querySelector('[data-c="no"]').addEventListener('click', () => {
+    bar.innerHTML = '<button class="upl-btn danger" data-act="unpin">🗑 Unpin</button>';
+    bar.querySelector('[data-act="unpin"]').addEventListener('click', () => promptUnpinPinata(row, cid));
+  });
+  bar.querySelector('[data-c="yes"]').addEventListener('click', () => doUnpinPinata(row, cid));
+}
+async function doUnpinPinata(row, cid) {
+  const bar = row.querySelector('.upl-action-bar');
+  if (bar) bar.innerHTML = '<span class="upl-confirm">… unpinning</span>';
+  const k = getPinataMgmtKey();
+  if (!k.jwt) { if (bar) bar.innerHTML = '<span class="upl-confirm">⚠ no management key</span>'; return; }
+  try {
+    await pinataUnpin(k.jwt, cid);
+    row.classList.add('inactive');
+    if (bar) bar.innerHTML = '<span class="upl-confirm" style="color:var(--green);">✓ unpinned</span>';
+    loadPinataList(); // refresh totals
+  } catch (e) {
+    if (bar) bar.innerHTML = `<span class="upl-confirm">⚠ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// ── Upload-to-Pinata modal (plaintext / encrypt-self / encrypt-to-user) ──
+function openPinataUploadModal() {
+  if (!myUsername) { alert('Log in first.'); return; }
+  const k = getPinataMgmtKey();
+  if (!k.jwt) { openPinataKeyModal(); setPinataMgmtStatus('Set a key first — this same key uploads from the tab.', true); return; }
+  document.getElementById('pinata-up-file').value = '';
+  document.getElementById('pinata-up-meta').textContent = '';
+  document.getElementById('pinata-up-user').value = '';
+  document.querySelector('input[name=pinata-up-mode][value="plain"]').checked = true;
+  onPinataModeChange();
+  const r = document.getElementById('pinata-up-result'); r.style.display = 'none'; r.innerHTML = '';
+  document.getElementById('pinata-up-btn').disabled = false;
+  setPinataUpStatus('Ready.');
+  document.getElementById('pinata-upload-modal').style.display = 'flex';
+}
+function closePinataUploadModal() { document.getElementById('pinata-upload-modal').style.display = 'none'; }
+function setPinataUpStatus(text, isErr) {
+  const n = document.getElementById('pinata-up-status');
+  if (!n) return;
+  n.textContent = text;
+  n.style.color = isErr ? 'var(--danger)' : 'var(--muted)';
+}
+function pinataUpMode() {
+  const el = document.querySelector('input[name=pinata-up-mode]:checked');
+  return el ? el.value : 'plain';
+}
+function onPinataModeChange() {
+  document.getElementById('pinata-up-user').disabled = pinataUpMode() !== 'user';
+}
+function onPinataFilePick() {
+  const f = (document.getElementById('pinata-up-file').files || [])[0];
+  const meta = document.getElementById('pinata-up-meta');
+  if (!f) { meta.textContent = ''; return; }
+  const mime = detectFileMime(f) || 'application/octet-stream';
+  meta.textContent = `${f.name} · ${bytesToHuman(f.size)} · ${mime}`;
+}
+async function confirmPinataUpload() {
+  const file = (document.getElementById('pinata-up-file').files || [])[0];
+  if (!file) { setPinataUpStatus('Pick a file first.', true); return; }
+  const k = getPinataMgmtKey();
+  if (!k.jwt) { setPinataUpStatus('No management key — click 🔑 Management key.', true); return; }
+  const mode = pinataUpMode();
+  const btn = document.getElementById('pinata-up-btn');
+  btn.disabled = true;
+  try {
+    if (mode === 'plain') {
+      // Plaintext: pin the raw bytes, real filename + mime preserved.
+      const buf  = new Uint8Array(await file.arrayBuffer());
+      const mime = detectFileMime(file) || 'application/octet-stream';
+      setPinataUpStatus('Pinning to your Pinata account…');
+      const pinned = await pinataPin({ bytes: buf, jwt: k.jwt, filename: file.name, mime, gatewayBase: k.gateway });
+      showPinataUpResult({ url: pinned.gateway_url });
+      setPinataUpStatus('✓ Uploaded — shareable link ready below.');
+    } else {
+      // Encrypt: build the SAME inner-blob format as room/DM attachments so it can
+      // be decrypted later by the existing parseInnerBlob helper. Wrap the AES key
+      // to each recipient's Hive posting key (self always included), pin the
+      // ciphertext, and also offer a self-contained .v4enc bundle for later use.
+      if (!myPrivKeyStr) throw new Error('Unlock encryption first (🔑 panel) to encrypt.');
+      const targets = new Set([myUsername]);
+      if (mode === 'user') {
+        const u = document.getElementById('pinata-up-user').value.trim().replace(/^@/, '').toLowerCase();
+        if (!u) throw new Error('Enter the Hive username to encrypt for.');
+        targets.add(u);
+      }
+      setPinataUpStatus('Encrypting…');
+      const built     = await buildInnerBlob({ file, sender: myUsername }); // { blob, rawKey, plaintextSize }
+      const rawKeyB64 = btoa(String.fromCharCode(...built.rawKey));
+      const per_recipient = {};
+      const skipped = [];
+      for (const u of targets) {
+        let pubKey = (u === myUsername) ? myPubKey : null;
+        if (!pubKey) { setPinataUpStatus(`Fetching @${u}'s posting key…`); try { pubKey = await fetchPubKey(u); } catch (_) { pubKey = null; } }
+        if (!pubKey) { skipped.push(u); continue; }
+        try { per_recipient[u] = encryptMsg(rawKeyB64, pubKey); } catch (_) { skipped.push(u); }
+      }
+      if (!Object.keys(per_recipient).length) throw new Error('could not encrypt to anyone' + (skipped.length ? ` (skipped: @${skipped.join(', @')})` : ''));
+      setPinataUpStatus('Pinning encrypted blob to your Pinata…');
+      const mime   = detectFileMime(file) || 'application/octet-stream';
+      const pinned = await pinataPin({ bytes: built.blob, jwt: k.jwt, filename: 'enc-' + file.name, mime: 'application/octet-stream', gatewayBase: k.gateway });
+      const envelope = {
+        v4call_enc: 1, cid: pinned.cid, gateway_url: pinned.gateway_url,
+        filename: file.name, mime, original_size: built.plaintextSize,
+        sender: myUsername, created: new Date().toISOString(),
+        recipients: Object.keys(per_recipient), per_recipient,
+        blob_b64: btoa(String.fromCharCode(...built.blob))
+      };
+      const envBytes = new TextEncoder().encode(JSON.stringify(envelope));
+      const dlUrl    = URL.createObjectURL(new Blob([envBytes], { type: 'application/json' }));
+      showPinataUpResult({ url: pinned.gateway_url, download: dlUrl, downloadName: file.name + '.v4enc', encrypted: true });
+      setPinataUpStatus('✓ Encrypted + pinned. Gateway link serves ciphertext; download the .v4enc bundle for later use.' + (skipped.length ? ` ⚠ skipped @${skipped.join(', @')}` : ''));
+    }
+    loadPinataList();
+  } catch (e) {
+    setPinataUpStatus('⚠ ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+function showPinataUpResult(o) {
+  const r = document.getElementById('pinata-up-result');
+  r.style.display = 'block';
+  r.innerHTML = `
+    <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:4px;">${o.encrypted ? 'GATEWAY LINK (serves encrypted bytes)' : 'SHAREABLE LINK (anyone can open)'}</div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <span class="upl-publink" id="pinata-up-url"></span>
+      <button class="upl-btn" id="pinata-up-copy">📋 Copy</button>
+      <button class="upl-btn" id="pinata-up-open">↗ Open</button>
+      ${o.download ? '<a class="upl-btn" id="pinata-up-dl" style="text-decoration:none;">⬇ Download .v4enc</a>' : ''}
+    </div>`;
+  document.getElementById('pinata-up-url').textContent = o.url;
+  document.getElementById('pinata-up-copy').addEventListener('click', () => {
+    navigator.clipboard?.writeText(o.url).then(() => { const b = document.getElementById('pinata-up-copy'); b.textContent = '✓ Copied'; setTimeout(() => { b.textContent = '📋 Copy'; }, 1500); });
+  });
+  document.getElementById('pinata-up-open').addEventListener('click', () => window.open(o.url, '_blank', 'noopener'));
+  if (o.download) {
+    const a = document.getElementById('pinata-up-dl');
+    a.href = o.download; a.download = o.downloadName || 'v4call.v4enc';
+  }
 }
 
 // ── Storage backend picker modal + per-upload-modal backend lines ──
