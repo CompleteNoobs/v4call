@@ -383,8 +383,12 @@
        reveals it. This overrides the inline display:flex that room-info sets. */
     #users-panel:not(.mgmt-open) #allowlist-panel{display:none!important;}
 
-    /* CENTER — video stage. No card chrome; subtle on the spotlight only. */
-    #video-panel{order:2;flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:12px;padding:4px 2px;overflow:hidden;background:transparent;}
+    /* CENTER — video stage. No card chrome; subtle on the spotlight only.
+       Default flex/order is supplied by the focus model below (one focus-*
+       class is always on #room-screen); rail width applies when unfocused. */
+    #video-panel{order:2;flex:0 0 340px;min-width:0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:4px 2px;overflow:hidden;background:transparent;}
+    #video-header{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 6px 0;flex:0 0 auto;font-family:'IBM Plex Mono',monospace;}
+    #video-header .ch-title{color:var(--subtext);font-weight:600;font-size:0.82rem;letter-spacing:0.02em;}
     #spotlight-slot{flex:1 1 auto;width:100%;min-height:0;display:flex;align-items:center;justify-content:center;background:#000;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
     #spotlight-slot .video-wrapper{width:100%;height:100%;cursor:default;display:flex;align-items:center;justify-content:center;background:#000;border-radius:12px;overflow:hidden;}
     #spotlight-slot .video-wrapper video{width:100%;height:100%;aspect-ratio:auto;object-fit:contain;}
@@ -402,6 +406,29 @@
     #peer-strip .video-wrapper{width:100%;cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden;transition:border-color 0.15s;}
     #peer-strip .video-wrapper:hover{border-color:var(--accent);}
     #peer-strip .video-wrapper .video-label{font-size:0.58rem;padding:1px 5px;bottom:4px;left:4px;}
+
+    /* ── Three-zone focus model ───────────────────────────────────────
+       Each card header has a ⤢ button. Clicking it makes that zone the wide
+       CENTRE column; the other two stay fixed side rails. CSS `order` does
+       the centring — it's purely visual, so the <video> keeps playing (no
+       renegotiation / reload). One focus-* class is always on #room-screen
+       (default focus-screen). Participants prefers the left rail, Chat the
+       right rail, Screen floats to whichever rail is free. */
+    .panel-focus{background:var(--surface2);border:1px solid var(--border);color:var(--subtext);width:22px;height:20px;border-radius:5px;cursor:pointer;font-size:0.72rem;line-height:1;transition:border-color 0.15s,color 0.15s,background 0.15s;}
+    .panel-focus:hover{border-color:var(--accent);color:var(--accent);}
+    #room-screen.focus-participants #participants-focus,
+    #room-screen.focus-screen #screen-focus,
+    #room-screen.focus-chat #chat-focus{background:var(--accent);color:#0a0c0f;border-color:var(--accent);}
+    #room-screen.focus-screen       #users-panel{order:1;}
+    #room-screen.focus-screen       #video-panel{order:2;flex:1 1 0;min-width:0;}
+    #room-screen.focus-screen       #chat-panel {order:3;}
+    #room-screen.focus-participants #video-panel{order:1;flex:0 0 340px;}
+    #room-screen.focus-participants #users-panel{order:2;flex:1 1 0;width:auto;min-width:0;}
+    #room-screen.focus-participants #chat-panel {order:3;}
+    #room-screen.focus-chat         #users-panel{order:1;}
+    #room-screen.focus-chat         #video-panel{order:3;flex:0 0 340px;}
+    #room-screen.focus-chat         #chat-panel {order:2;flex:1 1 0;width:auto;min-width:0;}
+
     /* ── Mobile bottom-tab nav (hidden on desktop) ─────────────── */
     .mob-nav{display:none;}
 
@@ -1082,7 +1109,7 @@
 </div>
 
 <!-- SCREEN 3: ROOM -->
-<div class="screen" id="room-screen">
+<div class="screen focus-screen" id="room-screen">
   <!-- LEFT card: Participants (video thumbnails + member list + management) -->
   <div id="users-panel">
     <div id="users-panel-header">
@@ -1090,6 +1117,7 @@
       <div class="up-head-btns">
         <button id="select-all-btn" onclick="toggleSelectAll()">all</button>
         <button id="manage-toggle-btn" onclick="toggleRoomManage()" title="Show / hide room management (allowlist · ban · admin)">⚙</button>
+        <button class="panel-focus" id="participants-focus" onclick="setZoneFocus('participants')" title="Make Participants the centre panel">⤢</button>
         <button class="panel-chevron" id="participants-chevron" onclick="toggleParticipants()" title="Collapse / expand participants">^</button>
       </div>
     </div>
@@ -1116,8 +1144,12 @@
     </div>
   </div>
 
-  <!-- CENTER: video stage (encryption banner + control pill + spotlight) -->
+  <!-- CENTER: video stage (header + encryption banner + control pill + spotlight) -->
   <div id="video-panel">
+    <div id="video-header">
+      <span class="ch-title">Screen</span>
+      <button class="panel-focus" id="screen-focus" onclick="setZoneFocus('screen')" title="Make the Screen the centre panel">⤢</button>
+    </div>
     <div id="enc-banner">🔒 End-to-End Hive Encryption: ACTIVE</div>
     <div id="control-pill">
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Unmute</button>
@@ -1141,6 +1173,7 @@
         <span id="chat-room-name">Room:</span>
       </div>
       <span id="peer-count">no others yet</span>
+      <button class="panel-focus" id="chat-focus" onclick="setZoneFocus('chat')" title="Make Chat &amp; Info the centre panel">⤢</button>
       <button class="panel-chevron" id="chat-chevron" onclick="toggleChatInfo()" title="Collapse / expand chat">v</button>
     </div>
     <div id="chat-body">
@@ -3429,6 +3462,9 @@ function leaveRoom(opts) {
   document.getElementById('chat-body').style.display         = '';
   document.getElementById('participants-chevron').textContent = '^';
   document.getElementById('chat-chevron').textContent         = 'v';
+  // Reset the three-zone focus back to Screen for the next room entry.
+  document.getElementById('room-screen').classList.remove('focus-participants', 'focus-chat');
+  document.getElementById('room-screen').classList.add('focus-screen');
   // If we joined a federated room, drop that connection and tell our home
   // server so it clears our in-call state.
   if (activeRoomSocket) {
@@ -6130,6 +6166,24 @@ function toggleChatInfo() {
 // so this works alongside the existing admin-gated display logic in room-info.
 function toggleRoomManage() {
   document.getElementById('users-panel').classList.toggle('mgmt-open');
+}
+
+// Three-zone focus: promote one card to the wide centre column via a
+// focus-* class on #room-screen (CSS handles the order/width swap — the
+// <video> never re-mounts). zone ∈ 'participants' | 'screen' | 'chat'.
+function setZoneFocus(zone) {
+  const rs = document.getElementById('room-screen');
+  if (!rs) return;
+  rs.classList.remove('focus-participants', 'focus-screen', 'focus-chat');
+  rs.classList.add('focus-' + zone);
+  // Never leave the focused zone collapsed (would be a wide empty card).
+  if (zone === 'participants') {
+    document.getElementById('participants-body').style.display = '';
+    document.getElementById('participants-chevron').textContent = '^';
+  } else if (zone === 'chat') {
+    document.getElementById('chat-body').style.display = '';
+    document.getElementById('chat-chevron').textContent = 'v';
+  }
 }
 
 // Product layout: the centre stage (#video-panel) is always present in a
