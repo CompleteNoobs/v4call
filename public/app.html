@@ -365,16 +365,43 @@
     #call-progress-bar{width:220px;height:3px;background:var(--border);border-radius:999px;overflow:hidden;}
     #call-progress-fill{height:100%;background:var(--green);border-radius:999px;width:100%;transition:width linear;}
 
-    /* Room */
-    #room-screen{flex-direction:row;}
-    #video-panel{display:flex;flex-direction:column;background:#080a0d;border-right:1px solid var(--border);overflow:hidden;flex-shrink:0;width:280px;}
-    #spotlight-slot{flex:0 0 auto;display:block;background:#000;}
-    #spotlight-slot .video-wrapper{width:100%;cursor:default;}
-    #peer-strip{flex:0 0 auto;display:flex;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:2px;padding:2px;background:#050709;border-top:1px solid var(--border);}
+    /* Room — "product" layout (desktop): three rounded cards on the --bg
+       background with dark gutters between them. Video=CENTER, Chat=RIGHT,
+       Participants=LEFT. Mobile (<=720px) keeps its own stacked overrides
+       below and is intentionally left stale per the desktop-only focus. */
+    #room-screen{flex-direction:row;gap:12px;padding:12px;background:var(--bg);align-items:stretch;overflow:hidden;}
+
+    /* LEFT card — Participants (video thumbs + member list + management) */
+    #users-panel{order:1;width:236px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;}
+    .up-head-btns{display:flex;align-items:center;gap:5px;}
+    .panel-chevron{background:var(--surface2);border:1px solid var(--border);color:var(--subtext);width:22px;height:20px;border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;line-height:1;transition:border-color 0.15s,color 0.15s;}
+    .panel-chevron:hover{border-color:var(--accent);color:var(--accent);}
+    #manage-toggle-btn{background:var(--surface2);border:1px solid var(--border);color:var(--subtext);width:22px;height:20px;border-radius:5px;cursor:pointer;font-size:0.7rem;line-height:1;transition:border-color 0.15s,color 0.15s;}
+    #manage-toggle-btn:hover,#users-panel.mgmt-open #manage-toggle-btn{border-color:var(--accent);color:var(--accent);}
+    #participants-body{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;}
+    /* Management (allowlist/ban/admin) is collapsed by default — the ⚙ toggle
+       reveals it. This overrides the inline display:flex that room-info sets. */
+    #users-panel:not(.mgmt-open) #allowlist-panel{display:none!important;}
+
+    /* CENTER — video stage. No card chrome; subtle on the spotlight only. */
+    #video-panel{order:2;flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:12px;padding:4px 2px;overflow:hidden;background:transparent;}
+    #spotlight-slot{flex:1 1 auto;width:100%;min-height:0;display:flex;align-items:center;justify-content:center;background:#000;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
+    #spotlight-slot .video-wrapper{width:100%;height:100%;cursor:default;display:flex;align-items:center;justify-content:center;background:#000;border-radius:12px;overflow:hidden;}
+    #spotlight-slot .video-wrapper video{width:100%;height:100%;aspect-ratio:auto;object-fit:contain;}
+    #spotlight-slot .video-label{bottom:9px;left:11px;font-size:0.72rem;}
+
+    /* Centered encryption banner (replaces the tiny header pill in-room) */
+    #enc-banner{display:none;flex:0 0 auto;align-items:center;gap:8px;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:0.78rem;font-weight:600;letter-spacing:0.02em;color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.3);border-radius:999px;padding:7px 18px;}
+
+    /* Centered control pill grouping the media buttons */
+    #control-pill{flex:0 0 auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;background:var(--surface2);border:1px solid var(--border);border-radius:999px;padding:6px 10px;}
+
+    /* LEFT video thumbnail stack (repurposed #peer-strip — now vertical) */
+    #peer-strip{flex:0 0 auto;display:flex;flex-direction:column;gap:6px;padding:8px;overflow-y:auto;max-height:46%;border-bottom:1px solid var(--border);}
     #peer-strip:empty{display:none;}
-    #peer-strip .video-wrapper{flex:0 0 90px;width:90px;cursor:pointer;border:2px solid transparent;border-radius:4px;transition:border-color 0.15s;}
+    #peer-strip .video-wrapper{width:100%;cursor:pointer;border:2px solid transparent;border-radius:8px;overflow:hidden;transition:border-color 0.15s;}
     #peer-strip .video-wrapper:hover{border-color:var(--accent);}
-    #peer-strip .video-wrapper .video-label{font-size:0.55rem;padding:1px 4px;bottom:3px;left:3px;}
+    #peer-strip .video-wrapper .video-label{font-size:0.58rem;padding:1px 5px;bottom:4px;left:4px;}
     /* ── Mobile bottom-tab nav (hidden on desktop) ─────────────── */
     .mob-nav{display:none;}
 
@@ -486,9 +513,14 @@
     .video-wrapper{position:relative;background:#000;}
     .video-wrapper video{width:100%;display:block;aspect-ratio:4/3;object-fit:cover;}
     .video-label{position:absolute;bottom:5px;left:7px;font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:#fff;background:rgba(0,0,0,0.6);padding:2px 6px;border-radius:4px;}
-    #chat-panel{display:flex;flex-direction:column;flex:1;overflow:hidden;}
-    #chat-header{padding:9px 14px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
-    #peer-count{margin-left:auto;}
+    /* RIGHT card — Chat & Info */
+    #chat-panel{order:3;width:344px;flex-shrink:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;}
+    #chat-body{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;}
+    #chat-header{padding:10px 14px;border-bottom:1px solid var(--border);font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);background:var(--surface);flex-shrink:0;display:flex;align-items:center;gap:8px;}
+    .ch-titles{display:flex;flex-direction:column;gap:1px;min-width:0;}
+    .ch-title{font-size:0.82rem;font-weight:600;color:var(--text);letter-spacing:0.02em;}
+    #chat-room-name{font-size:0.66rem;color:var(--subtext);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+    #peer-count{margin-left:auto;white-space:nowrap;}
     #enable-mic-btn,#enable-cam-btn,#share-screen-btn{display:none;padding:5px 11px;background:transparent;border-radius:6px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:600;letter-spacing:0.03em;transition:background 0.15s,opacity 0.2s;}
     #enable-mic-btn{color:var(--green);border:1px solid rgba(74,222,128,0.4);}
     #enable-mic-btn:hover{background:rgba(74,222,128,0.1);}
@@ -497,9 +529,9 @@
     #share-screen-btn{color:var(--accent);border:1px solid rgba(245,166,35,0.4);}
     #share-screen-btn:hover{background:rgba(245,166,35,0.1);}
     #enable-mic-btn.shown,#enable-cam-btn.shown,#share-screen-btn.shown{display:inline-flex;align-items:center;}
-    #users-panel{width:160px;border-left:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;}
-    #users-panel-header{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border);}
-    #users-panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);letter-spacing:0.05em;}
+    /* (#users-panel layout is defined in the product-layout block above) */
+    #users-panel-header{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid var(--border);}
+    #users-panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.82rem;font-weight:600;color:var(--text);letter-spacing:0.02em;}
     #select-all-btn{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;color:var(--accent);background:none;border:1px solid rgba(245,166,35,0.3);border-radius:4px;padding:2px 5px;cursor:pointer;}
     #select-all-btn:hover{background:rgba(245,166,35,0.1);}
     #room-users-list{flex:1;overflow-y:auto;}
@@ -598,6 +630,8 @@
     .att-recipients{font-size:0.62rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;}
     .att-error{font-size:0.7rem;color:var(--danger);padding:6px 8px;background:rgba(248,113,113,0.06);border-radius:6px;border:1px solid rgba(248,113,113,0.2);}
     #input-bar{display:flex;gap:7px;padding:10px 12px;border-top:1px solid var(--border);background:var(--surface);flex-shrink:0;align-items:flex-end;}
+    #attach-btn{height:40px;width:38px;flex-shrink:0;padding:0;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--subtext);cursor:pointer;font-size:1rem;line-height:1;transition:border-color 0.2s,color 0.2s;}
+    #attach-btn:hover{border-color:var(--accent);color:var(--accent);}
     #msg-input{flex:1;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'IBM Plex Sans',sans-serif;font-size:0.86rem;outline:none;resize:none;height:40px;max-height:100px;transition:border-color 0.2s;line-height:1.4;}
     #msg-input:focus{border-color:var(--accent);}
     #msg-input:disabled{opacity:0.35;}
@@ -1049,67 +1083,87 @@
 
 <!-- SCREEN 3: ROOM -->
 <div class="screen" id="room-screen">
+  <!-- LEFT card: Participants (video thumbnails + member list + management) -->
+  <div id="users-panel">
+    <div id="users-panel-header">
+      <h3>Participants</h3>
+      <div class="up-head-btns">
+        <button id="select-all-btn" onclick="toggleSelectAll()">all</button>
+        <button id="manage-toggle-btn" onclick="toggleRoomManage()" title="Show / hide room management (allowlist · ban · admin)">⚙</button>
+        <button class="panel-chevron" id="participants-chevron" onclick="toggleParticipants()" title="Collapse / expand participants">^</button>
+      </div>
+    </div>
+    <div id="participants-body">
+      <div id="peer-strip"></div>
+      <div id="room-users-list"></div>
+      <div id="selection-label">← toggle to message</div>
+      <div id="allowlist-panel">
+        <h4>ALLOWLIST</h4>
+        <div id="allowlist-members"></div>
+        <div class="al-add-row">
+          <input id="al-add-input" type="text" placeholder="add @user or @user@server.com" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();allowlistAdd();}"/>
+          <button class="al-add-btn" onclick="allowlistAdd()">+</button>
+        </div>
+        <div id="ban-row" style="display:none;">
+          <input id="ban-input" type="text" placeholder="ban @username from room" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();banUser(this.value);}"/>
+          <button class="ban-add-btn" onclick="banUser(document.getElementById('ban-input').value)">Ban</button>
+        </div>
+        <div id="banlist-section" style="display:none;">
+          <div class="banlist-header">BANNED</div>
+          <div id="banlist-members"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTER: video stage (encryption banner + control pill + spotlight) -->
   <div id="video-panel">
+    <div id="enc-banner">🔒 End-to-End Hive Encryption: ACTIVE</div>
+    <div id="control-pill">
+      <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Unmute</button>
+      <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Start Cam</button>
+      <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
+      <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
+    </div>
     <div id="spotlight-slot">
       <div class="video-wrapper spotlight" onclick="setSpotlight(this, {user:true})">
         <video id="local-video" autoplay muted playsinline></video>
         <div class="video-label" id="local-label">you</div>
       </div>
     </div>
-    <div id="peer-strip"></div>
   </div>
+
+  <!-- RIGHT card: Chat & Info -->
   <div id="chat-panel">
     <div id="chat-header">
-      <span id="chat-room-name">ROOM</span>
+      <div class="ch-titles">
+        <span class="ch-title">Chat &amp; Info</span>
+        <span id="chat-room-name">Room:</span>
+      </div>
       <span id="peer-count">no others yet</span>
-      <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Enable Mic</button>
-      <button id="enable-cam-btn"      onclick="toggleCam()"           title="Turn your camera on or off for this room">🎥 Enable Cam</button>
-      <button id="share-screen-btn"    onclick="toggleScreen()"        title="Share your screen with the room">🖥️ Share Screen</button>
-      <button id="attach-btn"          onclick="openAttachModal()"     title="Send an encrypted file via ipfs-gate (v0.2: images + audio + video + pdf + text + archives, gate-capped size)">📎 Attach</button>
-      <button id="follow-spotlight-btn" onclick="followRoomSpotlight()" title="You have a local pin. Click to follow the admin's room spotlight.">↺ Follow room spotlight</button>
+      <button class="panel-chevron" id="chat-chevron" onclick="toggleChatInfo()" title="Collapse / expand chat">v</button>
     </div>
-    <div id="call-cost-ticker">
-      <div class="ticker-item"><div class="ticker-label">DURATION</div><div class="ticker-value" id="ticker-duration">00:00</div></div>
-      <div class="ticker-item"><div class="ticker-label">RING PAID</div><div class="ticker-value" id="ticker-ring">—</div></div>
-      <div class="ticker-item"><div class="ticker-label">CONNECT PAID</div><div class="ticker-value" id="ticker-connect">—</div></div>
-      <div class="ticker-item"><div class="ticker-label">RUNNING COST</div><div class="ticker-value" id="ticker-running">—</div></div>
-      <div class="ticker-item"><div class="ticker-label">TOTAL SO FAR</div><div class="ticker-value" id="ticker-total">—</div></div>
-      <button id="end-call-btn" onclick="endCall()">📵 End Call</button>
-    </div>
-    <div id="room-ephemeral-warning">⚠ Room is ephemeral — if all users leave, the room and its history are deleted. New members can only read messages encrypted to their key.</div>
-    <div id="messages">
-      <div class="msg-system">Messages are signed and encrypted with Hive keys.</div>
-    </div>
-    <div id="input-bar">
-      <textarea id="msg-input" placeholder="Toggle users on the right then send…" rows="1" disabled></textarea>
-      <span id="char-count">500</span>
-      <div class="send-group">
-        <button id="send-btn"      onclick="sendMessage()"   disabled>🔒 Send</button>
-        <button id="broadcast-btn" onclick="sendBroadcast()" disabled>📢 All</button>
+    <div id="chat-body">
+      <div id="call-cost-ticker">
+        <div class="ticker-item"><div class="ticker-label">DURATION</div><div class="ticker-value" id="ticker-duration">00:00</div></div>
+        <div class="ticker-item"><div class="ticker-label">RING PAID</div><div class="ticker-value" id="ticker-ring">—</div></div>
+        <div class="ticker-item"><div class="ticker-label">CONNECT PAID</div><div class="ticker-value" id="ticker-connect">—</div></div>
+        <div class="ticker-item"><div class="ticker-label">RUNNING COST</div><div class="ticker-value" id="ticker-running">—</div></div>
+        <div class="ticker-item"><div class="ticker-label">TOTAL SO FAR</div><div class="ticker-value" id="ticker-total">—</div></div>
+        <button id="end-call-btn" onclick="endCall()">📵 End Call</button>
       </div>
-    </div>
-  </div>
-  <div id="users-panel">
-    <div id="users-panel-header">
-      <h3>IN ROOM</h3>
-      <button id="select-all-btn" onclick="toggleSelectAll()">all</button>
-    </div>
-    <div id="room-users-list"></div>
-    <div id="selection-label">← toggle to message</div>
-    <div id="allowlist-panel">
-      <h4>ALLOWLIST</h4>
-      <div id="allowlist-members"></div>
-      <div class="al-add-row">
-        <input id="al-add-input" type="text" placeholder="add @user or @user@server.com" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();allowlistAdd();}"/>
-        <button class="al-add-btn" onclick="allowlistAdd()">+</button>
+      <div id="room-ephemeral-warning">⚠ Room is ephemeral — if all users leave, the room and its history are deleted. New members can only read messages encrypted to their key.</div>
+      <div id="messages">
+        <div class="msg-system">Messages are signed and encrypted with Hive keys.</div>
       </div>
-      <div id="ban-row" style="display:none;">
-        <input id="ban-input" type="text" placeholder="ban @username from room" autocomplete="off" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();banUser(this.value);}"/>
-        <button class="ban-add-btn" onclick="banUser(document.getElementById('ban-input').value)">Ban</button>
-      </div>
-      <div id="banlist-section" style="display:none;">
-        <div class="banlist-header">BANNED</div>
-        <div id="banlist-members"></div>
+      <div id="input-bar">
+        <textarea id="msg-input" placeholder="Type a secure message…" rows="1" disabled></textarea>
+        <span id="char-count">500</span>
+        <button id="attach-btn" onclick="openAttachModal()" title="Send an encrypted file via ipfs-gate (images + audio + video + pdf + text + archives, gate-capped size)">📎</button>
+        <div class="send-group">
+          <button id="send-btn"      onclick="sendMessage()"   disabled>🔒 Send</button>
+          <button id="broadcast-btn" onclick="sendBroadcast()" disabled>📢 All</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2808,6 +2862,7 @@ socket.on('join-rejected', ({ room, reason }) => {
   document.getElementById('popout-btn').classList.remove('shown');
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
+  document.getElementById('enc-banner').style.display     = 'none';
 });
 socket.on('kicked', ({ reason }) => { alert(reason); leaveRoom(); });
 
@@ -3268,9 +3323,9 @@ async function enterRoom(roomName) {
   document.getElementById('share-screen-btn').classList.add('shown');
   if (pendingCallType === 'text') {
     // Text-only entry — no media acquisition. User opts in via the
-    // Enable Mic / Enable Cam buttons in the chat header.
+    // Unmute / Start Cam buttons in the centre control pill. The centre
+    // stage stays visible (the spotlight shows the local placeholder tile).
     localStream = null;
-    document.getElementById('video-panel').style.display = 'none';
     document.getElementById('local-label').textContent = '@' + myUsername + ' (text)';
   } else {
     try {
@@ -3278,19 +3333,20 @@ async function enterRoom(roomName) {
       localStream = await navigator.mediaDevices.getUserMedia({ video: wantVideo, audio: true });
       document.getElementById('local-video').srcObject  = localStream;
       document.getElementById('local-label').textContent = '@' + myUsername + (wantVideo ? ' (you)' : ' (voice)');
-      // Hide video panel for voice-only calls
-      document.getElementById('video-panel').style.display = wantVideo ? '' : 'none';
-    } catch(err) { alert('Camera/mic error: ' + err.message); currentRoom = ''; return; }
+    } catch(err) { alert(mediaErrorMessage(err, pendingCallType === 'video' ? 'camera' : 'microphone')); currentRoom = ''; return; }
   }
+  // Product layout: the centre stage is always present in a room.
+  document.getElementById('video-panel').style.display = '';
   updateMediaButtons();
   showScreen('room-screen');
   document.getElementById('room-badge').textContent   = '# ' + roomName;
   document.getElementById('room-badge').style.display = '';
   document.getElementById('enc-badge').style.display  = '';
+  document.getElementById('enc-banner').style.display = 'flex'; // centred banner
   document.getElementById('leave-room-btn').classList.add('shown');
   document.getElementById('popout-btn').classList.add('shown');
   document.getElementById('export-room-btn').classList.add('shown'); // any member can export
-  document.getElementById('chat-room-name').textContent   = '#' + roomName;
+  document.getElementById('chat-room-name').textContent   = 'Room: #' + roomName;
   // End-Room button is admin-only; if amCreator gets set later via room-info,
   // we re-show it there too.
   document.getElementById('end-room-btn').classList.toggle('shown', amCreator);
@@ -3333,7 +3389,9 @@ function leaveRoom(opts) {
   for (const k in peers) delete peers[k];
   for (const k in roomUsers) delete roomUsers[k];
   selectedRecipients.clear();
-  document.querySelectorAll('#video-panel .video-wrapper[id^="wrapper-"]').forEach(w => w.remove());
+  // Peer wrappers can live in the LEFT #peer-strip or the centre
+  // #spotlight-slot — match them anywhere by their wrapper- id prefix.
+  document.querySelectorAll('.video-wrapper[id^="wrapper-"]').forEach(w => w.remove());
   // Restore local tile to the spotlight slot for the next room entry
   const localWrapper = document.getElementById('local-video')?.parentElement;
   if (localWrapper) setSpotlight(localWrapper);
@@ -3342,9 +3400,9 @@ function leaveRoom(opts) {
   document.getElementById('enable-mic-btn').classList.remove('shown');
   document.getElementById('enable-cam-btn').classList.remove('shown');
   document.getElementById('share-screen-btn').classList.remove('shown');
-  // Reset button labels for the next room
-  document.getElementById('enable-mic-btn').textContent = '🎤 Enable Mic';
-  document.getElementById('enable-cam-btn').textContent = '🎥 Enable Cam';
+  // Reset button labels for the next room (state-aware wording)
+  document.getElementById('enable-mic-btn').textContent = '🎤 Unmute';
+  document.getElementById('enable-cam-btn').textContent = '🎥 Start Cam';
   document.getElementById('enable-cam-btn').disabled = false;
   document.getElementById('enable-cam-btn').style.opacity = '';
   document.getElementById('share-screen-btn').textContent = '🖥️ Share Screen';
@@ -3364,6 +3422,13 @@ function leaveRoom(opts) {
   document.getElementById('popout-btn').classList.remove('shown');
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
+  document.getElementById('enc-banner').style.display     = 'none';
+  document.getElementById('users-panel').classList.remove('mgmt-open');
+  // Reset any collapse-chevron state so the next room starts fully expanded.
+  document.getElementById('participants-body').style.display = '';
+  document.getElementById('chat-body').style.display         = '';
+  document.getElementById('participants-chevron').textContent = '^';
+  document.getElementById('chat-chevron').textContent         = 'v';
   // If we joined a federated room, drop that connection and tell our home
   // server so it clears our in-call state.
   if (activeRoomSocket) {
@@ -5758,6 +5823,27 @@ async function stopScreenShare() {
   addSystemMsg('🖥️ Screen sharing stopped');
 }
 
+// Map a getUserMedia DOMException to a clear, actionable message. Brave/Chrome on
+// macOS commonly throw NotFoundError ("Requested device not found") when the OS-level
+// camera/mic permission for the browser is OFF (System Settings ▸ Privacy & Security),
+// or when Brave Shields is blocking devices for the site — NOT just when no hardware
+// exists. NotAllowedError = site permission denied. NotReadableError = device busy.
+function mediaErrorMessage(err, device) {
+  const name = (err && err.name) ? err.name : '';
+  const Cap  = device.charAt(0).toUpperCase() + device.slice(1);
+  const sysPane = device === 'camera' ? 'Camera' : 'Microphone';
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError')
+    return `No ${device} available to this page. On macOS Brave/Chrome this is usually a permission, not missing hardware:\n` +
+           `1) System Settings ▸ Privacy & Security ▸ ${sysPane} → enable your browser, then fully QUIT and reopen it.\n` +
+           `2) Check the Brave Shields panel isn't blocking devices for this site.\n` +
+           `3) Make sure no other app (Zoom, FaceTime, OBS) is using the ${device}.`;
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError')
+    return `${Cap} permission denied for this site. Click the camera/mic icon in the address bar (or the Brave Shields panel) and allow ${device} access, then retry.`;
+  if (name === 'NotReadableError' || name === 'TrackStartError')
+    return `The ${device} is in use by another app (Zoom, FaceTime, OBS…). Close it and try again.`;
+  return `${Cap} error: ${(err && err.message) ? err.message : (name || 'unknown')}`;
+}
+
 async function enableMic() {
   if (localStream && localStream.getAudioTracks().length > 0) return;
   try {
@@ -5778,7 +5864,7 @@ async function enableMic() {
     updateMediaButtons();
     addSystemMsg('🎤 Microphone enabled');
   } catch(err) {
-    alert('Microphone error: ' + err.message);
+    alert(mediaErrorMessage(err, 'microphone'));
   }
 }
 
@@ -5826,7 +5912,7 @@ async function enableCam() {
     updateMediaButtons();
     addSystemMsg('🎥 Camera enabled');
   } catch(err) {
-    alert('Camera error: ' + err.message);
+    alert(mediaErrorMessage(err, 'camera'));
   }
 }
 
@@ -5862,12 +5948,13 @@ function updateMediaButtons() {
   const hasAudio = localStream && localStream.getAudioTracks().length > 0;
   const hasVideo = localStream && localStream.getVideoTracks().length > 0;
   const isSharing = !!currentScreenStream;
-  if (micBtn) micBtn.textContent = hasAudio ? '🎤 Disable Mic' : '🎤 Enable Mic';
+  // State-aware labels: the button shows the action it will perform next.
+  if (micBtn) micBtn.textContent = hasAudio ? '🎤 Mute' : '🎤 Unmute';
   if (camBtn) {
     // While sharing, the "video track" in localStream is the screen track —
-    // force the cam button to read Enable + disable it so a click doesn't
+    // force the cam button to read Start Cam + disable it so a click doesn't
     // accidentally tear down the screen share via disableCam().
-    camBtn.textContent = (hasVideo && !isSharing) ? '🎥 Disable Cam' : '🎥 Enable Cam';
+    camBtn.textContent = (hasVideo && !isSharing) ? '🎥 Stop Cam' : '🎥 Start Cam';
     camBtn.disabled    = isSharing;
     camBtn.style.opacity = isSharing ? '0.5' : '';
   }
@@ -6021,15 +6108,37 @@ function transferAdmin(username) {
   rsock().emit('room-transfer-admin', { room: currentRoom, username });
 }
 
-// Show the video panel whenever there's anything to render — local stream
-// has video, OR any peer has sent us a track (their wrapper exists). Hides
-// only when the room is purely text and no peer is sharing media.
+// ── Product-layout panel chrome ─────────────────────────────────────────
+// Collapse/expand the LEFT "Participants" card body and the RIGHT "Chat &
+// Info" card body via their header chevrons. Pure show/hide, no persistence.
+function toggleParticipants() {
+  const body = document.getElementById('participants-body');
+  const chev = document.getElementById('participants-chevron');
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  chev.textContent   = hidden ? '^' : 'v';
+}
+function toggleChatInfo() {
+  const body = document.getElementById('chat-body');
+  const chev = document.getElementById('chat-chevron');
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  chev.textContent   = hidden ? 'v' : '^';
+}
+// Reveal/hide the room-management UI (allowlist · ban · admin) inside the
+// Participants card. CSS hides #allowlist-panel unless the card has .mgmt-open,
+// so this works alongside the existing admin-gated display logic in room-info.
+function toggleRoomManage() {
+  document.getElementById('users-panel').classList.toggle('mgmt-open');
+}
+
+// Product layout: the centre stage (#video-panel) is always present in a
+// room — it hosts the encryption banner, the control pill and the spotlight
+// (which shows a placeholder tile when there's no video). So this just keeps
+// it visible; it's still called from the media-toggle paths for clarity.
 function refreshVideoPanelVisibility() {
-  const panel       = document.getElementById('video-panel');
-  if (!panel) return;
-  const hasLocal    = !!(localStream && localStream.getVideoTracks().length > 0);
-  const peerCount   = document.querySelectorAll('#video-panel .video-wrapper[id^="wrapper-"]').length;
-  panel.style.display = (hasLocal || peerCount > 0) ? '' : 'none';
+  const panel = document.getElementById('video-panel');
+  if (panel) panel.style.display = '';
 }
 async function createOffer(peerId) {
   const pc = createPC(peerId); const offer = await pc.createOffer();
