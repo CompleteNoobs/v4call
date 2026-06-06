@@ -780,8 +780,8 @@
       <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
     </div>
   </div>
-  <button id="right-strip" class="sidebar-strip panel-closed" title="Show/hide rooms panel"><span class="strip-ch">&#8249;</span><span class="strip-lbl">ROOMS</span></button>
-  <div id="lobby-right" class="collapsed">
+  <button id="right-strip" class="sidebar-strip" title="Show/hide rooms panel"><span class="strip-ch">&#8250;</span><span class="strip-lbl">ROOMS</span></button>
+  <div id="lobby-right">
     <div id="create-section">
       <h3>CREATE ROOM</h3>
       <div id="invitee-preview">Select users on the left first.</div>
@@ -1612,7 +1612,7 @@ async function verifySignature(message, timestamp, signature, fromUsername) {
 }
 
 // ── Sidebar toggles & resize ─────────────────────────────
-let leftSidebarOpen = true, rightSidebarOpen = false;
+let leftSidebarOpen = true, rightSidebarOpen = true;
 let leftW = 270, rightW = 240;
 
 function toggleLeftSidebar() {
@@ -3178,7 +3178,7 @@ function respondCall(accepted) {
     incomingCallData = null;
   }
 }
-socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ringFeePaid, callerServer }) => {
+socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ringFeePaid, ringCurrency, callerServer }) => {
   incomingCallData = { caller, callerPubKey, roomName, callType, callerServer: callerServer || null };
   if (callerPubKey) pubKeyCache[caller] = callerPubKey;
   let verifiedText = 'Verifying identity…';
@@ -3186,7 +3186,7 @@ socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ri
   // Show what was paid
   if (ringFeePaid > 0) {
     const el = document.getElementById('incoming-cost-display');
-    el.textContent = `Caller paid ${ringFeePaid.toFixed(3)} HBD ring fee`;
+    el.textContent = `Caller paid ${ringFeePaid.toFixed(3)} ${ringCurrency || 'HBD'} ring fee`;
     el.style.display = '';
   }
   try {
