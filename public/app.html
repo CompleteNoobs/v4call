@@ -76,8 +76,10 @@
 
     /* Lobby */
     #lobby-screen{flex-direction:row;}
-    #lobby-left{width:270px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:width 0.27s ease;}
+    #lobby-left{width:270px;border-right:1px solid var(--border);background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:flex-basis 0.27s ease;}
     #lobby-left.collapsed{width:0;border-right:none;}
+    #lobby-left-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+    .ph-tools{display:flex;align-items:center;gap:6px;}
     .panel-header{padding:9px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
     .panel-header h3{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--subtext);letter-spacing:0.05em;}
     .toggle-row{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none;}
@@ -161,7 +163,9 @@
     .dm-cur-btn:hover{border-color:var(--accent);color:var(--accent);}
 
 
-    #lobby-middle{flex:1;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);}
+    #lobby-middle{order:2;flex:0 0 380px;min-width:0;display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border);transition:flex-basis 0.27s ease;}
+    #lobby-middle-body{flex:1;display:flex;flex-direction:column;overflow:hidden;min-height:0;}
+    .lobby-tab-tools{display:flex;align-items:center;gap:5px;flex-shrink:0;padding:0 6px;}
     #lobby-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0;}
     .lobby-tab{flex:1;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;color:var(--subtext);text-align:center;cursor:pointer;border-bottom:2px solid transparent;transition:color 0.2s,border-color 0.2s;background:none;border-top:none;border-left:none;border-right:none;}
     .lobby-tab.active{color:var(--accent);border-bottom-color:var(--accent);}
@@ -245,8 +249,23 @@
     .room-join-btn{align-self:flex-start;padding:4px 12px;background:transparent;color:var(--blue);border:1px solid rgba(56,189,248,0.35);border-radius:5px;cursor:pointer;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;transition:background 0.2s;}
     .room-join-btn:hover{background:rgba(56,189,248,0.08);}
     #no-rooms-msg{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--muted);text-align:center;padding:20px;}
-    #lobby-right{width:240px;background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:width 0.27s ease;}
+    #lobby-right{width:240px;background:var(--surface);display:flex;flex-direction:column;flex-shrink:0;overflow:hidden;min-width:0;transition:flex-basis 0.27s ease;}
     #lobby-right.collapsed{width:0;}
+    #lobby-right-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;}
+    /* ── Lobby three-zone focus (same pattern as the room). Left prefers the
+       left rail, Right the right rail, Middle floats to the open side. ── */
+    #lobby-screen.focus-middle #lobby-left  {order:1;}
+    #lobby-screen.focus-middle #lobby-middle{order:2;flex:1 1 0;min-width:0;}
+    #lobby-screen.focus-middle #lobby-right {order:3;}
+    #lobby-screen.focus-left   #lobby-middle{order:1;flex:0 0 380px;}
+    #lobby-screen.focus-left   #lobby-left  {order:2;flex:1 1 0;width:auto;min-width:0;}
+    #lobby-screen.focus-left   #lobby-right {order:3;}
+    #lobby-screen.focus-right  #lobby-left  {order:1;}
+    #lobby-screen.focus-right  #lobby-middle{order:3;flex:0 0 380px;}
+    #lobby-screen.focus-right  #lobby-right {order:2;flex:1 1 0;width:auto;min-width:0;}
+    #lobby-screen.focus-left   #lobby-left-focus,
+    #lobby-screen.focus-middle #lobby-middle-focus,
+    #lobby-screen.focus-right  #lobby-right-focus{background:var(--accent);color:#0a0c0f;border-color:var(--accent);}
 
     /* Sidebar toggle strips */
     .sidebar-strip{width:14px;flex-shrink:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;background:var(--surface);border:none;cursor:col-resize;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:0.72rem;padding:0;transition:color 0.2s,background 0.2s,width 0.15s;user-select:none;}
@@ -386,9 +405,11 @@
     /* CENTER — video stage. No card chrome; subtle on the spotlight only.
        Default flex/order is supplied by the focus model below (one focus-*
        class is always on #room-screen); rail width applies when unfocused. */
-    #video-panel{order:2;flex:0 0 340px;min-width:0;display:flex;flex-direction:column;align-items:center;gap:10px;padding:4px 2px;overflow:hidden;background:transparent;}
+    #video-panel{order:2;flex:0 0 340px;min-width:0;display:flex;flex-direction:column;gap:8px;padding:4px 2px;overflow:hidden;background:transparent;}
     #video-header{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:1px 6px 0;flex:0 0 auto;font-family:'IBM Plex Mono',monospace;}
     #video-header .ch-title{color:var(--subtext);font-weight:600;font-size:0.82rem;letter-spacing:0.02em;}
+    .vh-tools{display:flex;align-items:center;gap:5px;}
+    #video-body{flex:1 1 auto;min-height:0;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;overflow:hidden;}
     #spotlight-slot{flex:1 1 auto;width:100%;min-height:0;display:flex;align-items:center;justify-content:center;background:#000;border:1px solid var(--border);border-radius:12px;overflow:hidden;}
     #spotlight-slot .video-wrapper{width:100%;height:100%;cursor:default;display:flex;align-items:center;justify-content:center;background:#000;border-radius:12px;overflow:hidden;}
     #spotlight-slot .video-wrapper video{width:100%;height:100%;aspect-ratio:auto;object-fit:contain;}
@@ -760,15 +781,20 @@
 </div>
 
 <!-- SCREEN 2: LOBBY -->
-<div class="screen" id="lobby-screen">
+<div class="screen focus-middle" id="lobby-screen">
   <div id="lobby-left">
     <div class="panel-header">
       <h3>ONLINE</h3>
-      <div class="toggle-row" onclick="toggleInvisible()">
-        <div class="pill" id="invis-pill"></div>
-        <span id="invis-label">visible</span>
+      <div class="ph-tools">
+        <div class="toggle-row" onclick="toggleInvisible()">
+          <div class="pill" id="invis-pill"></div>
+          <span id="invis-label">visible</span>
+        </div>
+        <button class="panel-focus" id="lobby-left-focus" onclick="setLobbyFocus('left')" title="Make Online users the centre panel">⤢</button>
+        <button class="panel-chevron" id="lobby-left-chevron" onclick="toggleLobbyZone('left')" title="Collapse / expand">^</button>
       </div>
     </div>
+    <div id="lobby-left-body">
     <div id="lobby-users-list"></div>
     <div id="kc-key-bar" style="display:none;">
       <div id="kc-key-label">🔑 Enter posting key for encrypted messages</div>
@@ -778,8 +804,8 @@
       </div>
       <div id="kc-key-status"></div>
     </div>
+    </div><!-- /#lobby-left-body -->
   </div>
-  <button id="left-strip" class="sidebar-strip" title="Show/hide users panel"><span class="strip-ch">&#8249;</span><span class="strip-lbl">USERS</span></button>
   <div id="lobby-middle">
     <div id="lobby-tabs">
       <button class="lobby-tab" onclick="switchLobbyTab('dm')">💬 DMs</button>
@@ -787,7 +813,12 @@
       <button class="lobby-tab" onclick="switchLobbyTab('active')">🚪 Active Rooms</button>
       <button class="lobby-tab" onclick="switchLobbyTab('included')">✉️ Included Rooms</button>
       <button class="lobby-tab" onclick="switchLobbyTab('uploads')">📦 Uploads</button>
+      <div class="lobby-tab-tools">
+        <button class="panel-focus" id="lobby-middle-focus" onclick="setLobbyFocus('middle')" title="Make this panel the centre">⤢</button>
+        <button class="panel-chevron" id="lobby-middle-chevron" onclick="toggleLobbyZone('middle')" title="Collapse / expand">^</button>
+      </div>
     </div>
+    <div id="lobby-middle-body">
     <div class="lobby-tab-content" id="tab-dm">
       <div id="dm-picker">
         <span style="color:var(--muted);">Open DM with:</span>
@@ -840,11 +871,18 @@
       </div>
       <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
     </div>
+    </div><!-- /#lobby-middle-body -->
   </div>
-  <button id="right-strip" class="sidebar-strip" title="Show/hide rooms panel"><span class="strip-ch">&#8250;</span><span class="strip-lbl">ROOMS</span></button>
   <div id="lobby-right">
-    <div id="create-section">
+    <div class="panel-header">
       <h3>CREATE ROOM</h3>
+      <div class="ph-tools">
+        <button class="panel-focus" id="lobby-right-focus" onclick="setLobbyFocus('right')" title="Make Create Room the centre panel">⤢</button>
+        <button class="panel-chevron" id="lobby-right-chevron" onclick="toggleLobbyZone('right')" title="Collapse / expand">v</button>
+      </div>
+    </div>
+    <div id="lobby-right-body">
+    <div id="create-section">
       <div id="invitee-preview">Select users on the left first.</div>
       <input id="room-name-input" type="text" placeholder="room name…" maxlength="32" oninput="checkRoomName()" autocomplete="off" spellcheck="false"/>
       <div id="room-name-status"></div>
@@ -876,6 +914,7 @@
       <button id="import-room-btn" onclick="document.getElementById('import-room-input').click()">📤 Import .v4room file</button>
       <div style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);line-height:1.5;">Restore a room exported from this or another v4call server. You become the new admin; original allowlist + history are preserved.</div>
     </div>
+    </div><!-- /#lobby-right-body -->
   </div>
   <!-- Mobile bottom-tab nav (hidden on desktop via CSS) -->
   <nav class="mob-nav" id="mob-nav-lobby">
@@ -1148,8 +1187,12 @@
   <div id="video-panel">
     <div id="video-header">
       <span class="ch-title">Screen</span>
-      <button class="panel-focus" id="screen-focus" onclick="setZoneFocus('screen')" title="Make the Screen the centre panel">⤢</button>
+      <div class="vh-tools">
+        <button class="panel-focus" id="screen-focus" onclick="setZoneFocus('screen')" title="Make the Screen the centre panel">⤢</button>
+        <button class="panel-chevron" id="screen-chevron" onclick="toggleVideoStage()" title="Collapse / expand the screen">^</button>
+      </div>
     </div>
+    <div id="video-body">
     <div id="enc-banner">🔒 End-to-End Hive Encryption: ACTIVE</div>
     <div id="control-pill">
       <button id="enable-mic-btn"      onclick="toggleMic()"           title="Turn your microphone on or off for this room">🎤 Unmute</button>
@@ -1163,6 +1206,7 @@
         <div class="video-label" id="local-label">you</div>
       </div>
     </div>
+    </div><!-- /#video-body -->
   </div>
 
   <!-- RIGHT card: Chat & Info -->
@@ -1698,67 +1742,43 @@ async function verifySignature(message, timestamp, signature, fromUsername) {
   } catch(e) { return null; }
 }
 
-// ── Sidebar toggles & resize ─────────────────────────────
-let leftSidebarOpen = true, rightSidebarOpen = true;
-let leftW = 270, rightW = 240;
-
-function toggleLeftSidebar() {
-  leftSidebarOpen = !leftSidebarOpen;
-  const s = document.getElementById('lobby-left');
-  const strip = document.getElementById('left-strip');
-  s.style.width = leftSidebarOpen ? leftW + 'px' : '0px';
-  s.classList.toggle('collapsed', !leftSidebarOpen);
-  strip.classList.toggle('panel-closed', !leftSidebarOpen);
-  strip.querySelector('.strip-ch').innerHTML = leftSidebarOpen ? '&#8249;' : '&#8250;';
+// ── Lobby three-zone focus + collapse (same pattern as the room) ─────────
+// Replaces the old side-strip collapse/resize. Each zone header has a ⤢
+// (focus → wide centre column) and a ^ (collapse body). CSS `order` does the
+// centring. Left prefers the left rail, Right the right, Middle floats.
+const LOBBY_ZONE = {
+  left:   { body: 'lobby-left-body',   chev: 'lobby-left-chevron',   open: '^', closed: 'v' },
+  middle: { body: 'lobby-middle-body', chev: 'lobby-middle-chevron', open: '^', closed: 'v' },
+  right:  { body: 'lobby-right-body',  chev: 'lobby-right-chevron',  open: 'v', closed: '^' },
+};
+function lobbyZoneExpanded(zone) {
+  return document.getElementById(LOBBY_ZONE[zone].body).style.display !== 'none';
 }
-
-function toggleRightSidebar() {
-  rightSidebarOpen = !rightSidebarOpen;
-  const s = document.getElementById('lobby-right');
-  const strip = document.getElementById('right-strip');
-  s.style.width = rightSidebarOpen ? rightW + 'px' : '0px';
-  s.classList.toggle('collapsed', !rightSidebarOpen);
-  strip.classList.toggle('panel-closed', !rightSidebarOpen);
-  strip.querySelector('.strip-ch').innerHTML = rightSidebarOpen ? '&#8250;' : '&#8249;';
+function expandLobbyZone(zone) {
+  const z = LOBBY_ZONE[zone];
+  document.getElementById(z.body).style.display = '';
+  document.getElementById(z.chev).textContent = z.open;
 }
-
-function initSidebarResize(stripId, sidebarId, side, toggleFn) {
-  const strip = document.getElementById(stripId);
-  const sidebar = document.getElementById(sidebarId);
-  let startX, startW, moved;
-  strip.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    startX = e.clientX;
-    startW = parseInt(sidebar.style.width) || sidebar.getBoundingClientRect().width;
-    moved = false;
-    sidebar.style.transition = 'none';
-    document.body.style.cursor = 'col-resize';
-    const onMove = (e) => {
-      if (!moved && Math.abs(e.clientX - startX) > 4) moved = true;
-      if (!moved) return;
-      let w = side === 'left' ? startW + (e.clientX - startX) : startW - (e.clientX - startX);
-      w = Math.max(160, Math.min(500, w));
-      if (side === 'left') leftW = w; else rightW = w;
-      sidebar.style.width = w + 'px';
-      sidebar.classList.remove('collapsed');
-      strip.classList.remove('panel-closed');
-      strip.querySelector('.strip-ch').innerHTML = side === 'left' ? '&#8249;' : '&#8250;';
-      if (side === 'left') leftSidebarOpen = true; else rightSidebarOpen = true;
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      sidebar.style.removeProperty('transition');
-      document.body.style.removeProperty('cursor');
-      if (!moved) toggleFn();
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
+function collapseLobbyZone(zone) {
+  const z = LOBBY_ZONE[zone];
+  document.getElementById(z.body).style.display = 'none';
+  document.getElementById(z.chev).textContent = z.closed;
+  const ls = document.getElementById('lobby-screen');
+  if (ls.classList.contains('focus-' + zone)) {
+    const next = ['middle', 'left', 'right'].find(z2 => z2 !== zone && lobbyZoneExpanded(z2));
+    if (next) setLobbyFocus(next);
+  }
 }
-
-initSidebarResize('left-strip', 'lobby-left', 'left', toggleLeftSidebar);
-initSidebarResize('right-strip', 'lobby-right', 'right', toggleRightSidebar);
+function toggleLobbyZone(zone) {
+  if (lobbyZoneExpanded(zone)) collapseLobbyZone(zone); else expandLobbyZone(zone);
+}
+function setLobbyFocus(zone) {
+  const ls = document.getElementById('lobby-screen');
+  if (!ls) return;
+  ls.classList.remove('focus-left', 'focus-middle', 'focus-right');
+  ls.classList.add('focus-' + zone);
+  expandLobbyZone(zone); // never leave the focused zone collapsed
+}
 
 // ── Invisible ───────────────────────────────────────────
 function toggleInvisible() {
@@ -3460,8 +3480,10 @@ function leaveRoom(opts) {
   // Reset any collapse-chevron state so the next room starts fully expanded.
   document.getElementById('participants-body').style.display = '';
   document.getElementById('chat-body').style.display         = '';
+  document.getElementById('video-body').style.display        = '';
   document.getElementById('participants-chevron').textContent = '^';
   document.getElementById('chat-chevron').textContent         = 'v';
+  document.getElementById('screen-chevron').textContent       = '^';
   // Reset the three-zone focus back to Screen for the next room entry.
   document.getElementById('room-screen').classList.remove('focus-participants', 'focus-chat');
   document.getElementById('room-screen').classList.add('focus-screen');
@@ -6147,20 +6169,38 @@ function transferAdmin(username) {
 // ── Product-layout panel chrome ─────────────────────────────────────────
 // Collapse/expand the LEFT "Participants" card body and the RIGHT "Chat &
 // Info" card body via their header chevrons. Pure show/hide, no persistence.
-function toggleParticipants() {
-  const body = document.getElementById('participants-body');
-  const chev = document.getElementById('participants-chevron');
-  const hidden = body.style.display === 'none';
-  body.style.display = hidden ? '' : 'none';
-  chev.textContent   = hidden ? '^' : 'v';
+// Room zone bodies + chevron glyphs (expanded/collapsed), keyed by zone.
+const ROOM_ZONE = {
+  participants: { body: 'participants-body', chev: 'participants-chevron', open: '^', closed: 'v' },
+  screen:       { body: 'video-body',        chev: 'screen-chevron',       open: '^', closed: 'v' },
+  chat:         { body: 'chat-body',          chev: 'chat-chevron',         open: 'v', closed: '^' },
+};
+function roomZoneExpanded(zone) {
+  return document.getElementById(ROOM_ZONE[zone].body).style.display !== 'none';
 }
-function toggleChatInfo() {
-  const body = document.getElementById('chat-body');
-  const chev = document.getElementById('chat-chevron');
-  const hidden = body.style.display === 'none';
-  body.style.display = hidden ? '' : 'none';
-  chev.textContent   = hidden ? 'v' : '^';
+function expandRoomZone(zone) {
+  const z = ROOM_ZONE[zone];
+  document.getElementById(z.body).style.display = '';
+  document.getElementById(z.chev).textContent = z.open;
 }
+// Collapse a zone; if it was the focused (centre) one, hand focus to a
+// still-expanded zone so you never stare at a wide empty card.
+function collapseRoomZone(zone) {
+  const z = ROOM_ZONE[zone];
+  document.getElementById(z.body).style.display = 'none';
+  document.getElementById(z.chev).textContent = z.closed;
+  const rs = document.getElementById('room-screen');
+  if (rs.classList.contains('focus-' + zone)) {
+    const next = ['screen', 'chat', 'participants'].find(z2 => z2 !== zone && roomZoneExpanded(z2));
+    if (next) setZoneFocus(next);
+  }
+}
+function toggleRoomZone(zone) {
+  if (roomZoneExpanded(zone)) collapseRoomZone(zone); else expandRoomZone(zone);
+}
+function toggleParticipants() { toggleRoomZone('participants'); }
+function toggleChatInfo()     { toggleRoomZone('chat'); }
+function toggleVideoStage()   { toggleRoomZone('screen'); }
 // Reveal/hide the room-management UI (allowlist · ban · admin) inside the
 // Participants card. CSS hides #allowlist-panel unless the card has .mgmt-open,
 // so this works alongside the existing admin-gated display logic in room-info.
@@ -6176,14 +6216,7 @@ function setZoneFocus(zone) {
   if (!rs) return;
   rs.classList.remove('focus-participants', 'focus-screen', 'focus-chat');
   rs.classList.add('focus-' + zone);
-  // Never leave the focused zone collapsed (would be a wide empty card).
-  if (zone === 'participants') {
-    document.getElementById('participants-body').style.display = '';
-    document.getElementById('participants-chevron').textContent = '^';
-  } else if (zone === 'chat') {
-    document.getElementById('chat-body').style.display = '';
-    document.getElementById('chat-chevron').textContent = 'v';
-  }
+  expandRoomZone(zone); // never leave the focused zone collapsed
 }
 
 // Product layout: the centre stage (#video-panel) is always present in a
