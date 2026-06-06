@@ -2642,11 +2642,13 @@ socket.on('attachment-notification', ({ room, sender }) => {
 function renderLobbyRooms(roomsData) {
   // Active rooms: memberCount > 0 (or user has membership — match existing logic via canJoin)
   const activeList = document.getElementById('rooms-list');
-  const noActive = document.getElementById('no-rooms-msg');
   activeList.innerHTML = '';
   const activeRooms = roomsData.filter(r => r.memberCount > 0 || r.allowlist.some(u => u.username === myUsername && r.memberCount > 0));
   if (activeRooms.length === 0) {
-    activeList.appendChild(noActive);
+    // Rebuild the placeholder fresh — the original node was destroyed by the
+    // innerHTML wipe above the first time a room appeared, so we can't re-append
+    // a cached reference (that was the appendChild-null crash). v0.16.28 fix.
+    activeList.innerHTML = '<div id="no-rooms-msg">No active rooms yet.</div>';
   } else {
     activeRooms.forEach(r => {
       const canJoin = r.allowlist.some(u => u.username === myUsername) || !!r.tokenGate;
@@ -2672,13 +2674,14 @@ function renderLobbyRooms(roomsData) {
   // Whether the room has other people in it is not relevant — Included is "rooms
   // I have a key to" regardless of who else is currently there.
   const incList = document.getElementById('included-rooms-list');
-  const noInc = document.getElementById('no-included-msg');
   incList.innerHTML = '';
   const includedRooms = roomsData.filter(r =>
     r.allowlist.some(u => u.username === myUsername) && r.name !== currentRoom
   );
   if (includedRooms.length === 0) {
-    incList.appendChild(noInc);
+    // Same fix as the active list — rebuild the placeholder rather than
+    // re-appending a node the innerHTML wipe already removed.
+    incList.innerHTML = '<div id="no-included-msg">No included rooms (allowlisted but empty).</div>';
   } else {
     includedRooms.forEach(r => {
       const card = document.createElement('div');
@@ -2903,6 +2906,14 @@ function renderDeferredPaidNotice(deferred) {
 }
 
 function prefillAllowlistInvite(username) {
+  // The allowlist panel is CSS-gated behind #users-panel.mgmt-open
+  // (display:none!important otherwise), so an inline display:flex alone does
+  // nothing — open the management UI the same way the ⚙ manage button does,
+  // and make sure the Participants zone is expanded so it's on-screen.
+  // v0.16.28 fix — clicking "Invite →" on a deferred paid invite did nothing.
+  const usersPanel = document.getElementById('users-panel');
+  if (usersPanel) usersPanel.classList.add('mgmt-open');
+  try { if (typeof expandRoomZone === 'function') expandRoomZone('participants'); } catch (_) {}
   const panel = document.getElementById('allowlist-panel');
   const input = document.getElementById('al-add-input');
   if (panel) panel.style.display = 'flex';
