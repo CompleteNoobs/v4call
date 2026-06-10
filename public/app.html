@@ -2024,11 +2024,14 @@ const dmHistoryLoaded = new Set();
 // where status is 'local' | 'federated' | 'nostr-only' | 'offline'. The
 // 'nostr-only' case is the transient post-restart window where Phase D Nostr
 // presence has populated the lobby but WS federation hasn't reconnected yet.
-async function dmPrecheck(target) {
+// purpose: 'dm' (default) may route over WS OR the Nostr payload transport;
+// 'call' is WS-only (calls aren't carried over Nostr), so the server reports a
+// Nostr-routable recipient as 'nostr-only' to the call path.
+async function dmPrecheck(target, purpose = 'dm') {
   try {
     return await new Promise((resolve) => {
       let done = false;
-      socket.emit('dm-precheck', { to: target }, (resp) => {
+      socket.emit('dm-precheck', { to: target, purpose }, (resp) => {
         if (done) return; done = true;
         resolve(resp && resp.status ? resp : { status: 'offline' });
       });
@@ -3065,7 +3068,7 @@ async function initiateCall(callee, callType = 'voice') {
   // dm-precheck handler is generic recipient-routing, not DM-specific. See
   // FED-RECOVERY-NOTES.md Lesson 11 / "WSS-disable-during-Nostr-test trap"
   // for why this gap mattered.
-  const callRouting = await dmPrecheck(callee);
+  const callRouting = await dmPrecheck(callee, 'call');   // calls are WS-only (no Nostr transport)
   if (callRouting.status === 'offline') {
     addLobbyMsg({type:'system',text:`⚠ @${callee} is offline — can't ring.`});
     return;

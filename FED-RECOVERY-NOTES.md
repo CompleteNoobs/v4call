@@ -10,6 +10,7 @@ v4call has **two independent federation layers** that look similar but do comple
 |---|---|---|---|
 | **WS server-to-server** | WebSocket on `/federation` between two v4call servers | Carries actual message payloads cross-server: DMs (text + attachments), call signaling, room invites, paid-flow notifications | Discovery, presence broadcast |
 | **Nostr (Phase C + D)** | Nostr relays via `kind:30078` events | Phase C = peer **discovery** (finding new servers); Phase D = peer **presence broadcast** (who's online on which server) | Any actual payload delivery. No DMs, no calls, no attachments. Just visibility. |
+| **Nostr payload transport** (optional, `NOSTR_FED_TRANSPORT=true`) | NIP-44-encrypted `kind:1314` events on the same relays | Carries **dm + dm-attachment** envelopes server→peer when WS is down/disabled. Reuses the WS `fedHandleMessage` dispatcher via a pseudo-socket. | Calls, room invite/join, presence — those stay WS-only / Phase D. Best-effort (relay reliability), so WS is preferred. |
 
 Both can be enabled independently:
 - `FEDERATION_PEERS` env (WS layer): list of `wss://peer.com/federation` URLs to connect to. Empty → WS fed disabled.
@@ -30,15 +31,15 @@ The user had been running **Nostr-only** for a while (WS fed commented out in `.
 | Same-server text DM | ✓ | ✓ | ✓ |
 | Same-server paid DM | ✓ | ✓ | ✓ |
 | Same-server attachment DM (ipfs-gate) | ✓ | ✓ | ✓ |
-| Cross-server text DM | ✓ | ✗ (no transport) | ✓ |
-| Cross-server paid DM | ✓ | ✗ | ✓ |
-| Cross-server attachment DM | ✓ (v0.16.18) | ✗ | ✓ |
+| Cross-server text DM | ✓ | ✗ → ✓ with `NOSTR_FED_TRANSPORT` | ✓ |
+| Cross-server paid DM | ✓ | ✗ → ✓ with `NOSTR_FED_TRANSPORT` | ✓ |
+| Cross-server attachment DM | ✓ (v0.16.18) | ✗ → ✓ with `NOSTR_FED_TRANSPORT` | ✓ |
 | Cross-server 1:1 call | ✓ | ✗ | ✓ |
 | Cross-server room invite | ✓ | ✗ | ✓ |
 | Cross-server room join (multi-party) | ✓ (browser → host server direct Socket.io) | ✗ | ✓ |
 | Peer **discovery** (finding new servers) | ✗ (manual config only) | ✓ (Phase C scans Nostr) | ✓ |
 
-**Bottom line:** WS server-to-server is the **payload transport**. Nostr is the **presence + discovery layer** on top. You need WS for anything cross-server beyond visibility.
+**Bottom line:** WS server-to-server is the **payload transport** and stays the *preferred* one. Nostr is the **presence + discovery layer** on top — and, with `NOSTR_FED_TRANSPORT=true`, an **optional best-effort payload transport for DMs + attachments** when WS is down/disabled (calls + rooms stay WS-only). See Lesson 12.
 
 ## Lessons learned (chronological — add new ones at the bottom)
 
@@ -180,6 +181,26 @@ Then `docker compose down && docker compose up -d` (no rebuild — `.env` is mou
 
 **The bigger meta-lesson (call it the "WSS-disable-during-Nostr-test trap"):** Whenever you disable WSS fed to isolate-test Nostr, write a one-line note in the .env right next to the change, and a follow-up task to re-enable it. The user lost weeks because Nostr presence made everything look healthy while the WSS pipes had silently regressed. Adjacent rule: any time WS and Nostr can mask each other, default to running BOTH during testing and only isolate one when explicitly verifying that one's behaviour.
 
+### Lesson 12 — Nostr payload transport (the fix for "wrappers over Nostr")
+
+**The quest:** make the ipfs-gate/Pinata media "wrappers" (and text DMs) deliver cross-server over Nostr, so a Nostr-only deployment (WS `FEDERATION_PEERS` commented out) actually works for DMs/attachments — not just *looks* alive via presence (the Lesson 1 trap).
+
+**The realisation that unblocked it:** the Nostr fed was never "broken" when we switched to WS-only — it had only ever done discovery (Phase C) + presence (Phase D). The wrappers were *always* WS-only. So this wasn't a re-enable; it was building the missing payload transport (old open-issue #3).
+
+**The design (server-side only; `nostr-fed.mjs` + `server.js`):**
+- **Pseudo-socket shim.** The WS dispatcher `fedHandleMessage(ws, json)` uses `ws` only for `ws._domain` + `fedSend(ws, reply)` in the dm/dm-attachment cases. A per-peer `{ _domain, readyState:1, send(str){ publish over Nostr } }` object makes those handlers — incl. recipient-side rate enforcement + escrow refunds (design rule #15) — run **unchanged** over Nostr. Replies (`dm-delivered`/`dm-failed`/`dm-attachment-failed`) route back automatically because the pseudo-socket's `send()` re-publishes to the sender server.
+- **Encryption: NIP-44 server→peer**, `kind:1314` (regular/stored so a briefly-offline peer gets relay backlog), `['p',peerHex]` + `['t','v4call-fedmsg']` + NIP-40 `['expiration',…]`. Relay sees only ciphertext; the user-level metadata (from/to/cid/filename/memo) is inside it. **Not** NIP-59 gift-wrap (its `created_at` randomization fights store-and-forward + expiration; the which-servers-talk metadata it hides is already public from Phase C/D).
+- **Trust gate (server.js owns it):** inbound fedmsg pubkey must map to an **approved** domain via the Hive-anchored `verified_nostr_hex` binding (mirrors `recordNostrPresence`). A **type whitelist** (`dm`,`dm-attachment`,`dm-delivered`,`dm-failed`,`dm-attachment-failed`) guarantees hello/call/room/presence never ride Nostr.
+- **Send-side router `fedRouteSend(user, msg)`: WS first, Nostr fallback.** WS stays preferred (latency + guaranteed delivery). `recipientStatus` gains a `nostr` status; `dm-precheck` reports it as `federated` (sendable) for DMs but `nostr-only` for **calls** (`purpose:'call'`) since calls are WS-only.
+
+**MONEY safety — dedup is load-bearing.** `ledgerPayment`/`sendFromEscrow` are NOT idempotent, and relays redeliver events. A redelivered paid fedmsg that re-ran the disburse path would **double-pay**. Guard: event-id dedup in BOTH layers (a `seenIds` Set in the module + an authoritative time-windowed `seenFedEventIds` Map in `server.js` before dispatch) + a per-domain ordering queue. **When testing, explicitly force a resubscribe / restart the recipient and confirm the already-delivered paid message is dropped (no second payout).**
+
+**Gotchas to remember:**
+- Transport needs `FED_DISCOVERY_MODE=nostr|both` AND `FED_PRESENCE_VIA_NOSTR=true` (the router resolves which peer hosts a username from Phase D presence) AND the peer's `NOSTR_PUBKEY` in their signed `v4call-server.json`. Boot-logs a warning if `NOSTR_FED_TRANSPORT=true` without these.
+- Best-effort: a dropped paid fedmsg = sender paid, recipient credited only when it lands. Keep ≥1 operator-controlled (nGate) relay in `NOSTR_RELAYS`.
+- NIP-44 caps plaintext at 65535B; the wrapper is small metadata (file bytes are on IPFS) so there's wide headroom + a 48KB pre-publish guard.
+- This is the *inverse* of the Lesson 1 trap: with the transport on, Nostr-visible now means actually-routable for DMs/attachments — the "visibility lies" gap is closed for those (calls still correctly report unroutable).
+
 ## Current state of the code (v0.16.18)
 
 ### Two new client-side helpers
@@ -209,7 +230,7 @@ Then `docker compose down && docker compose up -d` (no rebuild — `.env` is mou
    - Federation `case 'dm':` handler reject path silent on the receiving side (recipient-side rate enforcement rejecting a free DM by mistake?)
    - Some `[fed-text]` or `[text]` log line will pinpoint it
 2. **Same routing race exists for paid voice/video calls** — `call-invite` socket handler hasn't been updated to use `recipientStatus` yet. Lower priority since voice/video isn't currently the test focus.
-3. **No Nostr-based DM transport** — would let Nostr-only deployments work cross-server. Real engineering work (NIP-17 gift-wrap or similar). Tracked under v0.18.5+ Nostr + Lightning plan. Multi-session build.
+3. ~~**No Nostr-based DM transport**~~ — **RESOLVED (Nostr payload transport, `NOSTR_FED_TRANSPORT`).** DMs + attachments now route over NIP-44-encrypted `kind:1314` events when WS is down/disabled. NIP-44 server→peer (not NIP-17 gift-wrap — gift-wrap's `created_at` randomization fights store-and-forward + expiration for a 3-trusted-operator set). Calls + room invite/join still WS-only (deferred — they need a direct browser↔host Socket.io). See Lesson 12.
 4. **`call.completenoobs.com` peer is in approved-peers.json on both v4call.com and hive-book.com but no current FEDERATION_PEERS line points to it.** Up to operator whether to re-enable that triangle.
 
 ## Test recipes (the noob's cheat sheet)
