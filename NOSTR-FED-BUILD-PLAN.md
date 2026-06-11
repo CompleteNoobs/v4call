@@ -259,6 +259,52 @@ discovery-into-existing-approval (§4.5), no protocol bump (§4.8).
 
 ## 11. Status log
 
+- **2026-06-11** — **🟢 NOSTR PAYLOAD TRANSPORT — SHIPPED & PROVEN (beyond the
+  A→D discovery/presence arc).** DMs + media attachments now ride Nostr relays as
+  a **fallback transport when WSS `/federation` is down/disabled** (optional,
+  `NOSTR_FED_TRANSPORT`, default off). This was the explicit scope boundary §9
+  said this plan was NOT — "Not Nostr DMs / chat content" — reopened and built on
+  purpose once the discovery/presence foundation was stable, because the team
+  wanted DMs/attachments to survive a WSS outage (and a Nostr-only deployment to
+  actually deliver, not just *show* users online — the "visibility lies" trap).
+  **How:** `nostr-fed.mjs` gains `nostrFedSend` (NIP-44-encrypt the existing fed
+  envelope to the peer's pubkey → stored `kind:1314` event, `#p`+`#t` tags, NIP-40
+  expiration) + `startFedTransport` (subscribe for our `#p`, decrypt, hand up).
+  server.js resolves sender-pubkey→approved-domain (Hive-anchored binding), builds
+  a per-peer **pseudo-socket** (`{ _domain, readyState:1, send()→re-publish }`) and
+  runs the SAME `fedHandleMessage` switch the WSS path uses — so the `dm` /
+  `dm-attachment` handlers (recipient-side rate enforcement + escrow disburse +
+  refund, design rule #15) run UNCHANGED and the `dm-delivered`/`*-failed` reply
+  routes back over Nostr. Send-side `fedRouteSend(user,msg)` = **WSS-first,
+  Nostr-fallback**. **Scope kept tight:** only `dm` + `dm-attachment` (+ replies)
+  via a type whitelist; **calls + room invite/join stay WSS-only** (calls are
+  latency-sensitive; room join needs a direct browser↔host Socket.io). **Locked
+  decisions:** NIP-44 server→peer (NOT NIP-59 gift-wrap — its `created_at`
+  randomization fights store-and-forward + expiration; metadata it hides is already
+  public for a 3-operator set; `nostr-tools@2.23.5` has both); `kind:1314` regular/
+  stored (NOT replaceable 30078, NOT ephemeral 2xxxx) so a briefly-offline peer
+  gets relay backlog; **two-layer event-id dedup is money-critical** (ledger/escrow
+  not idempotent → relay redelivery would double-disburse); no `protocol_version`
+  bump (Nostr is outside the WS wire format → mixed-version peers just don't
+  subscribe). `recipientStatus`/`dm-precheck` gained a routable `nostr` status +
+  a `purpose` arg so calls still report `nostr-only`. **Proven 2026-06-11** on the
+  3 prod servers with WSS commented out: paid text DM (3 TEST, full disburse +
+  receipt) AND encrypted ipfs-gate attachment both delivered over the two gated
+  relays. **Gotchas captured:** (1) `NOSTR_FED_TRANSPORT` must actually be set in
+  `.env` on every peer — unset → silent default-off (presence masks it); (2) the
+  well-known `nostr_pubkey` MUST equal the server's `data/nostr/nostr-key.json`
+  signing key (the binding gate uses `verified_nostr_hex || nostr_pubkey`, and
+  `verified_nostr_hex` from a freshly-published well-known takes precedence — a
+  mismatch silently drops that server's presence + fedmsgs); (3) first-ever DM to a
+  Nostr-only user needs a Hive `fetchPubKey` fallback (Nostr presence carries no
+  pubkeys, unlike WSS) — fixed client-side. Best-effort caveat: keep ≥1
+  operator-controlled relay in `NOSTR_RELAYS`; a dropped paid fedmsg = sender paid,
+  recipient credited only on landing. Full design + recovery recipes in
+  `FED-RECOVERY-NOTES.md` Lesson 12; `.env.example` documents the two new vars
+  (`NOSTR_FED_TRANSPORT`, `NOSTR_FEDMSG_TTL_SECONDS`). **Strategic posture:** because
+  rooms keep WSS mandatory, this is **redundancy, not replacement** — a resilient
+  DM/attachment backup, kept default-off unless WSS DM dropouts recur.
+
 - **2026-05-22** — **🟢 NOSTR FEDERATION ARC — COMPLETE.** Phases A
   (throwaway spike) → B (publish own announce) → C (subscribe + Hive-anchored
   discovery, the shippable v0.19-class milestone) → D (cross-server presence,

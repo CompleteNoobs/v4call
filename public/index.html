@@ -196,7 +196,7 @@ footer a{color:#5ad6ff}
 <script>
   // Self-hosters: edit these three values for your server.
   const CONFIG = {
-    SERVER_FEE_PERCENT: null,             // e.g. 2  (means 2%) — leave null to show the test-fed table
+    SERVER_FEE_PERCENT: null,             // e.g. 2 (means 2%) to hard-set it; leave null to auto-fetch this server's live fee from /api/info (falls back to the test-fed table if unavailable)
     SERVER_NAME:        null,             // e.g. "call.example.com"
     GA_MEASUREMENT_ID:  'G-XXXXXXXXXX',   // paste your GA4 measurement ID; leave as-is to disable analytics
   };
@@ -240,16 +240,33 @@ footer a{color:#5ad6ff}
     if(prior === 'accepted') loadGA();
     else if(prior !== 'declined') document.getElementById('testWarning').classList.add('on');
 
-    // operator-set fee swaps the test-fed table for a single-line notice
+    // Platform fee display, in priority order:
+    //  1. operator-set CONFIG.SERVER_FEE_PERCENT (manual override) wins
+    //  2. otherwise ask THIS server's /api/info for its live MINIMUM fee, so the
+    //     page auto-updates when the operator changes DEFAULT_PLATFORM_FEE (no
+    //     manual edit). Other apps can scan the same endpoint across servers.
+    //  3. if neither is available (old server / offline), the static test-fed
+    //     table stays as-is.
+    const feeEl = document.getElementById('feeTableWrap');
+    function renderServerFee(name, pct){
+      if(!feeEl) return;
+      feeEl.innerHTML = '<p>This server (<strong>'+name+'</strong>) takes a minimum of '
+        + '<strong>'+pct+'%</strong> of escrow transactions as the platform fee. '
+        + 'It&rsquo;s a floor &mdash; the actual cut also depends on each user&rsquo;s rate post. '
+        + 'See the server&rsquo;s announcer post on Hive for the canonical value.</p>';
+    }
     if(CONFIG.SERVER_FEE_PERCENT !== null){
-      const el = document.getElementById('feeTableWrap');
-      if(el){
-        const name = CONFIG.SERVER_NAME || 'this server';
-        el.innerHTML = '<p>This server (<strong>'+name+'</strong>) takes '
-          + '<strong>'+CONFIG.SERVER_FEE_PERCENT+'%</strong> of escrow transactions '
-          + 'as the platform fee. See the server&rsquo;s announcer post on Hive '
-          + 'for the canonical value.</p>';
-      }
+      renderServerFee(CONFIG.SERVER_NAME || 'this server', CONFIG.SERVER_FEE_PERCENT);
+    } else {
+      fetch('/api/info', { cache: 'no-store' })
+        .then(r => r.ok ? r.json() : null)
+        .then(info => {
+          if(info && typeof info.platform_fee_percent === 'number'){
+            renderServerFee(info.domain || info.name || 'this server', info.platform_fee_percent);
+          }
+          // else: server has no /api/info yet → keep the static test-fed table
+        })
+        .catch(() => { /* offline / fetch blocked → keep the static test-fed table */ });
     }
 
     // lightbox: any <img> inside a <section> becomes clickable
@@ -855,9 +872,21 @@ JWT:        eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySW5mb3JtYXR...glvAaO_-8
       and <code>@alice@hive-book.com</code> are the same person on Hive.
     </p>
     <p>
-      Federation today runs over <strong>WebSocket</strong>. Nostr
-      federation is on the roadmap and is currently disabled while the
-      cross-fed media wrappers are being unified onto a single transport.
+      Federation runs over a direct server-to-server <strong>WebSocket</strong>
+      link &mdash; the primary, always-on transport. It carries everything:
+      presence, DMs, calls, rooms and payments.
+    </p>
+    <p>
+      <strong>Nostr</strong> runs alongside it as an <strong>optional</strong>
+      layer. Each server publishes to a small set of Nostr relays for two jobs:
+      fast <em>peer discovery</em> (finding other servers in seconds instead of
+      waiting on a periodic blockchain scan) and cross-server <em>presence</em>
+      (seeing who&rsquo;s online elsewhere). As of the latest build it can also
+      act as a <em>fallback transport for DMs and file attachments</em> when the
+      direct WebSocket link is down or disabled &mdash; so a free or paid DM to
+      someone on another server can still get through over the relays. It&rsquo;s
+      off by default and entirely optional; calls and rooms always use the
+      WebSocket link.
     </p>
 
     <h3>Escrow platform fee</h3>

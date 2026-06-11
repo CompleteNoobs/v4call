@@ -2,19 +2,20 @@
 
 A 2-minute "where are we?" snapshot. Detailed context lives in [CLAUDE.md](CLAUDE.md). Operator deploy steps live in [WalkThrough.wiki](WalkThrough.wiki). Federation wire format lives in [FEDERATION-BUILD-SPEC.md](FEDERATION-BUILD-SPEC.md).
 
-Last updated: 2026-04-30
+Last updated: 2026-06-11
 
 ## Current state
 
-- **Software:** v0.16.6 (recipient-side rate enforcement for federated paid flows shipped)
-- **Federation protocol:** v0.4 (unchanged — v0.16.5 + v0.16.6 are server-local fixes, no protocol bumps)
+- **Software:** v0.16.29 (Nostr payload transport — optional DM/attachment fallback over relays; proven on the 3-server prod fed)
+- **Federation protocol:** v0.4 (unchanged — the Nostr payload transport is outside the WS wire format, so no protocol bump)
+- **Transports:** WSS `/federation` is primary and always-on (presence/DMs/calls/rooms/payments). **Nostr relays are an optional fallback** for `dm` + `dm-attachment` when WSS is down/disabled (`NOSTR_FED_TRANSPORT`, default off) and also carry peer discovery + presence. Calls + rooms stay WSS-only.
 - **Production servers (federated):** call.completenoobs.com, hive-book.com, v4call.com
 - **Stable:** yes — multi-party rooms, paid 1:1 calls, paid DMs, cross-server rooms all working
 - **Design rule (Key Design Decisions #15):** Recipients enforce their own rules — caller-side servers are couriers + payment witnesses; the recipient's home server is the only trusted policy enforcer.
 
 ## Right now
 
-**Just shipped:** v0.16.6 — fully validated across federated paid DM flows (5 tests passing) + end-of-cycle UX polish (DM error routing to DM tab + tab unread indicator) shipped and tested.
+**Just shipped:** v0.16.29 — Nostr payload transport (optional DM + attachment fallback over relays), proven 2026-06-11 across the 3-server prod fed with WSS off (paid DM + encrypted attachment both delivered). Plus first-ever-DM `fetchPubKey` fallback + room-manage ⚙ toggle fix. *(Note: the "Next builds" list below predates the v0.16.7–v0.16.29 work and is stale — refresh separately.)*
 **Next planned build:** v0.16.7 — small UX polish pass (3 items, see below).
 
 ## Next builds (in order)

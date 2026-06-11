@@ -201,6 +201,12 @@ Then `docker compose down && docker compose up -d` (no rebuild — `.env` is mou
 - NIP-44 caps plaintext at 65535B; the wrapper is small metadata (file bytes are on IPFS) so there's wide headroom + a 48KB pre-publish guard.
 - This is the *inverse* of the Lesson 1 trap: with the transport on, Nostr-visible now means actually-routable for DMs/attachments — the "visibility lies" gap is closed for those (calls still correctly report unroutable).
 
+**PROVEN 2026-06-11** on the 3 prod servers with WSS commented out: a paid text DM (3 TEST → recipient-side disburse + `dm-delivered` receipt) AND an encrypted ipfs-gate attachment both delivered cross-server over the two gated relays. Three things bit during the rollout, all now understood:
+- **`NOSTR_FED_TRANSPORT` was unset on all 3 servers** → silent default-off (no `fedmsg subscribe`/`publish`), and presence masked it. Set it in `.env` on every peer (needs `FED_DISCOVERY_MODE=nostr|both` + `FED_PRESENCE_VIA_NOSTR=true` too). `.env`-only change → `down && up -d`, no rebuild.
+- **First-ever DM to a Nostr-only user failed silently** — `sendDmMessage` bailed when the recipient pubkey wasn't cached, and Nostr presence (unlike WSS) carries no pubkeys. Fixed client-side: fall back to `fetchPubKey` (Hive posting key is public on-chain) the way the call/attachment/allowlist paths already do.
+- **The attachment "cannot transfer to self / orphan-payments" error was NOT a v4call/Nostr bug** — the ipfs-gate's fee-receiving account equalled the uploader (testin), and Hive blocks self-transfers. Test attachments as a user who isn't the gate's payment account.
+- After publishing nostr keys into a server's `.well-known`, **verify the published key == that server's `data/nostr/nostr-key.json` signing key** — `verified_nostr_hex` (from the well-known) takes precedence in the trust gate, so a mismatch silently drops that server's presence + fedmsgs (a likely cause of asymmetric "server X can't see server Y" presence).
+
 ## Current state of the code (v0.16.18)
 
 ### Two new client-side helpers

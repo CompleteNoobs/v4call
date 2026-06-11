@@ -619,6 +619,8 @@ You should see your rates as JSON, including which currency and rates apply for 
 
 If you want your server to talk to other v4call servers — so users on different servers can call/DM each other — set up federation. This is optional. A standalone server works fine without it.
 
+'''Two transports (the WebSocket one is what you set up below):''' Federation's primary transport is a direct '''server-to-server WebSocket''' link (the <code>FEDERATION_PEERS</code> setting). It carries everything — presence, DMs, calls, rooms and payments. There is also an '''optional Nostr layer''' that runs alongside it: it gives faster peer discovery and cross-server presence, and — if you turn it on — it can act as a '''fallback transport for DMs and file attachments''' when the WebSocket link is down or disabled. The Nostr layer is '''off by default''' and entirely optional; calls and rooms always use the WebSocket link. To enable it, set <code>NOSTR_FED_TRANSPORT=true</code> (plus <code>FED_DISCOVERY_MODE=both</code>, <code>FED_PRESENCE_VIA_NOSTR=true</code>, and a <code>NOSTR_RELAYS</code> list) in your <code>.env</code> on '''every''' peer, and publish your server's Nostr key in your verify file + announce post (the <code>server-sign.html</code> / <code>server-announce.html</code> tools have the Nostr fields). All the Nostr vars are documented with comments in <code>.env.example</code>. Most operators can ignore this and just use the WebSocket federation below.
+
 Federation has two trust steps:
 
 # '''Domain proof''' — you publish a signed JSON file at <code>https://yourdomain.com/.well-known/v4call-server.json</code> proving that your Hive account controls this domain

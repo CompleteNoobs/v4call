@@ -20,7 +20,7 @@ Callers pay to ring. Callees set their own rates. Unused credit is refunded. Eve
 - Free-market platform fees — servers set minimums, users shop around
 - Hive Keychain login — no key paste needed
 - **Mobile UI** — bottom-tab nav, full-width single column on phones
-- **Federation** — cross-server presence, paid DMs, voice/video calls, custom token payments
+- **Federation** — cross-server presence, paid DMs, voice/video calls, custom token payments, cross-server rooms. Runs over a direct server-to-server WebSocket link (primary, always-on). **Nostr** is an optional layer: fast peer discovery + cross-server presence, plus an optional **fallback transport for DMs + file attachments** when the WebSocket link is down/disabled (`NOSTR_FED_TRANSPORT`, off by default; calls + rooms stay WebSocket-only)
 - **Operator tools** — signed verify file generator, on-chain server announcer, peer admin UI
 
 ---
@@ -462,7 +462,7 @@ MIT — see [LICENSE](LICENSE) for full text.
 - **In-repo deploy guide:** [WalkThrough.wiki](WalkThrough.wiki)
 - **Project context:** [CLAUDE.md](CLAUDE.md)
 - **Federation protocol spec:** [FEDERATION-BUILD-SPEC.md](FEDERATION-BUILD-SPEC.md)
-- **Nostr integration design notes:** [NOSTR-DESIGN-NOTES.md](NOSTR-DESIGN-NOTES.md) — design captured ahead of build; not yet implemented (post-v0.17 / post-HiveSigner candidate)
+- **Nostr federation:** [NOSTR-FED-BUILD-PLAN.md](NOSTR-FED-BUILD-PLAN.md) — server-side Nostr peer discovery + cross-server presence + an optional DM/attachment **fallback transport** (`NOSTR_FED_TRANSPORT`, default off) are **implemented**. Design notes: [NOSTR-DESIGN-NOTES.md](NOSTR-DESIGN-NOTES.md). (The separate per-*user* Nostr/Lightning rate-post fields remain planned — v0.18.5.)
 - **GitHub:** https://github.com/CompleteNoobs/v4call
 - **Hive signup:** https://signup.hive.io
 - **Hive Keychain:** https://hive-keychain.com
