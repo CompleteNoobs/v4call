@@ -417,6 +417,9 @@
     /* Management (allowlist/ban/admin) is collapsed by default — the ⚙ toggle
        reveals it. This overrides the inline display:flex that room-info sets. */
     #users-panel:not(.mgmt-open) #allowlist-panel{display:none!important;}
+    /* The ⚙ manage toggle only shows for users who can manage the room (creator)
+       or view the banlist — room-info sets .can-manage. */
+    #users-panel:not(.can-manage) #manage-toggle-btn{display:none;}
 
     /* CENTER — video stage. No card chrome; subtle on the spotlight only.
        Default flex/order is supplied by the focus model below (one focus-*
@@ -2293,9 +2296,13 @@ async function sendDmMessage() {
     return;
   }
 
-  const targetPub = pubKeyCache[dmPanelTarget];
+  // Nostr presence carries no pubkeys (unlike WSS presence), so a first-ever DM
+  // to a Nostr-only-visible user has nothing cached. The posting pubkey is public
+  // on Hive — fetch it by username (same fallback the call / attachment paths use).
+  let targetPub = pubKeyCache[dmPanelTarget];
+  if (!targetPub) { try { targetPub = await fetchPubKey(dmPanelTarget); } catch (_) { targetPub = null; } }
   if (!targetPub) {
-    addLobbyMsg({type:'system', text:`No public key for @${dmPanelTarget} — are they still online?`});
+    addLobbyMsg({type:'system', text:`No public key for @${dmPanelTarget} — they may not have a posting key on Hive, or a Hive node was unreachable. Try again.`, context:'dm'});
     return;
   }
 
@@ -3597,7 +3604,7 @@ function leaveRoom(opts) {
   document.getElementById('room-badge').style.display     = 'none';
   document.getElementById('enc-badge').style.display      = 'none';
   document.getElementById('enc-banner').style.display     = 'none';
-  document.getElementById('users-panel').classList.remove('mgmt-open');
+  document.getElementById('users-panel').classList.remove('mgmt-open', 'can-manage');
   // Reset any collapse-chevron state so the next room starts fully expanded.
   document.getElementById('participants-body').style.display = '';
   document.getElementById('chat-body').style.display         = '';
@@ -3928,7 +3935,11 @@ socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibil
   const showPanel     = amCreator || canSeeBanlist;
 
   const panel = document.getElementById('allowlist-panel');
-  if (!showPanel) { panel.style.display = 'none'; return; }
+  const usersPanel = document.getElementById('users-panel');
+  // .can-manage gates the ⚙ toggle's visibility. Collapse the panel if this user
+  // just lost eligibility (e.g. admin was transferred away).
+  usersPanel.classList.toggle('can-manage', showPanel);
+  if (!showPanel) { usersPanel.classList.remove('mgmt-open'); panel.style.display = 'none'; return; }
   panel.style.display = 'flex';
 
   // Members list — only the creator gets the per-row remove + ban controls.
@@ -6672,7 +6683,16 @@ function toggleVideoStage()   { toggleRoomZone('screen'); }
 // Participants card. CSS hides #allowlist-panel unless the card has .mgmt-open,
 // so this works alongside the existing admin-gated display logic in room-info.
 function toggleRoomManage() {
-  document.getElementById('users-panel').classList.toggle('mgmt-open');
+  const usersPanel = document.getElementById('users-panel');
+  if (!usersPanel || !usersPanel.classList.contains('can-manage')) return; // creator / banlist-viewer only
+  const panel   = document.getElementById('allowlist-panel');
+  const opening = !usersPanel.classList.contains('mgmt-open');
+  usersPanel.classList.toggle('mgmt-open', opening);
+  // Mirror prefillAllowlistInvite (v0.16.28): #allowlist-panel's base style is
+  // display:none and the :not(.mgmt-open) rule only HIDES — so opening must set
+  // inline flex, else a stale inline 'none' (left by room-info / leaveRoom) keeps
+  // it hidden and the button looks dead. THAT was the bug.
+  if (panel) panel.style.display = opening ? 'flex' : 'none';
 }
 
 // Three-zone focus: promote one card to the wide centre column via a
