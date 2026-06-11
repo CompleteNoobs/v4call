@@ -61,6 +61,7 @@ section:last-of-type{border-bottom:none}
 .hero .lead{font-size:1.18rem; color:#c9cfd9; max-width:780px; margin:0 0 1.6rem}
 .hero .pillline{color:#9aa3af; font-size:.9rem; margin-bottom:1.4rem; font-family:ui-monospace,monospace; letter-spacing:.4px}
 .hero .pillline span{color:#7ff0c5}
+.server-fee{color:#f5c451; font-weight:700; font-size:1.08rem; margin:.2rem 0 1.3rem; letter-spacing:.2px}
 
 .cta{display:flex; gap:.8rem; flex-wrap:wrap; margin-top:1.6rem}
 .btn{
@@ -247,26 +248,34 @@ footer a{color:#5ad6ff}
     //     manual edit). Other apps can scan the same endpoint across servers.
     //  3. if neither is available (old server / offline), the static test-fed
     //     table stays as-is.
-    const feeEl = document.getElementById('feeTableWrap');
-    function renderServerFee(name, pct){
-      if(!feeEl) return;
-      feeEl.innerHTML = '<p>This server (<strong>'+name+'</strong>) takes a minimum of '
-        + '<strong>'+pct+'%</strong> of escrow transactions as the platform fee. '
-        + 'It&rsquo;s a floor &mdash; the actual cut also depends on each user&rsquo;s rate post. '
-        + 'See the server&rsquo;s announcer post on Hive for the canonical value.</p>';
+    const feeEl     = document.getElementById('feeTableWrap');
+    const feeBanner = document.getElementById('serverFeeBanner');
+    function applyServerFee(name, pct){
+      // Gold one-liner at the top of the hero…
+      if(feeBanner){
+        feeBanner.textContent = 'This server’s escrow fee is ' + pct + '%';
+        feeBanner.style.display = '';
+      }
+      // …plus the fuller note where the test-fed table was.
+      if(feeEl){
+        feeEl.innerHTML = '<p>This server (<strong>'+name+'</strong>) takes a minimum of '
+          + '<strong>'+pct+'%</strong> of escrow transactions as the platform fee. '
+          + 'It&rsquo;s a floor &mdash; the actual cut also depends on each user&rsquo;s rate post. '
+          + 'See the server&rsquo;s announcer post on Hive for the canonical value.</p>';
+      }
     }
     if(CONFIG.SERVER_FEE_PERCENT !== null){
-      renderServerFee(CONFIG.SERVER_NAME || 'this server', CONFIG.SERVER_FEE_PERCENT);
+      applyServerFee(CONFIG.SERVER_NAME || 'this server', CONFIG.SERVER_FEE_PERCENT);
     } else {
       fetch('/api/info', { cache: 'no-store' })
         .then(r => r.ok ? r.json() : null)
         .then(info => {
           if(info && typeof info.platform_fee_percent === 'number'){
-            renderServerFee(info.domain || info.name || 'this server', info.platform_fee_percent);
+            applyServerFee(info.domain || info.name || 'this server', info.platform_fee_percent);
           }
-          // else: server has no /api/info yet → keep the static test-fed table
+          // else: server has no /api/info yet → banner stays hidden, static table stays
         })
-        .catch(() => { /* offline / fetch blocked → keep the static test-fed table */ });
+        .catch(() => { /* offline / fetch blocked → banner stays hidden, static table stays */ });
     }
 
     // lightbox: any <img> inside a <section> becomes clickable
@@ -304,6 +313,7 @@ footer a{color:#5ad6ff}
 <section class="hero">
   <div class="wrap">
     <div class="pillline">MIT&nbsp;LICENSED &nbsp; · &nbsp; v0.16.x &nbsp; · &nbsp; HIVE&nbsp;BLOCKCHAIN &nbsp; · &nbsp; WEBRTC</div>
+    <p class="server-fee" id="serverFeeBanner" aria-live="polite" style="display:none"></p>
     <h1>Know your caller. <br>Cryptographic proof, not promises.</h1>
     <p class="lead">
       v4call is paid, end-to-end-encrypted voice, video, screen-share and chat
