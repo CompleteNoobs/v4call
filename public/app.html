@@ -2209,8 +2209,8 @@ async function openDmPanel(username) {
       if (routing.federationEnabled === false) {
         rateEl.textContent  = `⚠ Cross-server DM unavailable (WS fed disabled)`;
         rateEl.className    = 'blocked';
-        rateEl.title        = `@${username} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — there's no transport to deliver DMs. Operator needs to enable FEDERATION_PEERS in .env.`;
-        inputEl.placeholder = `WS federation disabled — cross-server DMs not routable.`;
+        rateEl.title        = `@${username} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled and the Nostr DM transport off — no transport to deliver DMs. Operator needs to enable FEDERATION_PEERS or NOSTR_FED_TRANSPORT in .env.`;
+        inputEl.placeholder = `Cross-server DMs not routable (WS + Nostr transport both off).`;
       } else {
         rateEl.textContent  = `⏳ Federation reconnecting (${routing.domain || 'peer'}) — wait ~30s`;
         rateEl.className    = 'loading';
@@ -2290,7 +2290,7 @@ async function sendDmMessage() {
   }
   if (routing.status === 'nostr-only') {
     const text = (routing.federationEnabled === false)
-      ? `@${dmPanelTarget} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — cross-server DMs aren't routable. No payment charged.`
+      ? `@${dmPanelTarget} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS federation disabled and the Nostr DM transport off — cross-server DMs aren't routable. No payment charged.`
       : `⏳ @${dmPanelTarget} is shown via Nostr presence (${routing.domain || 'peer'}) but WS federation hasn't reconnected yet. Try again in ~30s — no payment charged.`;
     addLobbyMsg({ type:'system', text, context:'dm' });
     return;
@@ -5523,7 +5523,7 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
     }
     if (routing.status === 'nostr-only') {
       const msg = (routing.federationEnabled === false)
-        ? `@${dmContext.target} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS server-to-server federation disabled — cross-server attachments aren't routable. No payment charged.`
+        ? `@${dmContext.target} is on ${routing.domain || 'peer'} (visible via Nostr presence), but this server has WS federation disabled and the Nostr transport off — cross-server attachments aren't routable. No payment charged.`
         : `⏳ @${dmContext.target} is shown via Nostr (${routing.domain || 'peer'}) but WS federation is still reconnecting. Try again in ~30s — no payment charged.`;
       throw new Error(msg);
     }

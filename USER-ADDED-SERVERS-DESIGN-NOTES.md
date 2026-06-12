@@ -172,7 +172,7 @@ User initially suggested 3. Reasonable for browser resource cost (3 extra Socket
 User's framing: "nGate and IPFS-Gate is required". Both are higher-priority dependency work. User-added servers is a feature-rich enhancement that benefits power users + the multi-server-friend-group use case, but doesn't block anyone today (operator-level federation covers the 80% case).
 
 Comes back into focus once:
-- Nostr discovery layer (v0.19+) is in production — gives this feature a "verified server" path
+- Nostr discovery + presence layer (shipped 2026-05) is in production — gives this feature a "verified server" path (an optional Nostr DM/attachment fallback transport also shipped 2026-06)
 - nGate + ipfs-gate are stable — no longer competing for design + ops attention
 - Multi-escrow rate-editor extension is built — unblocks the paid-flow piece
 
@@ -185,7 +185,7 @@ Likely v0.20+ feature target. Probably 2-3 sessions of work:
 
 ## Open questions to answer when you pick this back up
 
-1. **Does Nostr discovery (v0.19+) ship before or alongside user-added servers?** If before, the Add Server dialog can have a "Browse known servers" picker (Nostr-sourced) alongside the manual URL entry. If alongside, manual entry only for v0.1.
+1. ~~**Does Nostr discovery ship before or alongside user-added servers?**~~ **Resolved: Nostr discovery + presence are already in production (shipped 2026-05).** So the Add Server dialog *can* have a "Browse known servers" picker (Nostr-sourced) alongside the manual URL entry from day one.
 2. **Does adding a server require Keychain login at add-time, or just at first comm action?** Add-time is friendlier UX (user knows immediately if the server doesn't accept them) but burns a Keychain prompt. Lazy login is fewer prompts but failures surface later.
 3. **What happens to user-added servers when the operator of one disappears?** Server-status sidebar should clearly show "● online", "○ offline", "✗ unreachable", with auto-retry on the offline cases and manual remove for the unreachable ones.
 4. **Cross-server room invites (item 1 in "Doesn't work cleanly")** — is the DM-link workaround acceptable, or does this need a proper protocol extension? Acceptable for v0.1; protocol extension only if usage data shows users actually want federated rooms across user-added servers.

@@ -51,7 +51,9 @@ The user had been running **Nostr-only** for a while (WS fed commented out in `.
 
 **Fix (v0.16.18):** Added `recipientStatus(username)` ([server.js:951](server.js#L951)) that returns one of `local | federated | nostr-only | offline`. The `dm-precheck` socket call lets the client check status BEFORE prompting for any Keychain payments. The DM panel surfaces a clear "Cross-server DM unavailable (WS fed disabled)" badge when state is `nostr-only` AND `FEDERATION_ENABLED === false`. When WS is enabled but reconnecting → "⏳ Federation reconnecting — wait ~30s".
 
-**For the noob who forgets:** If users appear online but DMs say "not online" / never arrive, FIRST check `grep FEDERATION_PEERS .env` on both servers. If commented out, WS fed is off and Nostr is lying to your eyes.
+**For the noob who forgets:** If users appear online but DMs say "not online" / never arrive, FIRST check `grep FEDERATION_PEERS .env` on both servers. If commented out, WS fed is off — **and** if `NOSTR_FED_TRANSPORT` is also off, Nostr is lying to your eyes (presence with no transport).
+
+**Update (v0.16.29):** this trap is now **resolved for DMs + file attachments** when `NOSTR_FED_TRANSPORT=true` — those route over Nostr even with WSS down (see Lesson 12). The trap still fully applies to **calls + rooms** (always WSS-only), and to DMs/attachments when the transport is off. So "Nostr-visible" now means "routable for DMs/attachments if the transport is on; visible-only otherwise."
 
 ### Lesson 2 — Paid actions MUST gate on routing before charging
 
@@ -262,7 +264,7 @@ docker compose logs app 2>&1 | grep -E "\[text\]|\[fed-text\]|\[fed-att\]|lobby-
 - Receiver side should log: `[fed-text] ← @from@peer → @to: delivered to local socket (sid abc…)`. If you see `recipient NOT in local lobbyUsers — message stored in chat DB only`, the recipient socket isn't where the receiver expected it to be (maybe the lobby-users state on hive-book.com side missed an update).
 
 ### "Is the user actually online via WS, or just visible via Nostr?"
-Look at the lobby snapshot — federated users have a `server` badge. If you can DM them and the dm-precheck returns `federated` (not `nostr-only`), WS is the source. If `nostr-only`, only presence is via Nostr.
+Look at the lobby snapshot — federated users have a `server` badge. `dm-precheck` tells you the route: `federated` = routable (WS if connected, **or** the Nostr transport when `NOSTR_FED_TRANSPORT` is on — it returns `via:'nostr'` in that case); `nostr-only` = visible via Nostr presence but **not** routable (WS down/disabled AND transport off). To see which transport actually carried a DM, check the logs for `[fed-text]` (WS) vs `[nostr] fedmsg` (Nostr transport).
 
 ## What to do RIGHT NOW (next test cycle)
 
