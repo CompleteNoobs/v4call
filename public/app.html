@@ -3051,14 +3051,17 @@ function knockRoom(name) {
 }
 socket.on('join-rejected', ({ room, reason }) => {
   addLobbyMsg({type:'system',text:`Could not join #${room}: ${reason}`});
-  showScreen('lobby-screen');
-  document.getElementById('leave-room-btn').classList.remove('shown');
-  document.getElementById('popout-btn').classList.remove('shown');
-  document.getElementById('room-badge').style.display     = 'none';
-  document.getElementById('enc-badge').style.display      = 'none';
-  document.getElementById('enc-banner').style.display     = 'none';
+  // If we were rejected from the room we believe we're in — e.g. a reconnect
+  // into a room that no longer exists after everyone disconnected/slept — fully
+  // tear down the stale room UI (including the creator-only Export / End Room
+  // header buttons) and return to the lobby. A partial cleanup here used to
+  // leave those buttons stuck visible in the lobby header. When we're rejected
+  // from a DIFFERENT room while legitimately in another, leave that one intact.
+  if (!currentRoom || room === currentRoom) {
+    leaveRoom({ skipServerEmit: true });
+  }
 });
-socket.on('kicked', ({ reason }) => { alert(reason); leaveRoom(); });
+socket.on('kicked', ({ reason }) => { if (!currentRoom) return; alert(reason); leaveRoom(); });
 
 // Server rejected our lobby identity (posting pubkey didn't match the Hive
 // account). The server has already disconnected this socket; return to login.
@@ -4032,6 +4035,10 @@ function endRoomForAll() {
   if (!currentRoom || !amCreator) return;
   if (!confirm(`End #${currentRoom} for everyone? All members will be kicked back to the lobby and the room (plus its history) will be deleted. This cannot be undone.`)) return;
   rsock().emit('room-end-all');
+  // Reset our own UI now rather than waiting for the server's 'kicked' echo — if
+  // the room was already gone server-side (everyone disconnected), no echo comes
+  // back and the room header buttons (Export / End Room) would stay stuck.
+  leaveRoom({ skipServerEmit: true });
 }
 
 // v0.14.5: download the current room as a .v4room JSON snapshot. Filename
