@@ -1389,11 +1389,23 @@ const FEDERATED_ROOM_EVENTS = [
   'call-receipt', 'payout-failed',
   'call-cap-warning', 'call-cap-reached',
   'credit-warning', 'credit-exhausted', 'credit-topup',
-  'kicked', 'join-rejected'
+  'kicked', 'join-rejected',
+  'displaced'  // v0.16.17 multi-tab — must forward from temp socket like kicked
 ];
 
 // Returns the socket to use for room/RTC/call emits.
 function rsock() { return activeRoomSocket || socket; }
+
+// Re-assert room membership on the socket that hosts the room. Called on
+// every temp-socket connect (incl. auto-reconnect after a wifi blip) because
+// the host server's disconnect handler drops us from room.members immediately.
+function rejoinHostedRoom(sock) {
+  if (!currentRoom || !sock) return;
+  const payload = { room: currentRoom, username: myUsername, pubKey: myPubKey };
+  if (sock === activeRoomSocket) payload.homeServer = MY_SERVER_DOMAIN;
+  sock.emit('join', payload);
+  setTimeout(() => sock.emit('resync'), 1000);
+}
 
 function openFederatedRoomSocket(serverDomain, onReady) {
   if (activeRoomSocket) closeFederatedRoomSocket();
@@ -1416,6 +1428,7 @@ function openFederatedRoomSocket(serverDomain, onReady) {
   activeRoomSocket.on('connect', () => {
     addLobbyMsg && addLobbyMsg({ type: 'system', text: `🔗 Connected to ${serverDomain} for this call.` });
     activeRoomSocket.emit('lobby-join', { username: myUsername, pubKey: myPubKey });
+    if (currentRoom) rejoinHostedRoom(activeRoomSocket);
     if (onReady) onReady();
   });
   activeRoomSocket.on('connect_error', (err) => {
@@ -2076,6 +2089,7 @@ async function openDmPanel(username) {
   // v0.16.17 — also fetch persisted dm-attachments for this conversation.
   // CID-level dedup in addAttachmentBubble guards against reconnect replays.
   if (!dmHistoryLoaded.has(username)) {
+    dmHistoryLoaded.add(username); // mark synchronously — a rapid second openDmPanel must be a no-op (was added in the async dm-history callback → race → duplicate history)
     socket.emit('dm-attachments-history', { withUser: username }, (envs) => {
       if (Array.isArray(envs)) {
         for (const env of envs) {
@@ -2084,9 +2098,7 @@ async function openDmPanel(username) {
         }
       }
     });
-  }
-  if (!dmHistoryLoaded.has(username)) socket.emit('dm-history', { withUser: username }, (history) => {
-    dmHistoryLoaded.add(username);
+    socket.emit('dm-history', { withUser: username }, (history) => {
     if (history && history.length > 0) {
       // Add history divider before the history messages
       const c = document.getElementById('dm-messages');
@@ -2124,6 +2136,7 @@ async function openDmPanel(username) {
       c.scrollTop = c.scrollHeight;
     }
   });
+  }
 
   const rateResp = await new Promise(resolve =>
     socket.emit('get-all-rates', { callee: username, callType: 'text' }, resolve)
@@ -2621,7 +2634,7 @@ function refreshUnreadAttachmentAffordance() {
   for (const r of data) {
     if (!roomsWithUnreadAttachment.has(r.name)) continue;
     const inActive = r.memberCount > 0;
-    const inIncluded = r.allowlist.some(u => u.username === myUsername) && r.name !== currentRoom;
+    const inIncluded = r.iAmAllowlisted && r.name !== currentRoom;
     if (inActive) activeHasUnread = true;
     if (inIncluded) includedHasUnread = true;
   }
@@ -2653,7 +2666,7 @@ function renderLobbyRooms(roomsData) {
   // Active rooms: memberCount > 0 (or user has membership — match existing logic via canJoin)
   const activeList = document.getElementById('rooms-list');
   activeList.innerHTML = '';
-  const activeRooms = roomsData.filter(r => r.memberCount > 0 || r.allowlist.some(u => u.username === myUsername && r.memberCount > 0));
+  const activeRooms = roomsData.filter(r => r.memberCount > 0);
   if (activeRooms.length === 0) {
     // Rebuild the placeholder fresh — the original node was destroyed by the
     // innerHTML wipe above the first time a room appeared, so we can't re-append
@@ -2661,10 +2674,10 @@ function renderLobbyRooms(roomsData) {
     activeList.innerHTML = '<div id="no-rooms-msg">No active rooms yet.</div>';
   } else {
     activeRooms.forEach(r => {
-      const canJoin = r.allowlist.some(u => u.username === myUsername) || !!r.tokenGate;
+      const canJoin = r.iAmAllowlisted || !!r.tokenGate;
       const card = document.createElement('div');
       card.className = 'room-card' + (roomsWithUnreadAttachment.has(r.name) ? ' has-unread-attachment' : '');
-      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
+      const chips     = `<span class="allowlist-chip">👥 ${r.allowlistCount} invited</span>`;
       const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
       const safeName = escapeHtml(r.name);
       card.innerHTML = `
@@ -2686,7 +2699,7 @@ function renderLobbyRooms(roomsData) {
   const incList = document.getElementById('included-rooms-list');
   incList.innerHTML = '';
   const includedRooms = roomsData.filter(r =>
-    r.allowlist.some(u => u.username === myUsername) && r.name !== currentRoom
+    r.iAmAllowlisted && r.name !== currentRoom
   );
   if (includedRooms.length === 0) {
     // Same fix as the active list — rebuild the placeholder rather than
@@ -2696,7 +2709,7 @@ function renderLobbyRooms(roomsData) {
     includedRooms.forEach(r => {
       const card = document.createElement('div');
       card.className = 'room-card' + (roomsWithUnreadAttachment.has(r.name) ? ' has-unread-attachment' : '');
-      const chips     = r.allowlist.map(u => `<span class="allowlist-chip ${u.online?'online':'offline'}">@${escapeHtml(u.username)}</span>`).join('');
+      const chips     = `<span class="allowlist-chip">👥 ${r.allowlistCount} invited</span>`;
       const tokenLine = r.tokenGate ? `<div class="room-card-token-gate">🪙 Open to holders of ${escapeHtml(r.tokenGate.amount)} ${escapeHtml(r.tokenGate.symbol)}</div>` : '';
       const safeName = escapeHtml(r.name);
       card.innerHTML = `
@@ -3046,6 +3059,13 @@ socket.on('join-rejected', ({ room, reason }) => {
   document.getElementById('enc-banner').style.display     = 'none';
 });
 socket.on('kicked', ({ reason }) => { alert(reason); leaveRoom(); });
+
+// Server rejected our lobby identity (posting pubkey didn't match the Hive
+// account). The server has already disconnected this socket; return to login.
+socket.on('lobby-join-rejected', ({ reason }) => {
+  alert(reason || 'Identity verification failed — please log in again.');
+  try { showScreen('login-screen'); } catch(_) {}
+});
 
 // v0.16.17 — server tells this tab it was displaced by the same user joining
 // from another tab/device. Server has already removed this tab's membership
@@ -3539,7 +3559,7 @@ async function enterRoom(roomName) {
   if (activeRoomSocket) joinPayload.homeServer = MY_SERVER_DOMAIN;
   rsock().emit('join', joinPayload);
   setTimeout(() => rsock().emit('resync'), 1500);
-  addRoomUser(socket.id, myUsername, myPubKey, true);
+  addRoomUser(rsock().id, myUsername, myPubKey, true);
   addSystemMsg(`You joined #${roomName} as @${myUsername}`);
   resolve();
   }); // end Promise
@@ -3910,7 +3930,7 @@ function updatePeerCount() {
 socket.on('room-info', ({ creator, allowlist, tokenGate, banlist, banlistVisibility, spotlight }) => {
   // amCreator can both flip on (we just got promoted) AND flip off (admin
   // was transferred away from us) so set it to the truth, don't only OR it.
-  amCreator = (creator === myUsername);
+  amCreator = (creator === myUsername) || (creator === `${myUsername}@${MY_SERVER_DOMAIN}`);
   // v0.16.15 — cache the room allowlist so the attachment picker can include
   // members who are allowlisted but not currently in the room socket.
   currentRoomAllowlist = Array.isArray(allowlist) ? allowlist.slice() : [];
@@ -6180,11 +6200,17 @@ document.getElementById('msg-input').addEventListener('input', function() {
 });
 
 // ── Socket room events ──────────────────────────────────
+function memberDisplayKey(u) {
+  if (!u) return '';
+  return u.homeServer ? `${u.username}@${u.homeServer}` : u.username;
+}
 function applyRoomUsers(users) {
   for (const u of users) {
-    if (u.username === myUsername) continue; // self — covers both main and federated temp-socket cases
+    if (u.username === myUsername && !u.homeServer) continue; // local self
+    if (u.username === myUsername && u.homeServer === MY_SERVER_DOMAIN) continue; // federated self
     if (document.getElementById('ue-'+u.socketId)) continue;
-    if (Object.keys(roomUsers).find(s => roomUsers[s].username === u.username)) continue;
+    const uKey = memberDisplayKey(u);
+    if (Object.keys(roomUsers).find(s => memberDisplayKey(roomUsers[s]) === uKey)) continue;
     addRoomUser(u.socketId, u.username, u.pubKey, false, u.joinedVia, u.homeServer);
     createOffer(u.socketId);
   }
@@ -6192,7 +6218,8 @@ function applyRoomUsers(users) {
 socket.on('room-users',        (users) => { applyRoomUsers(users); });
 socket.on('room-users-resync', (users) => { applyRoomUsers(users); });
 socket.on('user-joined', ({ socketId, username, pubKey, joinedVia, homeServer }) => {
-  const existingSid = Object.keys(roomUsers).find(s => roomUsers[s].username === username);
+  const joinKey = homeServer ? `${username}@${homeServer}` : username;
+  const existingSid = Object.keys(roomUsers).find(s => memberDisplayKey(roomUsers[s]) === joinKey);
   if (existingSid) {
     if (existingSid !== socketId) {
       roomUsers[socketId] = roomUsers[existingSid]; delete roomUsers[existingSid];
