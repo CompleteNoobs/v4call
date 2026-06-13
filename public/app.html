@@ -1504,6 +1504,16 @@ function floorFor(prec) {
   const p = (typeof prec === 'number') ? prec : 3;
   return Math.pow(10, -p);
 }
+// Display-only formatter when the exact option.precision isn't on hand: HBD/HIVE
+// keep their 3-decimal style; tokens show up to 8 decimals with trailing zeros
+// stripped (so 0.0000001 reads as "0.0000001", not "0.000" or "0.00000010").
+function dfmt(amount, currency) {
+  const cur = currency || 'HBD';
+  if (cur === 'HBD' || cur === 'HIVE') return Number(amount || 0).toFixed(3);
+  let s = Number(amount || 0).toFixed(8);
+  if (s.indexOf('.') >= 0) s = s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  return s;
+}
 
 // Single delegated click handler for any element rendered with [data-action]
 // + the relevant [data-user] / [data-room] attributes. Replaces the prior
@@ -2417,11 +2427,11 @@ socket.on('lobby-dm', async ({ from, ciphertext, signature, timestamp, textPaid,
 socket.on('lobby-dm-error', (msg) => { addLobbyMsg({type:'system', text:`⚠ ${msg}`, context:'dm'}); });
 socket.on('lobby-dm-payment-required', ({ to, rate, currency }) => {
   const cur = currency || 'HBD';
-  addLobbyMsg({type:'system', text:`@${to} requires ${rate.toFixed(3)} ${cur} per message — use the DM button to open the DM panel.`, context:'dm'});
+  addLobbyMsg({type:'system', text:`@${to} requires ${dfmt(rate, cur)} ${cur} per message — use the DM button to open the DM panel.`, context:'dm'});
 });
 socket.on('text-payment-received', ({ from, amount, currency }) => {
   const cur = currency || 'HBD';
-  addLobbyMsg({type:'system', text:`💰 @${from} paid you ${amount.toFixed(3)} ${cur} for a message — payout on its way.`, context:'dm'});
+  addLobbyMsg({type:'system', text:`💰 @${from} paid you ${dfmt(amount, cur)} ${cur} for a message — payout on its way.`, context:'dm'});
 });
 
 // ── DM unread alert on login ─────────────────────────────────
@@ -2464,7 +2474,7 @@ function renderMissedCallRow(c) {
 
   const when = c.started_at ? formatMissedCallTime(c.started_at) : '';
   const cur  = c.ring_currency || 'HBD';
-  const amt  = parseFloat(c.ring_paid).toFixed(3);
+  const amt  = dfmt(c.ring_paid, cur);
 
   row.innerHTML = `
     <div class="mc-line1">
@@ -2496,7 +2506,7 @@ function refundMissedCall(callId, rowEl) {
   socket.emit('refund-ring-fee', { callId }, (resp) => {
     if (resp && resp.success) {
       const cur = resp.currency || 'HBD';
-      const amt = parseFloat(resp.amount).toFixed(3);
+      const amt = dfmt(resp.amount, cur);
       const line2 = rowEl.querySelector('.mc-line2');
       if (line2) {
         const replacement = document.createElement('span');
@@ -2533,7 +2543,7 @@ function dismissMissedCallsAlert() {
 // Caller-side notification when the callee refunds the ring fee.
 socket.on('ring-fee-refunded', ({ callId, by, amount, currency }) => {
   const cur = currency || 'HBD';
-  const amt = parseFloat(amount).toFixed(3);
+  const amt = dfmt(amount, cur);
   addLobbyMsg({ type: 'system', text: `↩️ @${by} refunded your ring fee of ${amt} ${cur} (call ${callId}).` });
 });
 
@@ -2606,7 +2616,7 @@ function addLobbyMsg({ type, from, text, isSelf, to, sigOk, textPaid, currency, 
     const sigBadge  = sigOk===true ? `<span class="sig-ok">✓ signed</span>` : sigOk===false ? `<span class="sig-bad">⚠ bad sig</span>` : sigOk===null ? `<span style="font-size:0.58rem;color:var(--muted)">~ signed</span>` : '';
     const typeBadge = type==='dm' ? `<span class="dm-tag">🔒 ${isSelf?'→ '+to:'DM'}</span>` : `<span class="broadcast-tag">📢</span>`;
     const cur       = currency || 'HBD';
-    const paidBadge = (textPaid && textPaid >= 0.001) ? `<span style="font-size:0.58rem;color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);padding:1px 5px;border-radius:3px;">💰 ${parseFloat(textPaid).toFixed(3)} ${escHtml(cur)}</span>` : '';
+    const paidBadge = (textPaid && textPaid > 0) ? `<span style="font-size:0.58rem;color:var(--green);background:rgba(74,222,128,0.08);border:1px solid rgba(74,222,128,0.25);padding:1px 5px;border-radius:3px;">💰 ${dfmt(textPaid, cur)} ${escHtml(cur)}</span>` : '';
     el.innerHTML = `<div class="lmsg-meta"><span>@${isSelf?myUsername:from}</span>${typeBadge}${paidBadge}${sigBadge}<span>${stampText}</span></div><div class="lmsg-text">${linkify(text)}</div>`;
   }
   c.appendChild(el); c.scrollTop = c.scrollHeight;
@@ -3000,7 +3010,7 @@ socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id, pa
     ? `<br><span style="color:var(--subtext);font-size:0.7rem;">Cross-server invite from ${from_server}.</span>`
     : '';
   const paidNote = paid_invite_id
-    ? `<br><span style="color:var(--purple);font-size:0.72rem;">💜 Paid invite — @${from} sent ${parseFloat(paid_amount).toFixed(3)} ${escapeHtml(paid_currency)}. Accept = you keep the fee (minus platform). Decline = refund to inviter.</span>`
+    ? `<br><span style="color:var(--purple);font-size:0.72rem;">💜 Paid invite — @${from} sent ${dfmt(paid_amount, paid_currency)} ${escapeHtml(paid_currency)}. Accept = you keep the fee (minus platform). Decline = refund to inviter.</span>`
     : '';
   document.getElementById('invite-popup-text').innerHTML =
     `${fromLabel} invites you to <strong>#${roomName}</strong>` +
@@ -3008,7 +3018,7 @@ socket.on('room-invite', ({ roomName, from, invitees, from_server, invite_id, pa
     fedNote + paidNote;
   document.getElementById('invite-popup').style.display = 'block';
   const sysFrom = from_server ? `@${from}@${from_server}` : `@${from}`;
-  const paidTag = paid_invite_id ? ` 💜 ${parseFloat(paid_amount).toFixed(3)} ${paid_currency}` : '';
+  const paidTag = paid_invite_id ? ` 💜 ${dfmt(paid_amount, paid_currency)} ${paid_currency}` : '';
   showInviteMsg(`📞 ${sysFrom} invited you to #${roomName}${paidTag}`);
 });
 
@@ -3391,7 +3401,7 @@ socket.on('call-ringing', ({ callee, roomName }) => {
     const r   = pendingRates;
     const cur = r._currency || r.currency || 'HBD';
     const el  = document.getElementById('calling-cost-display');
-    el.textContent = `Ring: ${(r.ring||0).toFixed(3)} ${cur} paid · Connect: ${(r.connect||0).toFixed(3)} ${cur} on accept · ${(r.rate||0).toFixed(3)} ${cur}/hr`;
+    el.textContent = `Ring: ${dfmt(r.ring||0, cur)} ${cur} paid · Connect: ${dfmt(r.connect||0, cur)} ${cur} on accept · ${dfmt(r.rate||0, cur)} ${cur}/hr`;
     el.style.display = '';
   }
 });
@@ -3472,7 +3482,7 @@ socket.on('incoming-call', async ({ caller, callerPubKey, roomName, callType, ri
   // Show what was paid
   if (ringFeePaid > 0) {
     const el = document.getElementById('incoming-cost-display');
-    el.textContent = `Caller paid ${ringFeePaid.toFixed(3)} ${ringCurrency || 'HBD'} ring fee`;
+    el.textContent = `Caller paid ${dfmt(ringFeePaid, ringCurrency)} ${ringCurrency || 'HBD'} ring fee`;
     el.style.display = '';
   }
   try {
@@ -3760,8 +3770,9 @@ socket.on('call-cap-reached', ({ maxMinutes }) => {
 });
 
 // Payout failed — notify callee their earnings are held
-socket.on('payout-failed', ({ amount, reason, callId }) => {
-  addSystemMsg(`⚠️ Your payout of ${amount.toFixed(3)} HBD could not be sent automatically. Reason: ${reason}. Call ID: ${callId} — contact support to claim your funds.`);
+socket.on('payout-failed', ({ amount, reason, callId, currency }) => {
+  const cur = currency || 'HBD';
+  addSystemMsg(`⚠️ Your payout of ${dfmt(amount, cur)} ${cur} could not be sent automatically. Reason: ${reason}. Call ID: ${callId} — contact support to claim your funds.`);
 });
 
 socket.on('peer-hung-up', ({ by }) => {
@@ -3798,7 +3809,10 @@ function showReceipt(r) {
     ['Credit deposit',  r.depositPaid > 0 ? fmt(r.depositPaid) : '—'],
     ['Duration cost',   r.durationCost > 0 ? fmt(r.durationCost) : 'FREE'],
     ['Unused refund',   r.refundAmount > 0 ? '+ ' + fmt(r.refundAmount) + ' returned' : 'none'],
-    ['Platform fee',    (r.platformTotal || r.platformOnCall || 0) > 0
+    // platformTotal already includes the ring fee shown above — label it so the
+    // line items don't look like they double-charge the ring.
+    [(r.ringPaid > 0 ? 'Platform fee (incl. ring)' : 'Platform fee'),
+                        (r.platformTotal || r.platformOnCall || 0) > 0
                           ? fmt(r.platformTotal || r.platformOnCall || 0) : '—'],
     ['End reason',      (r.endReason || 'call ended').replace(/_/g,' ')],
   ] : [
@@ -3824,9 +3838,10 @@ function showReceipt(r) {
 }
 
 // Credit warnings from server
-socket.on('credit-warning', ({ minutesLeft, creditLeft, level }) => {
+socket.on('credit-warning', ({ minutesLeft, creditLeft, level, currency }) => {
   const icon = level === '2min' ? '🔴' : '🟡';
-  addSystemMsg(`${icon} Low credit — ${minutesLeft.toFixed(1)} minutes remaining (${creditLeft.toFixed(3)} HBD). Top up to continue.`);
+  const cur = currency || 'HBD';
+  addSystemMsg(`${icon} Low credit — ${minutesLeft.toFixed(1)} minutes remaining (${dfmt(creditLeft, cur)} ${cur}). Top up to continue.`);
   if (level === '2min') {
     // Show top-up prompt
     showTopUpPrompt();
@@ -6135,7 +6150,7 @@ socket.on('dm-attachment-payment-required', ({ to, rate, currency }) => {
   const cur = currency || 'HBD';
   addLobbyMsg({
     type: 'system',
-    text: `@${to} requires ${rate.toFixed(3)} ${cur} per attachment — reopen the DM and click 📎 to retry.`,
+    text: `@${to} requires ${dfmt(rate, cur)} ${cur} per attachment — reopen the DM and click 📎 to retry.`,
     context: 'dm'
   });
 });
@@ -6144,7 +6159,7 @@ socket.on('dm-attachment-sent', ({ to, textPaid, textCurrency }) => {
   if (textPaid > 0) {
     addLobbyMsg({
       type: 'system',
-      text: `✓ Attachment delivered to @${to} (paid ${textPaid.toFixed(3)} ${textCurrency || 'HBD'}).`,
+      text: `✓ Attachment delivered to @${to} (paid ${dfmt(textPaid, textCurrency)} ${textCurrency || 'HBD'}).`,
       context: 'dm'
     });
   }
