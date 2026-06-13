@@ -449,9 +449,16 @@
     el.textContent = msg;
     el.style.color = ({green:'var(--green)',danger:'var(--danger)',blue:'var(--blue)'})[color] || 'var(--subtext)';
   }
-  // FREE when 0 / empty, else the numeric string
-  function rv(id){ const n = parseFloat(v(id)); return (!n || isNaN(n)) ? 'FREE' : String(n); }
-  function rvObj(o){ const n = parseFloat(o); return (!n || isNaN(n)) ? 'FREE' : String(n); }
+  // FREE when 0 / empty, else a plain decimal string.
+  // NOTE: never String(n) — JS renders n ≤ 1e-7 in scientific notation
+  // ("1e-7"), which the server's RING:([\d.]+) parser would misread as "1".
+  // Format up to 8 decimals (Hive-Engine max precision), strip trailing zeros.
+  function numStr(n){
+    let s = n.toFixed(8).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+    return s;
+  }
+  function rv(id){ const n = parseFloat(v(id)); return (!n || isNaN(n)) ? 'FREE' : numStr(n); }
+  function rvObj(o){ const n = parseFloat(o); return (!n || isNaN(n)) ? 'FREE' : numStr(n); }
   function today(){ return new Date().toISOString().slice(0,10); }
 
   // ══════════════════════════════════════════════════════════
@@ -461,23 +468,23 @@
   function rateGridHtml(p, withMinDeposit){
     return `
       <div class="rg3">
-        <div class="rc"><label>INVITE FEE</label><input id="${p}-invite" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>OFFER FEE</label><input id="${p}-offer" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>DM FEE</label><input id="${p}-dm" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>INVITE FEE</label><input id="${p}-invite" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>OFFER FEE</label><input id="${p}-offer" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>DM FEE</label><input id="${p}-dm" type="number" value="0" min="0" step="any"/></div>
       </div>
       <div class="slabel">VOICE</div>
       <div class="rg4">
-        <div class="rc"><label>RING</label><input id="${p}-vring" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>CONNECT</label><input id="${p}-vconn" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>RATE /HR</label><input id="${p}-vrate" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>MIN-DEP min</label><input id="${p}-vdep" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>RING</label><input id="${p}-vring" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>CONNECT</label><input id="${p}-vconn" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>RATE /HR</label><input id="${p}-vrate" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>MIN-DEP min</label><input id="${p}-vdep" type="number" value="0" min="0" step="any"/></div>
       </div>
       <div class="slabel">VIDEO</div>
       <div class="rg4">
-        <div class="rc"><label>RING</label><input id="${p}-Vring" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>CONNECT</label><input id="${p}-Vconn" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>RATE /HR</label><input id="${p}-Vrate" type="number" value="0" min="0"/></div>
-        <div class="rc"><label>MIN-DEP min</label><input id="${p}-Vdep" type="number" value="0" min="0"/></div>
+        <div class="rc"><label>RING</label><input id="${p}-Vring" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>CONNECT</label><input id="${p}-Vconn" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>RATE /HR</label><input id="${p}-Vrate" type="number" value="0" min="0" step="any"/></div>
+        <div class="rc"><label>MIN-DEP min</label><input id="${p}-Vdep" type="number" value="0" min="0" step="any"/></div>
       </div>`;
   }
   // Emit the INVITE/TEXT/VOICE/VIDEO lines for a rate window with id prefix `p`.

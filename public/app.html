@@ -1491,6 +1491,20 @@ function escapeHtml(s) {
     : '&#39;');
 }
 
+// ── Per-currency precision (Path B) ──────────────────────────────────────────
+// Server attaches `precision` to each payment option (HBD/HIVE=3, tokens=their
+// Hive-Engine precision, e.g. SWAP.BTC=8). Use it to format payment amounts and
+// the "is this paid" floor so sub-0.001 token rates aren't rounded to zero or
+// treated as free. Defaults to 3 when precision is missing (old server / HBD).
+function qfmt(amount, prec) {
+  const p = (typeof prec === 'number') ? prec : 3;
+  return Number(amount || 0).toFixed(p);
+}
+function floorFor(prec) {
+  const p = (typeof prec === 'number') ? prec : 3;
+  return Math.pow(10, -p);
+}
+
 // Single delegated click handler for any element rendered with [data-action]
 // + the relevant [data-user] / [data-room] attributes. Replaces the prior
 // inline onclick="fn('${dynamicValue}')" pattern, which was unsafe when
@@ -2029,6 +2043,7 @@ let dmPanelRate   = 0;
 let dmPanelEscrow = ESCROW_ACCOUNT;
 let dmPanelBlocked = false;
 let dmPanelCurrency = 'HBD';
+let dmPanelPrecision = 3; // per-currency decimals (HBD/HIVE=3, tokens=their HE precision)
 // Conversations whose history has already been fetched + rendered this
 // session. Prevents the "every DM-button click re-appends history" bug —
 // the message-level dedup in addLobbyMsg would silently drop the duplicates,
@@ -2162,12 +2177,13 @@ async function openDmPanel(username) {
 
   const options = rateResp.options || [];
   if (!rateResp.found || rateResp.free || options.length === 0) {
-    dmPanelRate     = 0;
-    dmPanelCurrency = 'HBD';
+    dmPanelRate      = 0;
+    dmPanelCurrency  = 'HBD';
+    dmPanelPrecision = 3;
     if (rateResp.belowFloor) {
-      rateEl.textContent  = `⚠ rates below ${(0.001).toFixed(3)} min — sending free`;
+      rateEl.textContent  = `⚠ rate below the minimum unit — sending free`;
       rateEl.className    = 'free';
-      rateEl.title        = `@${username}'s rate post sets a rate below this server's processable minimum (0.001). The message will be sent free until they raise the rate.`;
+      rateEl.title        = `@${username}'s rate post sets a rate below this currency's smallest processable unit. The message will be sent free until they raise the rate.`;
     } else {
       rateEl.textContent  = 'Free';
       rateEl.className    = 'free';
@@ -2177,9 +2193,10 @@ async function openDmPanel(username) {
   } else {
     // Default to recommended (first) option
     const first = options[0];
-    dmPanelRate     = first.flat || 0;
-    dmPanelEscrow   = first.escrow || rateResp.escrow || ESCROW_ACCOUNT;
-    dmPanelCurrency = first.currency || 'HBD';
+    dmPanelRate      = first.flat || 0;
+    dmPanelEscrow    = first.escrow || rateResp.escrow || ESCROW_ACCOUNT;
+    dmPanelCurrency  = first.currency || 'HBD';
+    dmPanelPrecision = (typeof first.precision === 'number') ? first.precision : 3;
 
     if (options.length > 1) {
       // Build inline picker
@@ -2193,13 +2210,13 @@ async function openDmPanel(username) {
       rateEl.className = 'paid';
       window._dmPayOptions = options;
     } else {
-      rateEl.textContent = `${dmPanelRate.toFixed(3)} ${dmPanelCurrency} per message`;
+      rateEl.textContent = `${qfmt(dmPanelRate, dmPanelPrecision)} ${dmPanelCurrency} per message`;
       rateEl.className   = 'paid';
       window._dmPayOptions = null;
     }
 
-    if (dmPanelRate >= 0.001) {
-      sendBtn.textContent = `Pay ${dmPanelRate.toFixed(3)} ${dmPanelCurrency} & Send →`;
+    if (dmPanelRate >= floorFor(dmPanelPrecision)) {
+      sendBtn.textContent = `Pay ${qfmt(dmPanelRate, dmPanelPrecision)} ${dmPanelCurrency} & Send →`;
     } else {
       sendBtn.textContent = 'Send →';
     }
@@ -2251,6 +2268,7 @@ function closeDmPanel() {
   dmPanelRate    = 0;
   dmPanelBlocked = false;
   dmPanelCurrency = 'HBD';
+  dmPanelPrecision = 3;
   window._dmPayOptions = null;
   document.getElementById('dm-panel').classList.remove('active');
   document.getElementById('dm-panel-input').value   = '';
@@ -2267,9 +2285,10 @@ function selectDmCurrency(idx) {
   const options = window._dmPayOptions;
   if (!options || !options[idx]) return;
   const opt = options[idx];
-  dmPanelRate     = opt.flat || 0;
-  dmPanelCurrency = opt.currency || 'HBD';
-  dmPanelEscrow   = opt.escrow || ESCROW_ACCOUNT;
+  dmPanelRate      = opt.flat || 0;
+  dmPanelCurrency  = opt.currency || 'HBD';
+  dmPanelEscrow    = opt.escrow || ESCROW_ACCOUNT;
+  dmPanelPrecision = (typeof opt.precision === 'number') ? opt.precision : 3;
 
   // Update button styles
   document.querySelectorAll('.dm-cur-btn').forEach((btn, i) => {
@@ -2279,8 +2298,8 @@ function selectDmCurrency(idx) {
 
   // Update send button
   const sendBtn = document.getElementById('dm-panel-send');
-  if (dmPanelRate >= 0.001) {
-    sendBtn.textContent = `Pay ${dmPanelRate.toFixed(3)} ${dmPanelCurrency} & Send →`;
+  if (dmPanelRate >= floorFor(dmPanelPrecision)) {
+    sendBtn.textContent = `Pay ${qfmt(dmPanelRate, dmPanelPrecision)} ${dmPanelCurrency} & Send →`;
   } else {
     sendBtn.textContent = 'Send →';
   }
@@ -2324,7 +2343,7 @@ async function sendDmMessage() {
   const ciphertext = encryptMsg(text, targetPub);
   const senderCiphertext = encryptMsg(text, myPubKey); // sender's copy for history
 
-  if (dmPanelRate >= 0.001) {
+  if (dmPanelRate >= floorFor(dmPanelPrecision)) {
     if (!window.hive_keychain) {
       addLobbyMsg({type:'system', text:`Hive Keychain required to pay @${dmPanelTarget}'s message fee.`});
       return;
@@ -2332,6 +2351,8 @@ async function sendDmMessage() {
     const msgId   = 'dm_' + Date.now();
     const memo    = `v4call:text:${msgId}:${dmPanelTarget}`;
     const cur     = dmPanelCurrency;
+    const prec    = dmPanelPrecision;
+    const amtStr  = qfmt(dmPanelRate, prec);
     const isToken = (cur !== 'HBD' && cur !== 'HIVE');
 
     sendBtn.textContent = 'Opening Keychain…';
@@ -2341,24 +2362,24 @@ async function sendDmMessage() {
     if (isToken) {
       const json = JSON.stringify({
         contractName: 'tokens', contractAction: 'transfer',
-        contractPayload: { symbol: cur, to: dmPanelEscrow, quantity: dmPanelRate.toFixed(3), memo }
+        contractPayload: { symbol: cur, to: dmPanelEscrow, quantity: amtStr, memo }
       });
       paid = await new Promise(resolve =>
-        window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Transfer ${dmPanelRate.toFixed(3)} ${cur}`, r => resolve(r.success))
+        window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Transfer ${amtStr} ${cur}`, r => resolve(r.success))
       );
     } else {
       paid = await new Promise(resolve =>
-        window.hive_keychain.requestTransfer(myUsername, dmPanelEscrow, dmPanelRate.toFixed(3), memo, cur, r => resolve(r.success))
+        window.hive_keychain.requestTransfer(myUsername, dmPanelEscrow, amtStr, memo, cur, r => resolve(r.success))
       );
     }
 
-    sendBtn.textContent = `Pay ${dmPanelRate.toFixed(3)} ${cur} & Send →`;
+    sendBtn.textContent = `Pay ${amtStr} ${cur} & Send →`;
     sendBtn.disabled    = false;
     if (!paid) {
       addLobbyMsg({type:'system', text:'Payment cancelled — message not sent.'});
       return;
     }
-    addLobbyMsg({type:'system', text:`✓ ${dmPanelRate.toFixed(3)} ${cur} submitted — sending to @${dmPanelTarget}…`});
+    addLobbyMsg({type:'system', text:`✓ ${amtStr} ${cur} submitted — sending to @${dmPanelTarget}…`});
     socket.emit('lobby-dm', { to: dmPanelTarget, ciphertext, senderCiphertext, signature, timestamp, msgId, textPaid: dmPanelRate, textMemo: memo, textCurrency: cur });
     addLobbyMsg({ type:'dm', from:myUsername, text, isSelf:true, to:dmPanelTarget, sigOk:true, textPaid: dmPanelRate, currency: cur, signature, timestamp });
   } else {
@@ -2776,7 +2797,7 @@ socket.on('allowlist-info', ({ room, message }) => {
 let _ipPending = null; // { room, invitee, inviteId, escrow, options, selectedIdx }
 socket.on('invite-payment-required', ({ room, invitee, inviteId, escrow, options, belowFloor }) => {
   if (!options || options.length === 0) {
-    showInviteMsg(`⚠ @${invitee}'s invite rate is unprocessable on this server${belowFloor ? ' (below 0.001 floor)' : ''}. Try again later.`);
+    showInviteMsg(`⚠ @${invitee}'s invite rate is unprocessable on this server${belowFloor ? ' (below the currency minimum unit)' : ''}. Try again later.`);
     return;
   }
   _ipPending = { room, invitee, inviteId, escrow, options, selectedIdx: 0 };
@@ -2792,7 +2813,7 @@ function renderInvitePaymentOptions() {
     const btn = document.createElement('button');
     btn.className = 'pm-cur-btn' + (i === _ipPending.selectedIdx ? ' active' : '');
     const bal = (opt.balance != null) ? ` <span class="bal">bal ${parseFloat(opt.balance).toFixed(3)}</span>` : '';
-    btn.innerHTML = `${opt.flat.toFixed(3)} ${escapeHtml(opt.currency)}${bal}`;
+    btn.innerHTML = `${qfmt(opt.flat, opt.precision)} ${escapeHtml(opt.currency)}${bal}`;
     btn.addEventListener('click', () => {
       _ipPending.selectedIdx = i;
       renderInvitePaymentOptions();
@@ -2800,7 +2821,7 @@ function renderInvitePaymentOptions() {
     wrap.appendChild(btn);
   });
   const sel = _ipPending.options[_ipPending.selectedIdx];
-  document.getElementById('invite-payment-total').textContent = `${sel.flat.toFixed(3)} ${sel.currency}`;
+  document.getElementById('invite-payment-total').textContent = `${qfmt(sel.flat, sel.precision)} ${sel.currency}`;
 }
 
 document.getElementById('invite-pay-cancel-btn').addEventListener('click', () => {
@@ -2814,6 +2835,8 @@ document.getElementById('invite-pay-confirm-btn').addEventListener('click', asyn
   const opt    = options[selectedIdx];
   const cur    = opt.currency;
   const amount = opt.flat;
+  const prec   = (typeof opt.precision === 'number') ? opt.precision : 3;
+  const amtStr = qfmt(amount, prec);
   const memo   = `v4call:invite:${inviteId}`;
   const btn    = document.getElementById('invite-pay-confirm-btn');
 
@@ -2829,14 +2852,14 @@ document.getElementById('invite-pay-confirm-btn').addEventListener('click', asyn
   if (isToken) {
     const json = JSON.stringify({
       contractName: 'tokens', contractAction: 'transfer',
-      contractPayload: { symbol: cur, to: escrow, quantity: amount.toFixed(3), memo }
+      contractPayload: { symbol: cur, to: escrow, quantity: amtStr, memo }
     });
     paid = await new Promise(resolve =>
-      window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Pay ${amount.toFixed(3)} ${cur} invite fee`, r => resolve(r.success))
+      window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Pay ${amtStr} ${cur} invite fee`, r => resolve(r.success))
     );
   } else {
     paid = await new Promise(resolve =>
-      window.hive_keychain.requestTransfer(myUsername, escrow, amount.toFixed(3), memo, cur, r => resolve(r.success))
+      window.hive_keychain.requestTransfer(myUsername, escrow, amtStr, memo, cur, r => resolve(r.success))
     );
   }
 
@@ -2848,7 +2871,7 @@ document.getElementById('invite-pay-confirm-btn').addEventListener('click', asyn
   }
 
   document.getElementById('invite-payment-modal').style.display = 'none';
-  showInviteMsg(`✓ ${amount.toFixed(3)} ${cur} submitted — verifying & sending invite to @${invitee}…`);
+  showInviteMsg(`✓ ${amtStr} ${cur} submitted — verifying & sending invite to @${invitee}…`);
 
   socket.emit('allowlist-add', {
     room,
@@ -3132,7 +3155,7 @@ async function initiateCall(callee, callType = 'voice') {
       const msg = !response.found
         ? `@${callee} has no call rates set — calling for free…`
         : response.belowFloor
-          ? `⚠ @${callee}'s call rates are below this server's processable minimum (0.001) — calling for free.`
+          ? `⚠ @${callee}'s call rates are below the currency's smallest processable unit — calling for free.`
           : `@${callee}'s rates show free for this time window — calling…`;
       addLobbyMsg({type:'system',text:msg});
       proceedWithCall(callee, callType, null);
@@ -3188,17 +3211,18 @@ function updatePaymentAmounts(rates) {
   const rate       = typeof rates.rate       === 'number' ? rates.rate       : parseFloat(rates.rate       || 0) || 0;
   const minDepMin  = typeof rates.minDepositMin === 'number' ? rates.minDepositMin : 10;
   const cur        = rates.currency || 'HBD';
+  const prec       = (typeof rates.precision === 'number') ? rates.precision : 3;
   const deposit    = typeof rates.minDeposit === 'number' && rates.minDeposit > 0
     ? rates.minDeposit
-    : parseFloat(((rate / 60) * minDepMin).toFixed(3));
-  const total = parseFloat((ring + connect + deposit).toFixed(3));
+    : parseFloat(((rate / 60) * minDepMin).toFixed(prec));
+  const total = parseFloat((ring + connect + deposit).toFixed(prec));
 
-  document.getElementById('pm-ring').textContent       = ring    > 0 ? ring.toFixed(3)    + ' ' + cur : 'FREE';
-  document.getElementById('pm-connect').textContent    = connect > 0 ? connect.toFixed(3) + ' ' + cur : 'FREE';
-  document.getElementById('pm-rate').textContent       = rate    > 0 ? rate.toFixed(3)    + ' ' + cur + '/hr' : 'FREE';
-  document.getElementById('pm-deposit').textContent    = deposit > 0 ? deposit.toFixed(3) + ' ' + cur : 'FREE';
+  document.getElementById('pm-ring').textContent       = ring    > 0 ? qfmt(ring, prec)    + ' ' + cur : 'FREE';
+  document.getElementById('pm-connect').textContent    = connect > 0 ? qfmt(connect, prec) + ' ' + cur : 'FREE';
+  document.getElementById('pm-rate').textContent       = rate    > 0 ? qfmt(rate, prec)    + ' ' + cur + '/hr' : 'FREE';
+  document.getElementById('pm-deposit').textContent    = deposit > 0 ? qfmt(deposit, prec) + ' ' + cur : 'FREE';
   document.getElementById('pm-deposit-min').textContent = minDepMin.toString();
-  document.getElementById('pm-total').textContent      = total  > 0 ? total.toFixed(3)   + ' ' + cur : 'FREE — no payment required';
+  document.getElementById('pm-total').textContent      = total  > 0 ? qfmt(total, prec)   + ' ' + cur : 'FREE — no payment required';
 
   rates._ring    = ring;
   rates._connect = connect;
@@ -3207,6 +3231,7 @@ function updatePaymentAmounts(rates) {
   rates._total   = total;
   rates._minDepMin = minDepMin;
   rates._currency  = cur;
+  rates._precision = prec;
 }
 
 function cancelPayment() {
@@ -3240,8 +3265,10 @@ async function confirmPayAndCall() {
   const connect = rates._connect || 0;
   const deposit = rates._deposit || 0;
   const total   = rates._total   || ring + connect + deposit;
+  const prec    = (typeof rates._precision === 'number') ? rates._precision
+                : (typeof rates.precision === 'number') ? rates.precision : 3;
 
-  if (total < 0.001) {
+  if (total < floorFor(prec)) {
     document.getElementById('payment-modal').classList.remove('active');
     paymentPending = null;
     confirmBtn.textContent = 'Pay & Call →'; confirmBtn.disabled = false;
@@ -3249,7 +3276,7 @@ async function confirmPayAndCall() {
     return;
   }
 
-  const totalStr = total.toFixed(3);
+  const totalStr = qfmt(total, prec);
   const memo     = `v4call:pay:${callId}:${callee}`;
   const isToken  = (cur !== 'HBD' && cur !== 'HIVE');
   // The escrow account from the callee's rates post — for federated calls
@@ -3262,10 +3289,10 @@ async function confirmPayAndCall() {
     paymentPending = null;
 
     setTimeout(() => {
-      socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur, escrow: calleeEscrow }, ({ verified, reason }) => {
+      socket.emit('verify-ring-payment', { callId, callee, amount: ring || floorFor(prec), memo, currency: cur, escrow: calleeEscrow }, ({ verified, reason }) => {
         if (!verified && total > 0) {
           setTimeout(() => {
-            socket.emit('verify-ring-payment', { callId, callee, amount: ring || 0.001, memo, currency: cur, escrow: calleeEscrow }, ({ verified: v2 }) => {
+            socket.emit('verify-ring-payment', { callId, callee, amount: ring || floorFor(prec), memo, currency: cur, escrow: calleeEscrow }, ({ verified: v2 }) => {
               if (v2) {
                 socket.emit('verify-deposit-payment', { callId, callee, totalAmount: total, depositAmount: deposit, connectAmount: connect, memo, currency: cur, escrow: calleeEscrow });
                 addLobbyMsg({type:'system',text:`✓ Payment verified — calling @${callee}…`});
@@ -3680,12 +3707,14 @@ function startCallTicker(ringPaid, connectPaid, ratePerHour, isCaller, currency)
   callRatePerHour = ratePerHour || 0;
   amCaller        = isCaller;
   const cur       = currency || 'HBD';
+  // Display precision: HBD/HIVE=3, tokens default to 8 (their max) for the live ticker.
+  const tp        = (cur === 'HBD' || cur === 'HIVE') ? 3 : 8;
 
   const ticker = document.getElementById('call-cost-ticker');
   if (ticker) ticker.classList.add('active');
 
-  document.getElementById('ticker-ring').textContent    = ringPaid > 0    ? ringPaid.toFixed(3) + ' ' + cur    : 'FREE';
-  document.getElementById('ticker-connect').textContent = connectPaid > 0 ? connectPaid.toFixed(3) + ' ' + cur : 'FREE';
+  document.getElementById('ticker-ring').textContent    = ringPaid > 0    ? qfmt(ringPaid, tp) + ' ' + cur    : 'FREE';
+  document.getElementById('ticker-connect').textContent = connectPaid > 0 ? qfmt(connectPaid, tp) + ' ' + cur : 'FREE';
 
   if (callTickerInterval) clearInterval(callTickerInterval);
   callTickerInterval = setInterval(() => {
@@ -3697,8 +3726,8 @@ function startCallTicker(ringPaid, connectPaid, ratePerHour, isCaller, currency)
     const mm = String(Math.floor(elapsedMin)).padStart(2,'0');
     const ss = String(Math.floor((elapsedMs % 60000) / 1000)).padStart(2,'0');
     document.getElementById('ticker-duration').textContent = `${mm}:${ss}`;
-    document.getElementById('ticker-running').textContent  = ratePerHour > 0 ? running.toFixed(3) + ' ' + cur : 'FREE';
-    document.getElementById('ticker-total').textContent    = total.toFixed(3) + ' ' + cur;
+    document.getElementById('ticker-running').textContent  = ratePerHour > 0 ? qfmt(running, tp) + ' ' + cur : 'FREE';
+    document.getElementById('ticker-total').textContent    = qfmt(total, tp) + ' ' + cur;
   }, 1000);
 }
 
@@ -3754,34 +3783,39 @@ function showReceipt(r) {
   // Caller gets back: unused deposit (refund)
   // Platform gets: ring + platform% of (connect + duration)
 
+  const cur = r.currency || 'HBD';
+  const rp  = (typeof r.precision === 'number') ? r.precision
+            : (cur === 'HBD' || cur === 'HIVE') ? 3 : 8;
+  const fmt = (v) => qfmt(v, rp) + ' ' + cur;
+
   const rows = isCaller ? [
     ['Call with',       `@${r.callee}`],
     ['Duration',        (r.durationMin || 0).toFixed(1) + ' min'],
     ['Start',           (r.startTime || '').replace('T',' ').slice(0,19) + ' UTC'],
     ['End',             (r.endTime   || '').replace('T',' ').slice(0,19) + ' UTC'],
-    ['Ring fee paid',   r.ringPaid    > 0 ? r.ringPaid.toFixed(3)    + ' HBD' : 'FREE'],
-    ['Connect fee paid',r.connectPaid > 0 ? r.connectPaid.toFixed(3) + ' HBD' : 'FREE'],
-    ['Credit deposit',  r.depositPaid > 0 ? r.depositPaid.toFixed(3) + ' HBD' : '—'],
-    ['Duration cost',   r.durationCost > 0 ? r.durationCost.toFixed(3) + ' HBD' : 'FREE'],
-    ['Unused refund',   r.refundAmount > 0 ? '+ ' + r.refundAmount.toFixed(3) + ' HBD returned' : 'none'],
+    ['Ring fee paid',   r.ringPaid    > 0 ? fmt(r.ringPaid)    : 'FREE'],
+    ['Connect fee paid',r.connectPaid > 0 ? fmt(r.connectPaid) : 'FREE'],
+    ['Credit deposit',  r.depositPaid > 0 ? fmt(r.depositPaid) : '—'],
+    ['Duration cost',   r.durationCost > 0 ? fmt(r.durationCost) : 'FREE'],
+    ['Unused refund',   r.refundAmount > 0 ? '+ ' + fmt(r.refundAmount) + ' returned' : 'none'],
     ['Platform fee',    (r.platformTotal || r.platformOnCall || 0) > 0
-                          ? (r.platformTotal || r.platformOnCall || 0).toFixed(3) + ' HBD' : '—'],
+                          ? fmt(r.platformTotal || r.platformOnCall || 0) : '—'],
     ['End reason',      (r.endReason || 'call ended').replace(/_/g,' ')],
   ] : [
     ['Call with',       `@${r.caller}`],
     ['Duration',        (r.durationMin || 0).toFixed(1) + ' min'],
     ['Start',           (r.startTime || '').replace('T',' ').slice(0,19) + ' UTC'],
     ['End',             (r.endTime   || '').replace('T',' ').slice(0,19) + ' UTC'],
-    ['Connect fee',     r.connectPaid > 0 ? r.connectPaid.toFixed(3) + ' HBD' : 'FREE'],
-    ['Duration cost',   r.durationCost > 0 ? r.durationCost.toFixed(3) + ' HBD' : 'FREE'],
-    ['Platform cut',    (r.platformOnCall || 0) > 0 ? '- ' + (r.platformOnCall || 0).toFixed(3) + ' HBD' : '—'],
+    ['Connect fee',     r.connectPaid > 0 ? fmt(r.connectPaid) : 'FREE'],
+    ['Duration cost',   r.durationCost > 0 ? fmt(r.durationCost) : 'FREE'],
+    ['Platform cut',    (r.platformOnCall || 0) > 0 ? '- ' + fmt(r.platformOnCall || 0) : '—'],
     ['End reason',      (r.endReason || 'call ended').replace(/_/g,' ')],
   ];
 
   const totalLabel  = isCaller ? 'Net cost to you' : 'You received';
   const netCost = isCaller
-    ? Math.max(0, (r.ringPaid||0) + (r.connectPaid||0) + (r.depositPaid||0) - (r.refundAmount||0)).toFixed(3) + ' HBD'
-    : (r.calleeNet || 0).toFixed(3) + ' HBD';
+    ? fmt(Math.max(0, (r.ringPaid||0) + (r.connectPaid||0) + (r.depositPaid||0) - (r.refundAmount||0)))
+    : fmt(r.calleeNet || 0);
   const totalAmount = netCost;
   document.getElementById('receipt-content').innerHTML =
     rows.map(([l,v]) => `<div class="receipt-row"><span class="rl">${l}</span><span class="rv">${v}</span></div>`).join('') +
@@ -3812,17 +3846,20 @@ socket.on('credit-topup', ({ amount, minutesLeft }) => {
 function showTopUpPrompt() {
   if (!pendingRates || !currentCallId) return;
   const rate     = pendingRates._rate || pendingRates.rate || 0;
+  const prec     = (typeof pendingRates._precision === 'number') ? pendingRates._precision
+                 : (typeof pendingRates.precision === 'number') ? pendingRates.precision : 3;
   const topupMin = 10;
-  const topupAmt = parseFloat(((rate / 60) * topupMin).toFixed(3));
-  if (topupAmt < 0.001) return; // free call, no top-up needed
+  const topupAmt = parseFloat(((rate / 60) * topupMin).toFixed(prec));
+  if (topupAmt < floorFor(prec)) return; // free call, no top-up needed
 
   // Honour the callee's escrow + currency from their rates post — for federated
   // calls this points at the peer server's escrow, not ours.
   const cur          = pendingRates._currency || pendingRates.currency || 'HBD';
   const calleeEscrow = pendingRates.escrow || ESCROW_ACCOUNT;
   const isToken      = (cur !== 'HBD' && cur !== 'HIVE');
+  const amtStr       = qfmt(topupAmt, prec);
 
-  const msg = `Add ${topupMin} minutes of credit (${topupAmt.toFixed(3)} ${cur})?`;
+  const msg = `Add ${topupMin} minutes of credit (${amtStr} ${cur})?`;
   if (!confirm(msg)) return;
   if (!window.hive_keychain) { addSystemMsg('Keychain required for top-up.'); return; }
 
@@ -3843,11 +3880,11 @@ function showTopUpPrompt() {
   if (isToken) {
     const json = JSON.stringify({
       contractName:'tokens', contractAction:'transfer',
-      contractPayload:{ symbol: cur, to: calleeEscrow, quantity: topupAmt.toFixed(3), memo }
+      contractPayload:{ symbol: cur, to: calleeEscrow, quantity: amtStr, memo }
     });
-    window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Top up ${topupAmt.toFixed(3)} ${cur}`, onResult);
+    window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Top up ${amtStr} ${cur}`, onResult);
   } else {
-    window.hive_keychain.requestTransfer(myUsername, calleeEscrow, topupAmt.toFixed(3), memo, cur, onResult);
+    window.hive_keychain.requestTransfer(myUsername, calleeEscrow, amtStr, memo, cur, onResult);
   }
 }
 
@@ -5384,16 +5421,17 @@ function openDmAttachModal() {
   const rate   = dmPanelRate || 0;
   const cur    = dmPanelCurrency || 'HBD';
   const esc    = dmPanelEscrow || ESCROW_ACCOUNT;
+  const prec   = dmPanelPrecision;
   const remembered = getRememberedGateway();
   attachState = {
     mode: 'dm', file: null, gatewayUrl: remembered, recipients: new Set([target]),
-    dmTarget: target, dmRate: rate, dmCurrency: cur, dmEscrow: esc
+    dmTarget: target, dmRate: rate, dmCurrency: cur, dmEscrow: esc, dmPrecision: prec
   };
   document.getElementById('att-modal-title').textContent = `📎 Send Attachment → @${target}`;
   document.getElementById('att-recipients-label').textContent = 'RECIPIENT';
   const rateLine = document.getElementById('att-dm-rate-line');
-  if (rate >= 0.001) {
-    rateLine.textContent = `+ ${rate.toFixed(3)} ${cur} to @${target} (paid-DM rate, separate Keychain prompt)`;
+  if (rate >= floorFor(prec)) {
+    rateLine.textContent = `+ ${qfmt(rate, prec)} ${cur} to @${target} (paid-DM rate, separate Keychain prompt)`;
     rateLine.style.color = 'var(--accent)';
   } else {
     rateLine.textContent = `Free DM to @${target} — only the ipfs-gate fee applies.`;
@@ -5514,10 +5552,11 @@ async function confirmSendAttachment() {
   try {
     const mode = attachState.mode || 'room';
     const dmContext = mode === 'dm' ? {
-      target:   attachState.dmTarget,
-      rate:     attachState.dmRate || 0,
-      currency: attachState.dmCurrency || 'HBD',
-      escrow:   attachState.dmEscrow
+      target:    attachState.dmTarget,
+      rate:      attachState.dmRate || 0,
+      currency:  attachState.dmCurrency || 'HBD',
+      escrow:    attachState.dmEscrow,
+      precision: (typeof attachState.dmPrecision === 'number') ? attachState.dmPrecision : 3
     } : null;
     await sendAttachment({ file, gatewayUrl: gwUrl, recipientUsernames: recipients, mode, dmContext });
     setAttachStatus('✓ Sent.', false);
@@ -5555,24 +5594,26 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
       throw new Error(msg);
     }
 
-    if (dmContext.rate >= 0.001) {
+    const dmPrec = (typeof dmContext.precision === 'number') ? dmContext.precision : 3;
+    if (dmContext.rate >= floorFor(dmPrec)) {
       if (!window.hive_keychain) throw new Error('Hive Keychain required to pay the paid-DM rate.');
       msgId        = 'dma_' + Date.now();
       textMemo     = `v4call:text:${msgId}:${dmContext.target}`;
       textPaid     = dmContext.rate;
       textCurrency = dmContext.currency;
-      setAttachStatus(`Paying ${textPaid.toFixed(3)} ${textCurrency} paid-DM rate (Keychain)…`);
+      const amtStr = qfmt(textPaid, dmPrec);
+      setAttachStatus(`Paying ${amtStr} ${textCurrency} paid-DM rate (Keychain)…`);
       const isToken = (textCurrency !== 'HBD' && textCurrency !== 'HIVE');
       const paid = isToken
         ? await new Promise(resolve => {
             const json = JSON.stringify({
               contractName: 'tokens', contractAction: 'transfer',
-              contractPayload: { symbol: textCurrency, to: dmContext.escrow, quantity: textPaid.toFixed(3), memo: textMemo }
+              contractPayload: { symbol: textCurrency, to: dmContext.escrow, quantity: amtStr, memo: textMemo }
             });
-            window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Transfer ${textPaid.toFixed(3)} ${textCurrency} (paid-DM rate)`, r => resolve(r.success));
+            window.hive_keychain.requestCustomJson(myUsername, 'ssc-mainnet-hive', 'Active', json, `Transfer ${amtStr} ${textCurrency} (paid-DM rate)`, r => resolve(r.success));
           })
         : await new Promise(resolve =>
-            window.hive_keychain.requestTransfer(myUsername, dmContext.escrow, textPaid.toFixed(3), textMemo, textCurrency, r => resolve(r.success))
+            window.hive_keychain.requestTransfer(myUsername, dmContext.escrow, amtStr, textMemo, textCurrency, r => resolve(r.success))
           );
       if (!paid) throw new Error('paid-DM rate cancelled — attachment not sent.');
     }
