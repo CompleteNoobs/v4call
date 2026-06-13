@@ -1,6 +1,8 @@
 # v4call — Decentralised Paid Communications
 
-> ⚠️ **WARNING: This project was vibe-coded with Claude Opus 4.6 → 4.7. The author is a tinkerer, not a developer. Use at your own risk — review the code before trusting it with real money.**
+> ⚠️ **Proof of concept — not for real use.** v4call, along with its sister projects [nGate](https://github.com/CompleteNoobs/nGate) and [IPFS-Gate](https://github.com/CompleteNoobs/IPFS-Gate), are **proof-of-concept builds by independent builders** — not production software. They are **not safe to use** and **not recommended for general users**. They are provided for developers who want to review the code and are willing to take the risks of an early, quickly-built concept. Treat everything as a demo, not a service.
+>
+> This project was vibe-coded with Claude Opus 4.6 → 4.7. The author is a tinkerer, not a developer. **Review the code before trusting it with real money.**
 
 Video, audio and text calling with Hive blockchain identity, HBD micropayments, custom Hive-Engine token support, and cross-server federation.
 

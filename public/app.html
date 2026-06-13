@@ -18,7 +18,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>v4call</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Login-screen redesign fonts (used only inside #login-screen) -->
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg:#0a0c0f;--surface:#12151a;--surface2:#1a1e26;--border:#222730;
@@ -734,6 +737,138 @@
     .receipt-total .rl{color:var(--text);}
     .receipt-total .rv{color:var(--accent);font-weight:600;font-size:1rem;}
   </style>
+
+  <!-- ============================================================
+       LOGIN SCREEN REDESIGN (Grok design, grafted 2026-06)
+       All rules scoped under #login-screen + a private --lg-* token
+       set so nothing leaks into the lobby / room / call screens.
+       Wired to the existing keychainLogin()/hiveLogin() + element IDs.
+       ============================================================ -->
+  <style>
+    #login-screen{
+      position:relative;
+      /* Grok design tokens — scoped, never leak into the rest of the app */
+      --lg-bg:#05070c;--lg-bg-elevated:#0c1018;
+      --lg-surface:rgba(14,18,28,0.72);
+      --lg-border:rgba(255,255,255,0.08);--lg-border-focus:rgba(0,209,143,0.55);
+      --lg-text:#eef1f6;--lg-text-muted:#8b95a8;--lg-text-dim:#5c6678;
+      --lg-accent:#00d18f;--lg-accent-soft:rgba(0,209,143,0.14);
+      --lg-cyan:#4ecfff;--lg-gold:#f0b429;
+      --lg-hive:#e31337;--lg-hive-soft:rgba(227,19,55,0.14);
+      --lg-danger:#ff6b7a;--lg-danger-soft:rgba(255,107,122,0.12);
+      --lg-success:#3ee0a8;
+      --lg-radius:16px;--lg-radius-sm:10px;
+      --lg-shadow:0 24px 80px rgba(0,0,0,0.45);
+      --lg-font-display:'Syne',system-ui,sans-serif;
+      --lg-font-body:'DM Sans',system-ui,sans-serif;
+      background:var(--lg-bg);
+      font-family:var(--lg-font-body);
+    }
+
+    /* aurora background — absolute within the login screen (sits under the app header) */
+    #login-screen .bg{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none;}
+    #login-screen .bg::before{content:'';position:absolute;inset:-20%;
+      background:
+        radial-gradient(ellipse 55% 45% at 15% 20%, rgba(0,209,143,0.18), transparent 60%),
+        radial-gradient(ellipse 50% 40% at 85% 75%, rgba(78,207,255,0.14), transparent 55%),
+        radial-gradient(ellipse 40% 35% at 60% 10%, rgba(227,19,55,0.08), transparent 50%),
+        linear-gradient(180deg,#05070c 0%,#080c14 50%,#05070c 100%);}
+    #login-screen .bg-grid{position:absolute;inset:0;opacity:0.35;
+      background-image:linear-gradient(rgba(255,255,255,0.03) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.03) 1px,transparent 1px);
+      background-size:48px 48px;
+      -webkit-mask-image:radial-gradient(ellipse 80% 70% at 50% 40%, black 20%, transparent 75%);
+      mask-image:radial-gradient(ellipse 80% 70% at 50% 40%, black 20%, transparent 75%);}
+    #login-screen .orb{position:absolute;border-radius:50%;filter:blur(80px);animation:lg-drift 18s ease-in-out infinite alternate;}
+    #login-screen .orb-1{width:420px;height:420px;top:-8%;left:-6%;background:rgba(0,209,143,0.22);}
+    #login-screen .orb-2{width:360px;height:360px;bottom:-10%;right:-4%;background:rgba(78,207,255,0.16);animation-delay:-6s;}
+    @keyframes lg-drift{from{transform:translate(0,0) scale(1);}to{transform:translate(30px,-20px) scale(1.08);}}
+
+    /* layout — fills the .screen flex container */
+    #login-screen .page{position:relative;z-index:1;flex:1;width:100%;display:grid;grid-template-columns:1fr 1fr;overflow-y:auto;}
+
+    /* brand panel */
+    #login-screen .brand-panel{display:flex;flex-direction:column;justify-content:center;padding:3rem 4rem 3rem 5rem;position:relative;}
+    #login-screen .brand-panel::after{content:'';position:absolute;top:12%;right:0;width:1px;height:76%;background:linear-gradient(180deg,transparent,var(--lg-border),transparent);}
+    #login-screen .logo-row{display:flex;align-items:center;gap:14px;margin-bottom:2.5rem;}
+    #login-screen .logo-mark{width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--lg-accent) 0%,#00a870 100%);display:grid;place-items:center;box-shadow:0 8px 32px rgba(0,209,143,0.25);flex-shrink:0;}
+    #login-screen .logo-mark span{font-family:var(--lg-font-display);font-weight:800;font-size:1.15rem;color:#001a10;letter-spacing:-0.02em;}
+    #login-screen .logo-word{font-family:var(--lg-font-display);font-weight:700;font-size:1.35rem;letter-spacing:-0.02em;color:var(--lg-text);}
+    #login-screen .logo-word em{font-style:normal;color:var(--lg-accent);}
+    #login-screen .brand-panel h1{font-family:var(--lg-font-display);font-size:clamp(2.2rem,4vw,3.4rem);font-weight:800;line-height:1.08;letter-spacing:-0.03em;margin-bottom:1.25rem;max-width:14ch;color:var(--lg-text);}
+    #login-screen .brand-panel h1 .line2{background:linear-gradient(90deg,var(--lg-accent),var(--lg-cyan));-webkit-background-clip:text;background-clip:text;color:transparent;}
+    #login-screen .brand-lead{font-size:1.05rem;line-height:1.65;color:var(--lg-text-muted);max-width:38ch;margin-bottom:2.5rem;}
+    #login-screen .feature-list{display:flex;flex-direction:column;gap:14px;list-style:none;}
+    #login-screen .feature-list li{display:flex;align-items:flex-start;gap:12px;font-size:0.92rem;color:var(--lg-text-muted);line-height:1.5;}
+    #login-screen .feature-icon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:1rem;flex-shrink:0;background:var(--lg-surface);border:1px solid var(--lg-border);}
+    #login-screen .feature-list strong{display:block;color:var(--lg-text);font-weight:600;margin-bottom:2px;}
+
+    /* form panel */
+    #login-screen .form-panel{display:flex;align-items:center;justify-content:center;padding:2rem 1.5rem;}
+    #login-screen .login-card{width:100%;max-width:440px;background:var(--lg-surface);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);border:1px solid var(--lg-border);border-radius:calc(var(--lg-radius) + 4px);padding:2.25rem 2rem 2rem;box-shadow:var(--lg-shadow);animation:lg-rise 0.7s cubic-bezier(0.22,1,0.36,1) both;position:relative;}
+    #login-screen .login-card::before{content:'';position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(145deg,rgba(0,209,143,0.35),transparent 40%,rgba(78,207,255,0.2));-webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0);-webkit-mask-composite:xor;mask-composite:exclude;pointer-events:none;}
+    @keyframes lg-rise{from{opacity:0;transform:translateY(24px);}to{opacity:1;transform:translateY(0);}}
+    #login-screen .mobile-logo{display:none;align-items:center;gap:10px;margin-bottom:1.75rem;}
+
+    #login-screen .card-header{text-align:center;margin-bottom:1.25rem;}
+    #login-screen .hive-badge{display:inline-flex;align-items:center;gap:8px;padding:6px 14px 6px 10px;border-radius:999px;background:var(--lg-hive-soft);border:1px solid rgba(227,19,55,0.25);margin-bottom:1rem;}
+    #login-screen .hive-badge svg{flex-shrink:0;}
+    #login-screen .hive-badge span{font-family:var(--lg-font-display);font-weight:700;font-size:0.78rem;letter-spacing:0.12em;color:var(--lg-hive);}
+    #login-screen .card-header h2{font-family:var(--lg-font-display);font-size:1.5rem;font-weight:700;letter-spacing:-0.02em;margin-bottom:0.5rem;color:var(--lg-text);}
+    #login-screen .card-header p{font-size:0.88rem;color:var(--lg-text-muted);line-height:1.55;}
+
+    /* proof-of-concept notice */
+    #login-screen .poc-note{background:var(--lg-danger-soft);border:1px solid rgba(255,107,122,0.3);border-radius:var(--lg-radius-sm);padding:11px 13px;font-size:0.74rem;line-height:1.55;color:#ffb3bb;margin-bottom:1.25rem;}
+    #login-screen .poc-note strong{color:var(--lg-danger);}
+
+    /* fields */
+    #login-screen .field{display:flex;flex-direction:column;gap:7px;margin-bottom:1.1rem;}
+    #login-screen .field label{font-size:0.72rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--lg-text-dim);font-family:var(--lg-font-body);}
+    #login-screen .input-wrap{position:relative;display:flex;align-items:center;}
+    #login-screen .input-wrap input{width:100%;padding:13px 14px;padding-right:44px;background:var(--lg-bg-elevated);border:1px solid var(--lg-border);border-radius:var(--lg-radius-sm);color:var(--lg-text);font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.88rem;outline:none;transition:border-color 0.2s,box-shadow 0.2s,background 0.2s;}
+    #login-screen .input-wrap input::placeholder{color:var(--lg-text-dim);}
+    #login-screen .input-wrap input:focus{border-color:var(--lg-border-focus);box-shadow:0 0 0 3px var(--lg-accent-soft);background:#0a0e16;}
+    #login-screen .input-wrap .at-prefix{position:absolute;left:14px;color:var(--lg-text-dim);font-family:ui-monospace,monospace;font-size:0.88rem;pointer-events:none;}
+    #login-screen .input-wrap.has-prefix input{padding-left:28px;}
+    #login-screen .toggle-vis{position:absolute;right:8px;width:32px;height:32px;border:none;background:transparent;color:var(--lg-text-dim);cursor:pointer;border-radius:8px;display:grid;place-items:center;transition:color 0.2s,background 0.2s;}
+    #login-screen .toggle-vis:hover{color:var(--lg-text-muted);background:rgba(255,255,255,0.04);}
+    #login-screen .field-hint{font-size:0.76rem;color:var(--lg-text-dim);line-height:1.5;}
+    #login-screen .field-hint code{color:var(--lg-text-muted);}
+
+    /* buttons */
+    #login-screen .btn{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:13px 18px;border-radius:var(--lg-radius-sm);font-family:var(--lg-font-body);font-size:0.92rem;font-weight:600;cursor:pointer;border:none;transition:transform 0.15s,box-shadow 0.2s,opacity 0.2s,background 0.2s;}
+    #login-screen .btn:active:not(:disabled){transform:scale(0.985);}
+    #login-screen .btn:disabled{opacity:0.4;cursor:not-allowed;}
+    #login-screen .btn-keychain{background:linear-gradient(135deg,#1a9e5c 0%,#0d7a47 100%);color:#fff;box-shadow:0 4px 20px rgba(26,158,92,0.3);margin-bottom:0.5rem;}
+    #login-screen .btn-keychain:hover:not(:disabled){box-shadow:0 6px 28px rgba(26,158,92,0.4);}
+    #login-screen .btn-primary{background:linear-gradient(135deg,var(--lg-gold) 0%,#d49a1a 100%);color:#1a1200;box-shadow:0 4px 20px rgba(240,180,41,0.25);margin-top:0.25rem;}
+    #login-screen .btn-primary:hover:not(:disabled){box-shadow:0 6px 28px rgba(240,180,41,0.35);}
+    #login-screen .keychain-hint{text-align:center;font-size:0.76rem;color:var(--lg-text-dim);margin-bottom:1.25rem;}
+    #login-screen .keychain-hint a{color:var(--lg-cyan);text-decoration:none;font-weight:500;}
+    #login-screen .keychain-hint a:hover{text-decoration:underline;}
+
+    #login-screen .divider{display:flex;align-items:center;gap:12px;margin:1.25rem 0;}
+    #login-screen .divider::before,#login-screen .divider::after{content:'';flex:1;height:1px;background:var(--lg-border);}
+    #login-screen .divider span{font-size:0.68rem;font-weight:600;letter-spacing:0.1em;color:var(--lg-text-dim);}
+
+    /* security note */
+    #login-screen .security-note{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border-radius:var(--lg-radius-sm);background:var(--lg-accent-soft);border:1px solid rgba(0,209,143,0.2);font-size:0.8rem;color:var(--lg-success);line-height:1.5;margin-bottom:1rem;}
+    #login-screen .security-note svg{flex-shrink:0;margin-top:1px;}
+
+    /* status messages (login-error / login-status) */
+    #login-screen .msg{min-height:18px;font-size:0.8rem;text-align:center;margin-bottom:0.5rem;font-family:ui-monospace,monospace;}
+    #login-screen .msg.err{color:var(--lg-danger);}
+    #login-screen .msg.info{color:var(--lg-accent);}
+
+    #login-screen .footer-link{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:1.25rem;font-size:0.78rem;color:var(--lg-text-dim);text-decoration:none;transition:color 0.2s;}
+    #login-screen .footer-link:hover{color:var(--lg-cyan);}
+
+    /* responsive — collapse to single column, swap brand panel for inline logo */
+    @media (max-width:960px){
+      #login-screen .page{grid-template-columns:1fr;}
+      #login-screen .brand-panel{display:none;}
+      #login-screen .mobile-logo{display:flex;}
+    }
+  </style>
 </head>
 <body>
 
@@ -741,13 +876,14 @@
 	<!-- pop up cookies and other 2/3-->
 <div id="overlay">
   <div class="popup-box">
-	  <h2>Welcome to V4CALL - A CompleteNoobs.com project </h2> 
-	  <h3>This is in 0.1 concept phase - use at own risk</h3>
+	  <h2>Welcome to V4CALL - A CompleteNoobs.com project </h2>
+	  <h3>⚠ Proof of concept — not for real use</h3>
+	  <p style="color:#ff9090;">v4call, and its sister projects <strong>nGate</strong> and <strong>IPFS-Gate</strong>, are <strong>proof-of-concept builds by independent builders</strong> — not production software. They are <strong>not safe to use</strong> and <strong>not recommended for general users</strong>. They are here for developers who want to review the code and are willing to take the risks of an early, quickly-built concept. Treat everything as a demo, not a service.</p>
 	  <a href="https://github.com/CompleteNoobs/v4call"> github -mit licenced</a></p>
 	  <a href="https://www.completenoobs.com/noobs/V4CALL" > V4call completenoobs page</a></p>
     <p>We use cookies to track traffic. Are you 21 or older?</p>
-    <p>By accepting you are entering at your own risk</p>
-    <button onclick="acceptAndHide()">Yes, I Accept & I'm Over 21 & am aware you are noobs and are still learning i enter at my own risk</button>
+    <p>By accepting you acknowledge this is an experimental proof of concept and you are entering at your own risk.</p>
+    <button onclick="acceptAndHide()">Yes, I Accept & I'm Over 21 & I understand this is a proof-of-concept build by noobs still learning, and I enter at my own risk</button>
     <p>→ <a href="https://www.google.com" >No Thank You - take me to Google</a></p>
   </div>
 </div>
@@ -765,37 +901,124 @@
   <div id="status-dot"></div>
 </header>
 
-<!-- SCREEN 1: LOGIN -->
+<!-- SCREEN 1: LOGIN (redesigned 2026-06 — Grok design, wired to existing login fns) -->
 <div class="screen active" id="login-screen">
-  <div class="center-wrap">
-    <div class="card">
-      <div class="hive-logo">HIVE</div>
-      <h2>Sign in with Hive</h2>
-      <p>Your identity is verified using the Hive blockchain. Payments use Hive Keychain.</p>
-      <div class="field">
-        <label>HIVE USERNAME</label>
-        <input id="hive-username" type="text" placeholder="e.g. noblemage" autocomplete="off" autocapitalize="none" spellcheck="false"/>
+  <div class="bg" aria-hidden="true">
+    <div class="bg-grid"></div>
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+  </div>
+
+  <div class="page">
+    <aside class="brand-panel">
+      <div class="logo-row">
+        <div class="logo-mark"><span>v4</span></div>
+        <div class="logo-word">v4<em>call</em></div>
       </div>
-      <div id="keychain-login-section">
-        <button class="primary" id="keychain-login-btn" onclick="keychainLogin()" style="background:var(--green);">⚡ Sign in with Keychain</button>
-        <div class="field-hint" style="text-align:center;">Recommended — no key paste needed. <a href="https://hive-keychain.com" target="_blank" rel="noopener noreferrer" style="color:var(--blue);">Get Keychain →</a></div>
+      <h1>Know your caller.<br/><span class="line2">By proof.</span></h1>
+      <p class="brand-lead">Paid, encrypted voice, video, and chat — verified on the Hive blockchain. Your keys never leave this browser.</p>
+      <ul class="feature-list">
+        <li>
+          <div class="feature-icon">🔐</div>
+          <div><strong>Cryptographic identity</strong>Every session is tied to your Hive posting key — no passwords on our servers.</div>
+        </li>
+        <li>
+          <div class="feature-icon">⚡</div>
+          <div><strong>Keychain-first</strong>Sign in with one click via Hive Keychain. No copy-paste required.</div>
+        </li>
+        <li>
+          <div class="feature-icon">💬</div>
+          <div><strong>End-to-end encryption</strong>DMs and room messages wrapped to recipient posting keys.</div>
+        </li>
+      </ul>
+    </aside>
+
+    <main class="form-panel">
+      <div class="login-card">
+        <div class="mobile-logo">
+          <div class="logo-mark" style="width:40px;height:40px;border-radius:11px;"><span style="font-size:0.9rem;">v4</span></div>
+          <div class="logo-word" style="font-size:1.1rem;">v4<em>call</em></div>
+        </div>
+
+        <header class="card-header">
+          <div class="hive-badge">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M12 2L4 7v10l8 5 8-5V7l-8-5z" stroke="#e31337" stroke-width="1.5" fill="rgba(227,19,55,0.15)"/>
+            </svg>
+            <span>HIVE</span>
+          </div>
+          <h2>Welcome to v4call</h2>
+          <p>Sign in with your Hive account to enter the lobby.</p>
+        </header>
+
+        <div class="poc-note">
+          ⚠ <strong>Proof of concept — not for real use.</strong> v4call (and its sister projects nGate &amp; IPFS-Gate) are proof-of-concept builds by independent builders, not production software. Not safe to use and not recommended for general users — provided for developers reviewing the code who accept the risks. Don't trust it with real money. By signing in you enter at your own risk.
+        </div>
+
+        <form id="login-form" onsubmit="return false;">
+          <div class="field">
+            <label for="hive-username">Hive username</label>
+            <div class="input-wrap has-prefix">
+              <span class="at-prefix">@</span>
+              <input id="hive-username" type="text" placeholder="e.g. noblemage" autocomplete="username" autocapitalize="none" spellcheck="false"/>
+            </div>
+          </div>
+
+          <div id="keychain-login-section">
+            <button type="button" class="btn btn-keychain" id="keychain-login-btn" onclick="keychainLogin()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+              </svg>
+              Sign in with Keychain
+            </button>
+            <p class="keychain-hint">Recommended — no key paste needed. <a href="https://hive-keychain.com" target="_blank" rel="noopener noreferrer">Get Keychain →</a></p>
+          </div>
+
+          <div class="divider"><span>OR</span></div>
+
+          <div class="field">
+            <label for="hive-privkey">Posting private key</label>
+            <div class="input-wrap">
+              <input id="hive-privkey" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
+              <button type="button" class="toggle-vis" id="toggle-key-vis" aria-label="Show key" title="Show key" onclick="toggleKeyVis(this)">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              </button>
+            </div>
+            <p class="field-hint">Starts with <code>5J</code>. Hive wallet → Keys &amp; Permissions → Posting.</p>
+          </div>
+
+          <div class="security-note">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <rect x="5" y="11" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 11V8a4 4 0 1 1 8 0v3" stroke="currentColor" stroke-width="1.5"/>
+            </svg>
+            <span>🔒 Keys live in session memory only — never sent to any server.</span>
+          </div>
+
+          <div class="msg err"  id="login-error"  role="alert"></div>
+          <div class="msg info" id="login-status" aria-live="polite"></div>
+
+          <button type="button" class="btn btn-primary" id="login-btn" onclick="hiveLogin()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M15 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M5 21v-1a7 7 0 0 1 14 0v1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Sign in with key
+          </button>
+        </form>
+
+        <a class="footer-link" href="/info.html" target="_blank" rel="noopener noreferrer">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M12 11v5M12 8h.01" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          New here? Learn the v4call basics
+        </a>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;margin:4px 0;">
-        <div style="flex:1;height:1px;background:var(--border);"></div>
-        <span style="font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--muted);">OR</span>
-        <div style="flex:1;height:1px;background:var(--border);"></div>
-      </div>
-      <div class="field">
-        <label>POSTING PRIVATE KEY</label>
-        <input id="hive-privkey" type="password" placeholder="5Jxxx…" autocomplete="off" spellcheck="false"/>
-        <div class="field-hint">Your posting private key starts with 5J. Find it in your Hive wallet → Keys &amp; Permissions → Posting.</div>
-      </div>
-      <div class="security-note">🔒 Keys are stored only in session memory — never sent to the server.</div>
-      <div class="err"  id="login-error"></div>
-      <div class="info" id="login-status"></div>
-      <button class="primary" id="login-btn" onclick="hiveLogin()">Sign in with Key →</button>
-      <a href="/info.html" target="_blank" rel="noopener noreferrer" style="text-align:center;font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--blue);text-decoration:none;margin-top:4px;">📖 New here? Learn the v4call basics →</a>
-    </div>
+    </main>
   </div>
 </div>
 
@@ -1803,6 +2026,14 @@ function unlockEncryption() {
     status.textContent = 'Invalid key format. Use your Posting private key (starts with 5J).';
     status.style.color = 'var(--danger)';
   }
+}
+// Show/hide the posting-key field (eye toggle on the login screen)
+function toggleKeyVis(btn) {
+  const input = document.getElementById('hive-privkey');
+  if (!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  if (btn) { btn.title = show ? 'Hide key' : 'Show key'; btn.setAttribute('aria-label', show ? 'Hide key' : 'Show key'); }
 }
 document.getElementById('hive-privkey').addEventListener('keydown', e => { if (e.key==='Enter') hiveLogin(); });
 document.getElementById('hive-username').addEventListener('keydown', e => {
