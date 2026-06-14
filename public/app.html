@@ -4410,6 +4410,18 @@ function decryptMsg(ciphertext) {
 // real limit. Caught 2026-06-03 after gate-side bump to 25 MB failed to
 // take effect in the picker.
 let attachMaxBytes = 10 * 1024 * 1024;
+// §1 claim-model cutover — the gate's /reserve was cut over from a flat per-upload
+// fee to a computed MB-hour quote (size × hours × copies). The existing room/DM +
+// public upload flows MUST now send hours_requested/copies, or the gate silently
+// bills its DEFAULT_HOURS (~168h) and the client overpays/fails. These vars are
+// learned from GET / (payment + pricing blocks, via refreshAttachCostLine) with
+// fallbacks that match the gate defaults so the reserve call is deterministic even
+// before the caps fetch lands. An OLD flat-fee gate (v0.1.3) ignores these fields
+// and returns no `quote`, so every consumer below falls back to payment.amount.
+let gateDefaultHours  = 168;     // ≈ 7-day TTL — preserves the old attachment lifetime
+let gateRatePerMbHour = null;    // for the pre-file rate hint on the cost line
+let gateMbDivisor     = 1000000; // decimal MB (bytes / 1e6), per PRICING-V1
+let gatePayCurrency   = null;    // gate's PAYMENT_CURRENCY from GET /
 // v0.16.17 — `mode` is 'room' (existing) or 'dm' (new). dmTarget/dmRate/
 // dmCurrency/dmEscrow populated only in 'dm' mode and copied from the open
 // DM panel so the modal reflects the same paid-DM gate the panel sees.
@@ -5217,9 +5229,9 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const j = await r.json();
     const p = j.payment || {};
-    const amount = p.amount ?? '?';
+    const pr = j.pricing || {};
     const cur = p.currency || '?';
-    const days = p.ttl_days ?? '?';
+    if (p.currency) gatePayCurrency = cur;
     // v0.16.21 — Pick up the gate's actual MAX_FILE_SIZE_MB so the
     // client cap tracks operator config. Defaults to the boot-time
     // const (10 MB) when the gate doesn't advertise it.
@@ -5233,6 +5245,25 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
       attachMaxBytes = Math.floor(maxMb * 1024 * 1024);
     }
     const sizeStr = Number.isFinite(maxMb) && maxMb > 0 ? `, ≤ ${maxMb} MB` : '';
+
+    // §1 cutover — claim-model gate (payment.model === 'claim-mb-hour'): cost is
+    // size × hours × copies, so a flat per-upload figure no longer exists. The
+    // pre-file line shows the per-MB·hr rate + default duration as a hint; the
+    // exact figure comes back from /reserve and is shown right before paying.
+    const rate     = Number(pr.rate_per_mb_hour ?? j.rate_per_mb_hour);
+    const defHours = Number(p.default_hours ?? j.default_hours);
+    if (Number.isFinite(rate) && rate > 0) {
+      gateRatePerMbHour = rate;
+      if (Number.isFinite(defHours) && defHours > 0) gateDefaultHours = defHours;
+      if (Number.isFinite(Number(pr.mb_divisor)) && Number(pr.mb_divisor) > 0) gateMbDivisor = Number(pr.mb_divisor);
+      const hrStr = Number.isFinite(defHours) && defHours > 0 ? `, ${defHours} h default` : '';
+      line.textContent = `≈ ${rate} ${cur}/MB·hr${hrStr}${sizeStr} — exact cost shown before you pay`;
+      return;
+    }
+
+    // Legacy flat-fee gate (v0.1.3): payment.amount + ttl_days.
+    const amount = p.amount ?? '?';
+    const days   = p.ttl_days ?? '?';
     line.textContent = `≈ ${amount} ${cur} for ${days} day${days === 1 ? '' : 's'}${sizeStr}`;
   } catch (e) {
     line.textContent = `⚠ could not reach ${gatewayUrl}`;
@@ -5583,9 +5614,12 @@ async function uploadPublicFile(file, gatewayUrl) {
   }
 
   setPubStatus('Reserving quota…');
+  // §1 cutover — send hours_requested/copies so the claim-model gate quotes a
+  // known duration (≈ the old 7-day TTL) instead of silently billing DEFAULT_HOURS.
+  // Old flat-fee gates ignore these fields and return no `quote`.
   const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ uploader: myUsername, size_bytes: buf.length, mode: 'public' })
+    body: JSON.stringify({ uploader: myUsername, size_bytes: buf.length, mode: 'public', hours_requested: gateDefaultHours, copies: 1 })
   });
   if (!reserveRes.ok) { const j = await reserveRes.json().catch(() => ({})); throw new Error(`reserve failed: ${j.message || reserveRes.status}`); }
   const reserve       = await reserveRes.json();
@@ -5594,6 +5628,11 @@ async function uploadPublicFile(file, gatewayUrl) {
   const memo          = reserve.payment.memo;
   const payAmount     = reserve.payment.amount;
   const payCurrency   = (reserve.payment.currency || 'CNOOBS').toUpperCase();
+  // Surface the computed quote before the Keychain pop (no-op on an old gate).
+  if (reserve.quote) {
+    const q = reserve.quote;
+    setPubStatus(`Quote: ${q.total} ${q.currency} — ${q.billable_mb} MB × ${q.billable_hrs} h × ${q.copies} cop${q.copies_capped ? ' (copies capped to node count)' : ''}.`);
+  }
 
   setPubStatus('Signing upload proof (Keychain)…');
   const proofMsg       = buildUploadProofMessage({ ciphertextSha256Hex: sha, reservationId, uploader: myUsername });
@@ -5886,10 +5925,13 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
   } else {
     // 2) Reserve
     setAttachStatus('Reserving quota…');
+    // §1 cutover — send hours_requested/copies so the claim-model gate quotes a
+    // known duration (≈ the old 7-day TTL) instead of silently billing
+    // DEFAULT_HOURS. Old flat-fee gates ignore these fields and return no `quote`.
     const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length })
+      body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length, hours_requested: gateDefaultHours, copies: 1 })
     });
     if (!reserveRes.ok) {
       const j = await reserveRes.json().catch(() => ({}));
@@ -5904,6 +5946,11 @@ async function sendAttachment({ file, gatewayUrl, recipientUsernames, mode, dmCo
     // backwards compat with v0.1.2 gates that didn't include `currency` in the
     // reserve response. v0.1.3+ always returns it.
     const payCurrency = (reserve.payment.currency || 'CNOOBS').toUpperCase();
+    // Surface the computed quote before the Keychain pop (no-op on an old gate).
+    if (reserve.quote) {
+      const q = reserve.quote;
+      setAttachStatus(`Quote: ${q.total} ${q.currency} — ${q.billable_mb} MB × ${q.billable_hrs} h × ${q.copies} cop${q.copies_capped ? ' (copies capped to node count)' : ''}.`);
+    }
 
     // 3) Sign upload proof
     setAttachStatus('Signing upload proof (Keychain)…');
