@@ -5945,6 +5945,10 @@ async function runPrivateSend({ file, gatewayUrl, recipients, hours, copies, pol
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const commitment = await sha256HexBytes(u8concat(fileBytes, salt));
   const saltB64 = btoa(String.fromCharCode(...salt));
+  // Stage 6 proof-of-receipt: the gate stores H(plaintext) (NOT the salted
+  // commitment, which is public in the link). A recipient later reproduces this
+  // from their decrypted bytes to prove receipt. Not placed in the artifact.
+  const receiptHash = await sha256HexBytes(fileBytes);
 
   const release_policy = { type: policyType, addresses: recipients.map(r => r.split('@')[0].toLowerCase()) };
 
@@ -5989,7 +5993,7 @@ async function runPrivateSend({ file, gatewayUrl, recipients, hours, copies, pol
   form.append('uploader_pubkey', myPubKey);
   form.append('upload_proof_sig', uploadProofSig);
   form.append('release_policy', JSON.stringify(release_policy));
-  form.append('commitment', commitment); // forward-compat: a Stage-6 gate stores it
+  form.append('receipt_hash', receiptHash); // Stage 6: gate stores H(plaintext) for proof-of-receipt
   form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
   let upRes;
   try {
@@ -6246,9 +6250,60 @@ function renderRevealResult(env, header, fileBytes) {
   actions.appendChild(op);
   card.appendChild(actions);
 
-  // Stage 6 hook: a "Confirm receipt & allow early release" button lands here —
-  // it'll sign H(fileBytes ‖ salt) and POST it to the gate's receipt endpoint.
+  // Stage 6 — proof-of-receipt. Recompute H(plaintext) from the decrypted bytes
+  // and sign it: this proves to the gate you actually decrypted, and (per the
+  // file's release policy) can let the owner stop hosting early + get a refund.
+  if (env.order_id) {
+    const rcptWrap = document.createElement('div');
+    rcptWrap.style.cssText = 'margin-top:8px;border-top:1px solid var(--border);padding-top:8px;';
+    const rbtn = document.createElement('button');
+    rbtn.className = 'att-btn';
+    rbtn.textContent = '✅ Confirm receipt';
+    rbtn.title = 'Prove you decrypted this; per its release policy, may let the owner stop hosting early';
+    const rstat = document.createElement('div');
+    rstat.style.cssText = 'font-size:0.66rem;color:var(--muted);margin-top:5px;';
+    rstat.textContent = 'release policy: ' + ((env.release_policy && env.release_policy.type) || 'owner_only');
+    rbtn.onclick = () => confirmReceipt(env, fileBytes, rbtn, rstat);
+    rcptWrap.appendChild(rbtn);
+    rcptWrap.appendChild(rstat);
+    card.appendChild(rcptWrap);
+  }
   box.appendChild(card);
+}
+async function confirmReceipt(env, fileBytes, btn, statusEl) {
+  if (!env || !env.order_id) return;
+  if (!myUsername) { statusEl.textContent = '✗ Log in first.'; return; }
+  if (btn) btn.disabled = true;
+  try {
+    statusEl.textContent = 'Computing proof…';
+    const proofHash = await sha256HexBytes(fileBytes);          // H(plaintext) — only a decryptor can produce it
+    const ts = Math.floor(Date.now() / 1000);
+    const message = `ipfs-gate:receipt:v1:${env.order_id}:${myUsername}:${ts}:${proofHash}`;
+    statusEl.textContent = 'Signing (Keychain)…';
+    const sig = await signRaw(message);
+    if (!sig) { statusEl.textContent = '✗ signature cancelled.'; if (btn) btn.disabled = false; return; }
+    const gateBase = (env.gateway_hint || '').replace(/\/ipfs\/[^/]*\/?$/i, '') || getRememberedGateway();
+    statusEl.textContent = 'Submitting receipt…';
+    const resp = await fetch(`${gateBase}/claims/receipt`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: env.order_id, hive_account: myUsername, ts, pubkey: myPubKey, sig, proof_hash: proofHash })
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) { statusEl.textContent = '✗ ' + (j.message || j.error || `HTTP ${resp.status}`); if (btn) btn.disabled = false; return; }
+    if (j.released && j.ended) {
+      statusEl.textContent = `✓ Receipt confirmed — hosting released early. ${j.fully_unpinned ? 'File unpinned.' : 'A backstop kept it alive.'} Owner refunded the unused time.`;
+      if (btn) btn.textContent = '✓ Released';
+    } else if (j.released === false && typeof j.got === 'number') {
+      statusEl.textContent = `✓ Receipt recorded — ${j.got}/${j.needed} recipients confirmed (all_of: waiting for the rest).`;
+      if (btn) btn.textContent = '✓ Receipt sent';
+    } else {
+      statusEl.textContent = '✓ Receipt recorded' + (j.note ? ' — ' + j.note : '.');
+      if (btn) btn.textContent = '✓ Receipt sent';
+    }
+  } catch (e) {
+    statusEl.textContent = '✗ ' + (e.message || 'failed');
+    if (btn) btn.disabled = false;
+  }
 }
 
 function openAttachModal() {
