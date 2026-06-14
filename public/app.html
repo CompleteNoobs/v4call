@@ -1114,6 +1114,7 @@
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px;">
             <button class="uploads-refresh-btn" onclick="loadUploadsList(true)">🔄 Refresh</button>
             <button class="uploads-refresh-btn" onclick="openPublicUploadModal()" title="Upload a plaintext file and get a shareable link — anyone can open it, no v4call needed">⬆ Public upload</button>
+            <button class="uploads-refresh-btn" onclick="openPrivateSendModal()" title="Encrypt a file to specific people, pay to host it, get a Reveal link only they can decrypt">🔒 Private send</button>
           </div>
         </div>
         <div id="uploads-list"><div class="uploads-status">Open this tab to load your uploads from the gate.</div></div>
@@ -1290,6 +1291,66 @@
     <div class="payment-btn-row">
       <button id="pub-upload-btn" onclick="confirmPublicUpload()" style="background:var(--accent);color:#0a0c0f;">⬆ Upload (public)</button>
       <button id="pub-cancel-btn" onclick="closePublicUploadModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- PRIVATE SEND MODAL (Stage 4 — encrypt-to-people, pay-to-host, shareable Reveal link) -->
+<div id="private-send-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(10,12,15,0.88);backdrop-filter:blur(8px);align-items:center;justify-content:center;">
+  <div class="payment-box" style="border-color:var(--purple);max-width:460px;max-height:92vh;overflow-y:auto;">
+    <h3 style="color:var(--purple);">🔒 Private Send</h3>
+    <p style="font-size:0.78rem;color:var(--subtext);line-height:1.6;">Encrypt a file to specific people, pay the gate to host it for a chosen time, and get a <strong>Reveal link</strong> only they can decrypt. Privacy is the <strong>encryption</strong> — anyone can fetch the ciphertext, only the wrapped Hive keys open it.</p>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">FILE (any type)</div>
+      <input id="priv-file-input" type="file" onchange="onPrivFilePick()" style="font-size:0.78rem;color:var(--text);width:100%;"/>
+      <div id="priv-file-meta" style="font-size:0.7rem;color:var(--muted);margin-top:4px;"></div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">RECIPIENTS (Hive usernames — you're always included)</div>
+      <div style="display:flex;gap:6px;">
+        <input id="priv-recip-input" type="text" placeholder="@username" onkeydown="if(event.key==='Enter'){event.preventDefault();privAddRecipient();}" style="flex:1;font-size:0.78rem;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;"/>
+        <button type="button" onclick="privAddRecipient()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;font-size:0.8rem;padding:4px 12px;">+ Add</button>
+      </div>
+      <div id="priv-recip-chips" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px;"></div>
+    </div>
+
+    <div style="margin-top:10px;display:flex;gap:10px;">
+      <div style="flex:1;">
+        <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">HOST FOR (hours)</div>
+        <input id="priv-hours" type="number" min="1" value="168" onchange="refreshPrivEstimate()" oninput="refreshPrivEstimate()" style="width:100%;font-size:0.78rem;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;"/>
+      </div>
+      <div style="flex:1;">
+        <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">COPIES</div>
+        <input id="priv-copies" type="number" min="1" value="1" onchange="refreshPrivEstimate()" oninput="refreshPrivEstimate()" style="width:100%;font-size:0.78rem;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;"/>
+        <div id="priv-copies-note" style="font-size:0.64rem;color:var(--muted);margin-top:3px;"></div>
+      </div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">WHO CAN STOP HOSTING EARLY (release authority)</div>
+      <label style="display:block;font-size:0.74rem;color:var(--text);margin-bottom:3px;cursor:pointer;"><input type="radio" name="priv-policy" value="owner_only" checked> Only me (owner)</label>
+      <label style="display:block;font-size:0.74rem;color:var(--text);margin-bottom:3px;cursor:pointer;"><input type="radio" name="priv-policy" value="any_of"> Me or any one recipient</label>
+      <label style="display:block;font-size:0.74rem;color:var(--text);cursor:pointer;"><input type="radio" name="priv-policy" value="all_of"> Me, or all recipients together</label>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div style="font-size:0.68rem;color:var(--subtext);margin-bottom:5px;">STORAGE</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span id="priv-backend-line" style="font-size:0.78rem;color:var(--text);flex:1;"></span>
+        <button type="button" onclick="openStorageModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;font-size:0.74rem;padding:4px 9px;">⚙ Change</button>
+      </div>
+      <div id="priv-rate-hint" style="font-size:0.68rem;color:var(--muted);margin-top:4px;"></div>
+    </div>
+
+    <div class="payment-total" style="margin-top:10px;"><span class="label">EST. COST</span><span class="amount" id="priv-cost-line" style="color:var(--purple);">Pick a file to estimate.</span></div>
+    <div class="payment-note" id="priv-status-note" style="min-height:18px;">Ready.</div>
+    <div id="priv-result" style="display:none;margin-top:8px;"></div>
+    <div class="keychain-required">⚡ Requires Hive Keychain (Posting sign + Active pay) + unlocked 🔑 encryption</div>
+    <div class="payment-btn-row">
+      <button id="priv-send-btn" onclick="confirmPrivateSend()" style="background:var(--purple);color:#0a0c0f;">🔒 Encrypt &amp; Create Link</button>
+      <button id="priv-cancel-btn" onclick="closePrivateSendModal()" style="background:var(--surface2);color:var(--subtext);border:1px solid var(--border)!important;">Close</button>
     </div>
   </div>
 </div>
@@ -4422,6 +4483,7 @@ let gateDefaultHours  = 168;     // ≈ 7-day TTL — preserves the old attachme
 let gateRatePerMbHour = null;    // for the pre-file rate hint on the cost line
 let gateMbDivisor     = 1000000; // decimal MB (bytes / 1e6), per PRICING-V1
 let gatePayCurrency   = null;    // gate's PAYMENT_CURRENCY from GET /
+let gateCopiesMax     = 1;       // pricing.copies_max — replication dial cap (1 on single-node)
 // v0.16.17 — `mode` is 'room' (existing) or 'dm' (new). dmTarget/dmRate/
 // dmCurrency/dmEscrow populated only in 'dm' mode and copied from the open
 // DM panel so the modal reflects the same paid-DM gate the panel sees.
@@ -5142,17 +5204,25 @@ function renderBackendLines() {
   const desc = describeBackend(b);
   const a = document.getElementById('att-backend-line'); if (a) a.textContent = desc;
   const p = document.getElementById('pub-backend-line'); if (p) p.textContent = desc;
+  const pv = document.getElementById('priv-backend-line'); if (pv) pv.textContent = desc;
   const ac = document.getElementById('att-cost-line');
   const pc = document.getElementById('pub-cost-line');
   if (b.type === 'pinata') {
     const t = b.jwt ? 'You pay Pinata directly — no Hive or v4call fee' : '⚠ Set your Pinata key (⚙ Change) before uploading';
     if (ac) ac.textContent = t;
     if (pc) pc.textContent = t;
+    // Private send needs the gate's claim/order for release + proof — Pinata can't do it.
+    const prv = document.getElementById('priv-rate-hint');
+    if (prv) prv.textContent = '⚠ Private send needs the ipfs-gate backend (release control + proof-of-receipt) — switch via ⚙ Change.';
   } else {
-    const attOpen = document.getElementById('attachment-modal')?.style.display !== 'none';
-    const pubOpen = document.getElementById('public-upload-modal')?.style.display !== 'none';
+    const attOpen  = document.getElementById('attachment-modal')?.style.display !== 'none';
+    const pubOpen  = document.getElementById('public-upload-modal')?.style.display !== 'none';
+    const privOpen = document.getElementById('private-send-modal')?.style.display !== 'none';
     if (ac && attOpen) refreshAttachCostLine(b.url, 'att-cost-line');
     if (pc && pubOpen) refreshAttachCostLine(b.url, 'pub-cost-line');
+    // The rate hint also (re)populates gateDefaultHours / gateRatePerMbHour /
+    // gateCopiesMax for the estimate + reserve call.
+    if (privOpen) refreshAttachCostLine(b.url, 'priv-rate-hint').then(() => { syncPrivCopiesCap(); refreshPrivEstimate(); });
   }
 }
 function openStorageModal() {
@@ -5256,6 +5326,7 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
       gateRatePerMbHour = rate;
       if (Number.isFinite(defHours) && defHours > 0) gateDefaultHours = defHours;
       if (Number.isFinite(Number(pr.mb_divisor)) && Number(pr.mb_divisor) > 0) gateMbDivisor = Number(pr.mb_divisor);
+      if (Number.isFinite(Number(pr.copies_max)) && Number(pr.copies_max) >= 1) gateCopiesMax = Number(pr.copies_max);
       const hrStr = Number.isFinite(defHours) && defHours > 0 ? `, ${defHours} h default` : '';
       line.textContent = `≈ ${rate} ${cur}/MB·hr${hrStr}${sizeStr} — exact cost shown before you pay`;
       return;
@@ -5670,6 +5741,335 @@ async function uploadPublicFile(file, gatewayUrl) {
   let url = upJson.gateway_url || '';
   if (!url || /\/\/ipfs\.localhost(\/|$|:)/i.test(url) || /\/\/localhost(\/|$|:)/i.test(url)) url = `${gatewayUrl}/ipfs/${cid}`;
   return { cid, url, mime };
+}
+
+// ──────────────────────────────────────────────────────────────
+// Stage 4 — Private Send (encrypt-to-people, pay-to-host, Reveal link)
+// ──────────────────────────────────────────────────────────────
+// A standalone "encrypt a file to specific people, pay the gate to host it for a
+// chosen time, share a Reveal link only they can decrypt" flow. Distinct from the
+// room/DM attachments: its own modal, a self-contained shareable artifact (not a
+// room broadcast), and the gate's claim/order/release machinery (Stages 1–3).
+//
+//   Artifact  = "v4reveal:" + base64url(JSON envelope) carrying cid + gateway hint
+//               + per-recipient wrapped AES keys + commitment/salt + order_id +
+//               release_policy + sig. Self-contained → no gate lookup to Reveal;
+//               CID is portable; only listed recipients can decrypt. Stage 5 reads it.
+//   Commitment= SHA-256(fileBytes ‖ salt). Emitted now so Stage 6 proof-of-receipt
+//               can verify a recipient actually decrypted (salt is in the envelope;
+//               a bystander has the salt but NOT the plaintext → can't forge).
+//   Sig       = posting-key signRaw over a Stage-4-namespaced canonical message
+//               (separate sig space from room/dm so nothing cross-replays).
+// Requires the ipfs-gate backend (Pinata has no claim/order → no release/proof).
+
+let privSendState  = null; // { file, recipients:Set<string> }
+let privPendingEnv = null; // unsigned envelope stashed if the final sign is declined (no re-pay on retry)
+
+function privSigInput(env) {
+  // Canonical, namespaced message the SENDER signs. Binds cid, size, sender,
+  // lifetime, recipient set, kind, commitment, and the release policy.
+  const recips = Object.keys(env.per_recipient || {}).map(s => s.toLowerCase()).sort().join(',');
+  const addrs  = ((env.release_policy && env.release_policy.addresses) || []).map(s => s.toLowerCase()).sort().join(',');
+  const ptype  = (env.release_policy && env.release_policy.type) || 'owner_only';
+  return `v4call-reveal:v1:${env.cid}|${env.size_bytes}|${env.sender}|${env.created_at}|${env.expires_at}|${env.kind_hint}|${env.commitment}|${ptype}:${addrs}|${recips}`;
+}
+async function verifyPrivEnvelopeSig(env) {
+  // Returns true / false / null. Used by Stage 5 Reveal before trusting bytes.
+  try {
+    if (!env.envelope_sig || !env.sender) return null;
+    const pubKeyStr = await fetchPubKey(env.sender);
+    if (!pubKeyStr) return null;
+    const message = privSigInput(env);
+    const hashBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(message));
+    if (!dhive.Signature || typeof dhive.Signature.fromString !== 'function') return null;
+    const sig = dhive.Signature.fromString(env.envelope_sig);
+    const recovered = sig.recover(Buffer.from ? Buffer.from(new Uint8Array(hashBytes)) : new Uint8Array(hashBytes));
+    return recovered.toString() === pubKeyStr;
+  } catch (e) { console.warn('[private] envelope sig verify failed:', e.message); return null; }
+}
+
+// base64url <-> string for the artifact (paste-safe; no +,/,= to mangle).
+function b64urlEncode(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(s) {
+  let b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+function buildRevealArtifact(env) { return 'v4reveal:' + b64urlEncode(JSON.stringify(env)); }
+
+function openPrivateSendModal() {
+  if (!myUsername) { alert('Log in first.'); return; }
+  if (!myPrivKeyStr) { alert('Unlock encryption first (🔑 key panel) — recipient key wrapping needs your posting key.'); return; }
+  privSendState = { file: null, recipients: new Set() };
+  privPendingEnv = null;
+  document.getElementById('priv-file-input').value = '';
+  document.getElementById('priv-file-meta').textContent = '';
+  document.getElementById('priv-recip-input').value = '';
+  document.getElementById('priv-hours').value = String(gateDefaultHours);
+  document.getElementById('priv-copies').value = '1';
+  const r0 = document.querySelector('input[name=priv-policy][value=owner_only]'); if (r0) r0.checked = true;
+  setPrivStatus('Ready.');
+  const res = document.getElementById('priv-result'); res.style.display = 'none'; res.innerHTML = '';
+  document.getElementById('priv-cost-line').textContent = 'Pick a file to estimate.';
+  document.getElementById('priv-send-btn').disabled = false;
+  renderPrivRecipients();
+  document.getElementById('private-send-modal').style.display = 'flex';
+  renderBackendLines(); // fills backend line + rate hint + estimate + copies cap
+}
+function closePrivateSendModal() {
+  document.getElementById('private-send-modal').style.display = 'none';
+  privSendState = null;
+}
+function onPrivFilePick() {
+  const f = document.getElementById('priv-file-input').files[0];
+  if (privSendState) privSendState.file = f || null;
+  const meta = document.getElementById('priv-file-meta');
+  if (!f) { meta.textContent = ''; refreshPrivEstimate(); return; }
+  const overCap = (getStorageBackend().type === 'ipfs-gate' && f.size > attachMaxBytes)
+    ? ` ⚠ over gate cap (${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB)` : '';
+  meta.textContent = `${f.name} · ${bytesToHuman(f.size)} · ${detectFileMime(f) || 'application/octet-stream'}${overCap}`;
+  refreshPrivEstimate();
+}
+function privAddRecipient() {
+  const inp = document.getElementById('priv-recip-input');
+  const bare = (inp.value || '').trim().replace(/^@+/, '').toLowerCase().split('@')[0];
+  if (!bare) return;
+  if (!/^[a-z][a-z0-9.\-]{2,15}$/.test(bare)) { setPrivStatus(`⚠ "${bare}" doesn't look like a Hive username.`, true); return; }
+  if (bare === myUsername) { setPrivStatus("You're always included — no need to add yourself.", true); inp.value = ''; return; }
+  privSendState.recipients.add(bare);
+  inp.value = '';
+  setPrivStatus('Ready.');
+  renderPrivRecipients();
+  refreshPrivEstimate();
+}
+function privRemoveRecipient(u) {
+  if (privSendState) privSendState.recipients.delete(u);
+  renderPrivRecipients();
+  refreshPrivEstimate();
+}
+function renderPrivRecipients() {
+  const box = document.getElementById('priv-recip-chips');
+  if (!box) return;
+  const recs = privSendState ? [...privSendState.recipients] : [];
+  if (!recs.length) { box.innerHTML = '<span style="font-size:0.7rem;color:var(--muted);">No recipients yet — only you will be able to open it.</span>'; return; }
+  box.innerHTML = recs.map(u =>
+    `<span style="display:inline-flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);border-radius:12px;padding:3px 8px;font-size:0.72rem;color:var(--text);">@${escapeHtml(u)}<span data-priv-rm="${escapeHtml(u)}" style="cursor:pointer;color:var(--danger);font-weight:700;">✕</span></span>`
+  ).join('');
+  box.querySelectorAll('[data-priv-rm]').forEach(el => el.onclick = () => privRemoveRecipient(el.getAttribute('data-priv-rm')));
+}
+function syncPrivCopiesCap() {
+  const ci = document.getElementById('priv-copies');
+  const note = document.getElementById('priv-copies-note');
+  if (!ci) return;
+  ci.max = String(gateCopiesMax);
+  if ((parseInt(ci.value) || 1) > gateCopiesMax) ci.value = String(gateCopiesMax);
+  if (note) note.textContent = gateCopiesMax <= 1 ? 'single-node gate → 1' : `up to ${gateCopiesMax}`;
+}
+function setPrivStatus(text, isErr) {
+  const n = document.getElementById('priv-status-note');
+  if (!n) return;
+  n.textContent = text;
+  n.style.color = isErr ? 'var(--danger)' : 'var(--subtext)';
+}
+function refreshPrivEstimate() {
+  const el = document.getElementById('priv-cost-line');
+  if (!el) return;
+  const f = privSendState && privSendState.file;
+  if (!f) { el.textContent = 'Pick a file to estimate.'; return; }
+  const hours  = Math.max(1, parseInt(document.getElementById('priv-hours').value) || gateDefaultHours);
+  const copies = Math.max(1, Math.min(gateCopiesMax, parseInt(document.getElementById('priv-copies').value) || 1));
+  if (getStorageBackend().type === 'pinata') { el.textContent = 'Switch to the ipfs-gate backend (⚙ Change).'; return; }
+  if (!gateRatePerMbHour) { el.textContent = `~ ${(f.size / 1e6).toFixed(2)} MB × ${hours} h × ${copies} — exact cost quoted at pay.`; return; }
+  const mb  = f.size / gateMbDivisor;
+  const est = gateRatePerMbHour * mb * hours * copies;
+  el.textContent = `≈ ${est.toFixed(3)} ${gatePayCurrency || 'TEST'} (${mb.toFixed(2)} MB × ${hours} h × ${copies} cop) — exact at pay`;
+}
+
+async function confirmPrivateSend() {
+  const btn = document.getElementById('priv-send-btn');
+  if (!privSendState || !privSendState.file) { setPrivStatus('⚠ Pick a file first.', true); return; }
+  const backend = getStorageBackend();
+  if (backend.type !== 'ipfs-gate') { setPrivStatus('⚠ Private send needs the ipfs-gate backend (release control + proof). Switch via ⚙ Change.', true); return; }
+  if (!/^https?:\/\//.test(backend.url || '')) { setPrivStatus('⚠ Gateway URL invalid — set it in ⚙ Change.', true); return; }
+  if (!myPrivKeyStr) { setPrivStatus('⚠ Unlock encryption first (🔑 key panel).', true); return; }
+  const file = privSendState.file;
+  if (file.size > attachMaxBytes) { setPrivStatus(`⚠ ${(file.size / 1024 / 1024).toFixed(2)} MB — exceeds gate cap (${(attachMaxBytes / 1024 / 1024).toFixed(0)} MB).`, true); return; }
+  const hours  = Math.max(1, parseInt(document.getElementById('priv-hours').value) || gateDefaultHours);
+  const copies = Math.max(1, Math.min(gateCopiesMax, parseInt(document.getElementById('priv-copies').value) || 1));
+  const policyType = (document.querySelector('input[name=priv-policy]:checked') || {}).value || 'owner_only';
+  const recipients = [...privSendState.recipients];
+
+  btn.disabled = true;
+  try {
+    const artifact = await runPrivateSend({ file, gatewayUrl: backend.url, recipients, hours, copies, policyType });
+    if (artifact) { showPrivResult(artifact); setPrivStatus('✓ Link ready below.'); }
+    // artifact === null means the upload+pay landed but the envelope sign was
+    // declined — runPrivateSend has already shown the ↻ Retry signature UI.
+  } catch (e) {
+    setPrivStatus('✗ ' + (e.message || 'failed'), true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runPrivateSend({ file, gatewayUrl, recipients, hours, copies, policyType }) {
+  // 1) Read plaintext (for the commitment) + encrypt to a fresh AES key.
+  setPrivStatus('Encrypting…');
+  const fileBytes = new Uint8Array(await file.arrayBuffer());
+  const { blob, rawKey } = await buildInnerBlob({ file, sender: myUsername });
+  const ciphertextSha256Hex = await sha256HexBytes(blob);
+
+  // Commitment = SHA-256(fileBytes ‖ salt). The salt rides in the envelope so a
+  // recipient can recompute it after decrypting (Stage 6 proof-of-receipt).
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const commitment = await sha256HexBytes(u8concat(fileBytes, salt));
+  const saltB64 = btoa(String.fromCharCode(...salt));
+
+  const release_policy = { type: policyType, addresses: recipients.map(r => r.split('@')[0].toLowerCase()) };
+
+  // 2) Reserve — claim-model quote (size × hours × copies).
+  setPrivStatus('Reserving quota…');
+  const reserveRes = await fetch(`${gatewayUrl}/reserve`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uploader: myUsername, size_bytes: blob.length, hours_requested: hours, copies, mode: 'encrypted' })
+  });
+  if (!reserveRes.ok) { const j = await reserveRes.json().catch(() => ({})); throw new Error(`reserve failed: ${j.message || reserveRes.status}`); }
+  const reserve       = await reserveRes.json();
+  const reservationId = reserve.reservation_id;
+  const escrowAccount = reserve.payment.escrow_account;
+  const memo          = reserve.payment.memo;
+  const payAmount     = reserve.payment.amount;
+  const payCurrency   = (reserve.payment.currency || gatePayCurrency || 'TEST').toUpperCase();
+  if (reserve.quote) {
+    const q = reserve.quote;
+    setPrivStatus(`Quote: ${q.total} ${q.currency} — ${q.billable_mb} MB × ${q.billable_hrs} h × ${q.copies} cop${q.copies_capped ? ' (copies capped to node count)' : ''}.`);
+  }
+
+  // 3) Sign upload proof.
+  setPrivStatus('Signing upload proof (Keychain)…');
+  const proofMsg = buildUploadProofMessage({ ciphertextSha256Hex, reservationId, uploader: myUsername });
+  const uploadProofSig = await signRaw(proofMsg);
+  if (!uploadProofSig) throw new Error('upload proof signature cancelled');
+
+  // 4) Pay.
+  setPrivStatus(`Paying ${payAmount} ${payCurrency} (Keychain)…`);
+  const txId = await keychainTransferGateToken({ to: escrowAccount, amount: payAmount, memo, symbol: payCurrency });
+  if (!txId) throw new Error('payment cancelled or failed');
+
+  // 5) Settle delay so the tx is indexed before /upload checks it.
+  setPrivStatus('Waiting for tx to index (3s)…');
+  await new Promise(r => setTimeout(r, 3000));
+
+  // 6) Upload ciphertext + release_policy + commitment.
+  setPrivStatus('Uploading ciphertext…');
+  const form = new FormData();
+  form.append('reservation_id', reservationId);
+  form.append('tx_id', txId);
+  form.append('uploader_pubkey', myPubKey);
+  form.append('upload_proof_sig', uploadProofSig);
+  form.append('release_policy', JSON.stringify(release_policy));
+  form.append('commitment', commitment); // forward-compat: a Stage-6 gate stores it
+  form.append('ciphertext', new Blob([blob], { type: 'application/octet-stream' }), 'ciphertext.bin');
+  let upRes;
+  try {
+    upRes = await fetch(`${gatewayUrl}/upload`, { method: 'POST', body: form });
+  } catch (e) {
+    throw new Error(`upload failed (${e.message}) — your ${payAmount} ${payCurrency} payment to ${escrowAccount} was already broadcast. tx: ${txId} · reservation: ${reservationId}. Ask the operator to check /admin/orphan-payments.`);
+  }
+  if (!upRes.ok) { const j = await upRes.json().catch(() => ({})); throw new Error(`upload failed: ${j.message || upRes.status} — payment tx ${txId} may need operator review (orphan-payments).`); }
+  const upJson = await upRes.json();
+  const cid = upJson.cid;
+  const expires_at = upJson.expires_at || null;
+  const order_id = upJson.order_id || null;
+  const claim_id = upJson.claim_id || null;
+  let gateway_hint = upJson.gateway_url || '';
+  if (!gateway_hint || /\/\/ipfs\.localhost(\/|$|:)/i.test(gateway_hint) || /\/\/localhost(\/|$|:)/i.test(gateway_hint)) {
+    gateway_hint = `${gatewayUrl}/ipfs/${cid}`;
+  }
+
+  // 7) Wrap the AES key to each recipient's Hive posting key (always incl. self).
+  setPrivStatus('Wrapping keys for recipients…');
+  const rawKeyB64 = btoa(String.fromCharCode(...rawKey));
+  const audience = new Set([myUsername, ...recipients.map(r => r.split('@')[0].toLowerCase())]);
+  const per_recipient = {};
+  const skipped = [];
+  for (const u of audience) {
+    let pubKey = (u === myUsername) ? myPubKey : null;
+    if (!pubKey) { try { pubKey = await fetchPubKey(u); } catch (_) { pubKey = null; } }
+    if (!pubKey) { skipped.push(u); continue; }
+    try { per_recipient[u] = encryptMsg(rawKeyB64, pubKey); }
+    catch (e) { console.warn('[private] wrap failed for', u, e.message); skipped.push(u); }
+  }
+  if (!per_recipient[myUsername]) throw new Error('could not wrap the key to your own account — aborting (no one could decrypt).');
+  if (skipped.length) setPrivStatus(`⚠ couldn't wrap for: @${skipped.join(', @')} — they won't be able to open it. Building link for the rest…`, true);
+
+  // 8) Build + sign the recipient-scoped envelope, encode the self-contained artifact.
+  setPrivStatus('Signing envelope (Keychain)…');
+  const env = {
+    type: 'private-reveal', v: 1,
+    cid, size_bytes: blob.length, sender: myUsername,
+    created_at: new Date().toISOString(), expires_at,
+    kind_hint: mimeToKind(detectFileMime(file) || 'application/octet-stream'),
+    gateway_hint, order_id, claim_id,
+    release_policy, commitment, salt: saltB64,
+    per_recipient
+  };
+  const sig = await signRaw(privSigInput(env));
+  if (!sig) {
+    // Upload + payment already landed; don't lose them. Stash for a sign-only retry.
+    privPendingEnv = env;
+    showPrivResultRetrySign();
+    setPrivStatus('Upload + payment done, but the envelope wasn\'t signed — click ↻ Retry signature to finish the link (no re-payment).', true);
+    return null;
+  }
+  env.envelope_sig = sig;
+  return buildRevealArtifact(env);
+}
+
+async function privRetrySign() {
+  if (!privPendingEnv) return;
+  setPrivStatus('Signing envelope (Keychain)…');
+  const sig = await signRaw(privSigInput(privPendingEnv));
+  if (!sig) { setPrivStatus('Still not signed — click ↻ Retry signature.', true); return; }
+  privPendingEnv.envelope_sig = sig;
+  const artifact = buildRevealArtifact(privPendingEnv);
+  privPendingEnv = null;
+  showPrivResult(artifact);
+  setPrivStatus('✓ Link ready below.');
+}
+function showPrivResultRetrySign() {
+  const box = document.getElementById('priv-result');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-size:0.72rem;color:var(--danger);margin-bottom:6px;">Your file is uploaded + paid, but the envelope wasn\'t signed — the link needs your signature to be usable. No re-payment on retry.</div>'
+    + '<button onclick="privRetrySign()" style="background:var(--purple);color:#0a0c0f;font-size:0.78rem;padding:6px 14px;">↻ Retry signature</button>';
+}
+function showPrivResult(artifact) {
+  const box = document.getElementById('priv-result');
+  if (!box) return;
+  box.style.display = 'block';
+  box.innerHTML = `
+    <div style="font-size:0.7rem;color:var(--subtext);margin-bottom:5px;">REVEAL LINK — share with your recipients (only they can decrypt):</div>
+    <textarea id="priv-result-text" readonly style="width:100%;height:72px;font-size:0.66rem;font-family:'IBM Plex Mono',monospace;color:var(--text);background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:6px;resize:vertical;">${escapeHtml(artifact)}</textarea>
+    <div style="display:flex;gap:6px;margin-top:6px;">
+      <button onclick="privCopyResult()" style="background:var(--purple);color:#0a0c0f;font-size:0.74rem;padding:5px 12px;">📋 Copy link</button>
+    </div>
+    <div style="font-size:0.66rem;color:var(--muted);margin-top:6px;">Paste it into the <strong>Reveal</strong> tab (Stage 5) to decrypt. The ciphertext lives on the gate; this link carries the keys.</div>`;
+}
+function privCopyResult() {
+  const ta = document.getElementById('priv-result-text');
+  if (!ta) return;
+  ta.select();
+  try { navigator.clipboard.writeText(ta.value); } catch (_) { try { document.execCommand('copy'); } catch (_) {} }
+  setPrivStatus('✓ Copied to clipboard.');
 }
 
 function openAttachModal() {
