@@ -323,6 +323,7 @@
     .payment-total .label{color:var(--text);}
     .payment-total .amount{color:var(--accent);font-weight:600;font-size:1rem;}
     .payment-note{font-size:0.68rem;color:var(--muted);line-height:1.5;}
+    .gate-pricing{font-size:0.66rem;color:var(--muted);line-height:1.5;margin-top:4px;}
     .payment-btn-row{display:flex;gap:8px;}
     .payment-btn-row button{flex:1;padding:10px;border-radius:7px;font-family:'IBM Plex Mono',monospace;font-weight:600;font-size:0.82rem;cursor:pointer;border:none;}
     #pay-confirm-btn{background:var(--green);color:#0a0c0f;}
@@ -1268,6 +1269,7 @@
     </div>
 
     <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="att-cost-line" style="color:var(--accent);">… checking gate</span></div>
+    <div id="att-pricing" class="gate-pricing"></div>
     <div class="payment-note" id="att-status-note" style="min-height:18px;">Ready.</div>
     <div class="keychain-required">⚡ Requires Hive Keychain (Posting + Active)</div>
     <div class="payment-btn-row">
@@ -1298,6 +1300,7 @@
     </div>
 
     <div class="payment-total" style="margin-top:10px;"><span class="label">COST</span><span class="amount" id="pub-cost-line" style="color:var(--accent);">… checking gate</span></div>
+    <div id="pub-pricing" class="gate-pricing"></div>
     <div class="payment-note" id="pub-status-note" style="min-height:18px;">Ready.</div>
     <div id="pub-result" style="display:none;margin-top:8px;"></div>
     <div class="keychain-required">⚡ Requires Hive Keychain (Posting + Active)</div>
@@ -4497,6 +4500,7 @@ let gateRatePerMbHour = null;    // for the pre-file rate hint on the cost line
 let gateMbDivisor     = 1000000; // decimal MB (bytes / 1e6), per PRICING-V1
 let gatePayCurrency   = null;    // gate's PAYMENT_CURRENCY from GET /
 let gateCopiesMax     = 1;       // pricing.copies_max — replication dial cap (1 on single-node)
+let gateMinHours      = 1;       // pricing.min_hours — minimum billable duration (fee floor)
 // v0.16.17 — `mode` is 'room' (existing) or 'dm' (new). dmTarget/dmRate/
 // dmCurrency/dmEscrow populated only in 'dm' mode and copied from the open
 // DM panel so the modal reflects the same paid-DM gate the panel sees.
@@ -5224,6 +5228,10 @@ function renderBackendLines() {
     const t = b.jwt ? 'You pay Pinata directly — no Hive or v4call fee' : '⚠ Set your Pinata key (⚙ Change) before uploading';
     if (ac) ac.textContent = t;
     if (pc) pc.textContent = t;
+    // Pinata has no gate pricing model — the user pays Pinata per their own plan.
+    const pinataNote = 'ⓘ Pinata backend — you pay Pinata directly per your plan; no gate fee or per-MB·hr pricing.';
+    const ap = document.getElementById('att-pricing'); if (ap) ap.textContent = pinataNote;
+    const pp = document.getElementById('pub-pricing'); if (pp) pp.textContent = pinataNote;
     // Private send needs the gate's claim/order for release + proof — Pinata can't do it.
     const prv = document.getElementById('priv-rate-hint');
     if (prv) prv.textContent = '⚠ Private send needs the ipfs-gate backend (release control + proof-of-receipt) — switch via ⚙ Change.';
@@ -5231,7 +5239,7 @@ function renderBackendLines() {
     const attOpen  = document.getElementById('attachment-modal')?.style.display !== 'none';
     const pubOpen  = document.getElementById('public-upload-modal')?.style.display !== 'none';
     const privOpen = document.getElementById('private-send-modal')?.style.display !== 'none';
-    if (ac && attOpen) refreshAttachCostLine(b.url, 'att-cost-line');
+    if (ac && attOpen) refreshAttachCostLine(b.url, 'att-cost-line').then(() => refreshAttachEstimate());
     if (pc && pubOpen) refreshAttachCostLine(b.url, 'pub-cost-line');
     // The rate hint also (re)populates gateDefaultHours / gateRatePerMbHour /
     // gateCopiesMax for the estimate + reserve call.
@@ -5340,8 +5348,10 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
       if (Number.isFinite(defHours) && defHours > 0) gateDefaultHours = defHours;
       if (Number.isFinite(Number(pr.mb_divisor)) && Number(pr.mb_divisor) > 0) gateMbDivisor = Number(pr.mb_divisor);
       if (Number.isFinite(Number(pr.copies_max)) && Number(pr.copies_max) >= 1) gateCopiesMax = Number(pr.copies_max);
+      if (Number.isFinite(Number(pr.min_hours)) && Number(pr.min_hours) > 0) gateMinHours = Number(pr.min_hours);
       const hrStr = Number.isFinite(defHours) && defHours > 0 ? `, ${defHours} h default` : '';
       line.textContent = `≈ ${rate} ${cur}/MB·hr${hrStr}${sizeStr} — exact cost shown before you pay`;
+      paintPricingModels();
       return;
     }
 
@@ -5349,8 +5359,32 @@ async function refreshAttachCostLine(gatewayUrl, lineId) {
     const amount = p.amount ?? '?';
     const days   = p.ttl_days ?? '?';
     line.textContent = `≈ ${amount} ${cur} for ${days} day${days === 1 ? '' : 's'}${sizeStr}`;
+    paintPricingModels(`ⓘ ${amount} ${cur} flat per upload · ${days} day TTL · ≤ ${Number.isFinite(maxMb) ? maxMb + ' MB' : 'gate cap'}`);
   } catch (e) {
     line.textContent = `⚠ could not reach ${gatewayUrl}`;
+    paintPricingModels('⚠ could not load pricing — check the gateway in ⚙ Change.');
+  }
+}
+
+// The gate's full pricing model + a worked example, shown in every upload modal
+// (#att-pricing / #pub-pricing / #priv-rate-hint). Reads the cached caps that
+// refreshAttachCostLine pulled from the SELECTED gate's GET /, so it always
+// reflects whichever gate is active and updates if the operator changes pricing.
+function pricingModelText() {
+  if (!gateRatePerMbHour) return null;
+  const cur   = gatePayCurrency || 'TEST';
+  const maxMb = Math.round(attachMaxBytes / (1024 * 1024));
+  const exMb  = 2; // worked example: a 2 MB file for the gate's default duration
+  const exCost = +(gateRatePerMbHour * exMb * gateDefaultHours).toFixed(3);
+  return `ⓘ ${gateRatePerMbHour} ${cur}/MB·hr · min ${gateMinHours} h · ≤ ${maxMb} MB · default ${gateDefaultHours} h`
+       + ` · e.g. ${exMb} MB × ${gateDefaultHours} h = ${exCost} ${cur}`;
+}
+function paintPricingModels(textOverride) {
+  const txt = (textOverride !== undefined) ? textOverride : pricingModelText();
+  if (txt == null) return;
+  for (const id of ['att-pricing', 'pub-pricing', 'priv-rate-hint']) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
   }
 }
 
@@ -6441,8 +6475,24 @@ document.addEventListener('change', (e) => {
     }
     meta.textContent = `${f.name} — ${(f.size / 1024).toFixed(1)} KB`; meta.style.color = 'var(--subtext)';
     if (attachState) attachState.file = f;
+    refreshAttachEstimate();
   }
 });
+// Per-file gate-fee estimate for the room/DM attach modal (mirrors private-send's
+// EST COST). The attach flow always uses the gate's default duration + 1 copy
+// (no picker here), so cost = rate × MB × default_hours. For a DM attachment the
+// paid-DM rate is shown separately on #att-dm-rate-line; this is the gate fee only.
+function refreshAttachEstimate() {
+  const line = document.getElementById('att-cost-line');
+  if (!line) return;
+  if (getStorageBackend().type === 'pinata') return; // renderBackendLines sets the pinata text
+  const f = attachState && attachState.file;
+  if (!f) return; // no file → leave the rate hint refreshAttachCostLine wrote
+  if (!gateRatePerMbHour) { line.textContent = `~ ${(f.size / 1e6).toFixed(2)} MB × ${gateDefaultHours} h — exact cost quoted at pay.`; return; }
+  const mb = f.size / gateMbDivisor;
+  const est = gateRatePerMbHour * mb * gateDefaultHours;
+  line.textContent = `≈ ${est.toFixed(3)} ${gatePayCurrency || 'TEST'} (${mb.toFixed(2)} MB × ${gateDefaultHours} h) — exact at pay`;
+}
 function setAttachStatus(text, isError) {
   const n = document.getElementById('att-status-note');
   n.textContent = text;
