@@ -1,5 +1,16 @@
 # Stage 4–6 Handoff — Private Encrypted Hosting (v4call client side)
 
+> ## ✅ COMPLETE — Stages 4, 5, 6 all shipped 2026-06-16
+> Private Encrypted Hosting **v1 is done end-to-end** (Stages 0–6). Client code lives in
+> `public/app.html`; the Stage-6 gate endpoint + migration live in the `IPFS-Gate` repo
+> (`server.js`, `quota.js`, `migrations/005_receipts.sql`; **43 gate tests green**).
+> - **Stage 4** — `🔒 Private send` modal (📦 Uploads tab): encrypt → wrap → reserve (`hours_requested`/`copies`) → pay → upload (`release_policy` + `receipt_hash`) → self-contained `v4reveal:<base64url>` artifact. Sender-signed `v4call-reveal:v1:…` envelope. (Also folded in the §1 cutover for the existing room/DM + public flows.)
+> - **Stage 5** — `🔓 Reveal` tab: paste → verify sig → "not addressed to you" guard → unwrap → fetch → decrypt → render. Tested across the 3-server fed.
+> - **Stage 6** — `POST /claims/receipt` + `✅ Confirm receipt` button. **Scheme decision (don't regress):** the gate stores `receipt_hash = SHA-256(plaintext)`, **NOT** the salted `commitment` in the link. That commitment is *public* (anyone with the link has it) so presenting it proves nothing; only an account that actually decrypted can reproduce `H(plaintext)` (a bystander has only the ciphertext). `proof_hash` is bound into the signed message so it can't be swapped/replayed. The salted commitment stays in the link only for the recipient's *local* sender-attestation check. A verified receipt bridges into the existing `recordReleaseConsent`/`evaluateRelease` threshold.
+> - **Follow-ups (not built):** owner-facing receipt dashboard (gate returns `receipts: […]`, no UI); v2 cross-gate federation.
+>
+> *Everything below is the original handoff brief, kept for reference.*
+
 > **Quest:** bring ipfs-gate + v4call up to the *Private Encrypted Hosting v1* working model.
 > **Gate side (Stages 1a–3) is DONE** in the `IPFS-Gate` repo — claim/MB-hour pricing,
 > backstop escrow + FIFO baton-pass, extend, moderation×escrow, replication dial,
@@ -23,9 +34,9 @@ stop-hosting + refund.
 
 | Stage | Where | Scope |
 |---|---|---|
-| **4 — Encrypted upload, send side** | v4call | Pick file + recipients + duration + copies + release policy → random-key AES-GCM encrypt → wrap key to each recipient's Hive key → **embed a commitment salt** (for Stage 6) → push through the gate's claim flow → return a shareable link. |
-| **5 — "Reveal" tab** | v4call | Paste a link → fetch ciphertext → unwrap with your posting key → decrypt → view/save. **Tab name is LOCKED: "Reveal".** |
-| **6 — Proof-of-receipt** | both | After decrypt, hash+sign the plaintext; a NEW gate endpoint verifies it against the stored commitment, records a per-recipient receipt, and **lights that recipient's release right** (feeds the Stage-3 `all_of` threshold). |
+| ✅ **4 — Encrypted upload, send side** | v4call | Pick file + recipients + duration + copies + release policy → random-key AES-GCM encrypt → wrap key to each recipient's Hive key → **embed a commitment salt** (for Stage 6) → push through the gate's claim flow → return a shareable link. |
+| ✅ **5 — "Reveal" tab** | v4call | Paste a link → fetch ciphertext → unwrap with your posting key → decrypt → view/save. **Tab name is LOCKED: "Reveal".** |
+| ✅ **6 — Proof-of-receipt** | both | After decrypt, hash+sign the plaintext; a NEW gate endpoint verifies it against the stored `receipt_hash` (= `SHA-256(plaintext)`, **not** the public salted commitment), records a per-recipient receipt, and **lights that recipient's release right** (feeds the Stage-3 `all_of` threshold). |
 
 **Build order:** 4 → 5 → 6, test each before the next (the gate stages already follow this).
 Stage 6 needs a small **gate-side** addition too (see §5).

@@ -1,5 +1,22 @@
 # v4call — Decentralised Paid Communications
 
+> ## 🔀 ARCHIVED — v4call is being decoupled (2026-06-16)
+>
+> This monolith repo (final version **v0.16.29**) is **archived**. Active work has moved to four new repos:
+>
+> - **[v4call-node](https://github.com/CompleteNoobs/v4call-node)** — headless CLI/API server (no HTML, no money key)
+> - **[v4call-app](https://github.com/CompleteNoobs/v4call-app)** — standalone client = all GUIs; connects to a chosen node
+> - **[escrow-core](https://github.com/CompleteNoobs/escrow-core)** — shared custodial-escrow engine (library)
+> - **[ipfs-gate-node](https://github.com/CompleteNoobs/ipfs-gate-node)** — headless file-storage server
+>
+> **Why:** split the one-big-program into focused pieces — the money-handling code becomes a tiny, isolated,
+> separately-audited box, and the client becomes a standalone app that can point at any node. Full plan + build
+> order in the decoupling hand-off doc (`handover-decoupling.md` in the project root).
+>
+> This repo stays for reference/history. **Do not build new features here.**
+
+---
+
 > ⚠️ **Proof of concept — not for real use.** v4call, along with its sister projects [nGate](https://github.com/CompleteNoobs/nGate) and [IPFS-Gate](https://github.com/CompleteNoobs/IPFS-Gate), are **proof-of-concept builds by independent builders** — not production software. They are **not safe to use** and **not recommended for general users**. They are provided for developers who want to review the code and are willing to take the risks of an early, quickly-built concept. Treat everything as a demo, not a service.
 >
 > This project was vibe-coded with Claude Opus 4.6 → 4.7. The author is a tinkerer, not a developer. **Review the code before trusting it with real money.**
